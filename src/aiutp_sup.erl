@@ -5,8 +5,24 @@
 -export([init/1]).
 
 start_link() ->
-	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+  supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-	Procs = [],
-	{ok, {{one_for_one, 1, 5}, Procs}}.
+  SupFlags = #{strategy => one_for_all,
+               intensity => 1,
+               period => 5},
+  ConnManager = #{id => aiutp_conn_manager,
+                  start => {aiutp_conn_manager,start_link,[]},
+                  restart => transient,
+                  shutdown => 5000,
+                  type => worker,
+                  modules => [aiutp_conn_manager]
+                 },
+  SocketSup = #{id => aiutp_socket_sup,
+             start => {aiutp_socket_sup,start_link,[]},
+             restart => transient,
+             shutdown => 5000,
+             type => supervisor,
+             modules => [aiutp_socket_sup]
+            },
+  {ok, {SupFlags, [ConnManager,SocketSup]}}.
