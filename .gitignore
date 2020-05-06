@@ -15,3 +15,9 @@ deps
 .rebar3
 _build/
 _checkouts/
+
+# erlang.mk
+.erlang.mk
+_rel/
+ebin/
+aiutp.d
