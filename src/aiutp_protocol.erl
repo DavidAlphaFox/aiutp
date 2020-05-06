@@ -1,7 +1,7 @@
 -module(aiutp_protocol).
 -include("aiutp.hrl").
 
--export([decode/1]).
+-export([decode/1,encode/2]).
 
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
@@ -44,13 +44,13 @@ decode_packet(Packet) ->
   Ty = decode_type(Type),
   ok = validate_packet_type(Ty, Payload),
 
-  {#packet { type = Ty,
-             conn_id = ConnectionId,
-             win_sz = WindowSize,
-             seq_no = SeqNo,
-             ack_no = AckNo,
-             extension = Extensions,
-             payload = Payload},
+  {#packet{type = Ty,
+           conn_id = ConnectionId,
+           win_sz = WindowSize,
+           seq_no = SeqNo,
+           ack_no = AckNo,
+           extension = Extensions,
+           payload = Payload},
    TimeStamp,
    TimeStampdiff,
    TS}.
@@ -77,3 +77,37 @@ validate_packet_type(Ty, Payload) ->
     st_syn -> ok;
     st_reset -> ok
   end.
+
+
+-spec encode(packet(), integer()) -> binary().
+encode(#packet {type = Type,
+                conn_id = ConnID,
+                win_sz = WSize,
+                seq_no = SeqNo,
+                ack_no = AckNo,
+                extension = ExtList,
+                payload = Payload}, TSDiff) ->
+  {Extension, ExtBin} = encode_extensions(ExtList),
+  EncTy = encode_type(Type),
+  TS = os:system_time(micosecond),
+  <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
+    TS:32/integer,TSDiff:32/integer,
+    WSize:32/integer,
+    SeqNo:16/integer, AckNo:16/integer,
+    ExtBin/binary,Payload/binary>>.
+
+encode_extensions([]) -> {0, <<>>};
+encode_extensions([{sack, Bits} | R]) ->
+  {Next, Bin} = encode_extensions(R),
+  Sz = byte_size(Bits),
+  {?EXT_SACK, <<Next:8/integer, Sz:8/integer, Bits/binary, Bin/binary>>};
+encode_extensions([{ext_bits, Bits} | R]) ->
+  {Next, Bin} = encode_extensions(R),
+  Sz = byte_size(Bits),
+  {?EXT_BITS, <<Next:8/integer, Sz:8/integer, Bits/binary, Bin/binary>>}.
+
+encode_type(st_data) -> ?ST_DATA;
+encode_type(st_fin) -> ?ST_FIN;
+encode_type(st_state) -> ?ST_STATE;
+encode_type(st_reset) -> ?ST_RESET;
+encode_type(st_syn) -> ?ST_SYN.
