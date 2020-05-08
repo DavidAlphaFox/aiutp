@@ -9,13 +9,14 @@
 -module(aiutp_socket).
 
 -behaviour(gen_server).
-
+-include("aiutp.hrl").
 %% API
 -export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
+-export([incoming/4]).
 
 -define(SERVER, ?MODULE).
 
@@ -27,6 +28,14 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
+  case Type of
+    st_reset -> ok;
+    st_syn ->
+      gen_server:cast(Socket,{syn,Packet,Timing,Remote});
+    _ ->
+      gen_server:cast(Socket,{reset,Packet,Timing,Remote})
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -111,7 +120,6 @@ handle_info({'EXIT',Dispatch,Reason},#state{dispatch = Dispatch} = State)->
   {stop,Reason,State};
 handle_info({udp, Socket, IP, InPortNo, Packet},
             #state{socket = Socket,dispatch = Dispatch} = State)->
-  ok = inet:setopts(Socket, [{active,false}]),
   aiutp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};

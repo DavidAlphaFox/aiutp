@@ -19,10 +19,17 @@ init([]) ->
                   modules => [aiutp_conn_manager]
                  },
   SocketSup = #{id => aiutp_socket_sup,
-             start => {aiutp_socket_sup,start_link,[]},
-             restart => transient,
-             shutdown => 5000,
-             type => supervisor,
-             modules => [aiutp_socket_sup]
-            },
-  {ok, {SupFlags, [ConnManager,SocketSup]}}.
+                start => {aiutp_socket_sup,start_link,[]},
+                restart => transient,
+                shutdown => 5000,
+                type => supervisor,
+                modules => [aiutp_socket_sup]
+               },
+  WorkerSup = #{id => aiutp_woker_sup,
+                start => {aiutp_worker_sup,start_link,[]},
+                restart => transient,
+                shutdown => 5000,
+                type => supervisor,
+                modules => [aiutp_worker_sup]
+               },
+  {ok, {SupFlags, [ConnManager,SocketSup,WorkerSup]}}.

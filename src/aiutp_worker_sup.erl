@@ -6,7 +6,7 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(aiutp_socket_sup).
+-module(aiutp_worker_sup).
 
 -behaviour(supervisor).
 
@@ -15,15 +15,14 @@
 
 %% Supervisor callbacks
 -export([init/1]).
--export([open/1,open/2]).
+-export([new/1]).
 
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
-open(Port)-> open(Port,[]).
-open(Port,Options)-> supervisor:start_child(?SERVER, [Port,Options]).
+new(Socket)-> supervisor:start_child(?SERVER, [Socket]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -59,14 +58,14 @@ init([]) ->
   SupFlags = #{strategy => simple_one_for_one,
                intensity => 1,
                period => 5},
-  Socket = #{id => aiutp_socket,
-             start => {aiutp_socket,start_link,[]},
+  Worker = #{id => aiutp_worker,
+             start => {aiutp_worker,start_link,[]},
              restart => temporary,
              shutdown => 5000,
              type => worker,
-             modules => [aiutp_socket]
+             modules => [aiutp_worker]
             },
-  {ok, {SupFlags, [Socket]}}.
+  {ok, {SupFlags, [Worker]}}.
 
 %%%===================================================================
 %%% Internal functions

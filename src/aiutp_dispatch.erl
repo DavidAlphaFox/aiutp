@@ -7,8 +7,8 @@
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
 -module(aiutp_dispatch).
-
 -behaviour(gen_server).
+-include("aiutp.hrl").
 
 %% API
 -export([start_link/1]).
@@ -90,9 +90,17 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({dispatch,Remote,_Payload},State)->
-  io:format("dispatch from remote: ~p~n",[Remote]),
+handle_cast({dispatch,Remote,Payload},
+            #state{socket = Socket} = State)->
+  case aiutp_protocol:decode(Payload) of
+    {ok,Packet,TS,TSDiff,RecvTime} ->
+      handle_packet(Packet,TS,TSDiff,RecvTime,Remote,Socket);
+    {error,Reason}->
+      error_logger:info_report([decode_error,Reason]),
+      ok
+  end,
   {noreply,State};
+
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -153,3 +161,11 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+handle_packet(#packet{conn_id = ConnID} = Packet,
+              TS,TSDiff,RecvTime,Remote,Socket)->
+  case aiutp_conn_manager:lookup(Remote, ConnID) of
+    {error,not_exist} ->
+      aiutp_socket:incoming(Socket,Packet,{TS,TSDiff,RecvTime},Remote);
+    {ok,Worker} ->
+      aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime},Remote)
+  end.
