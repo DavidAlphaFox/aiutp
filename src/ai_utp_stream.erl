@@ -1,8 +1,8 @@
 -module(ai_utp_stream).
 -include("ai_utp.hrl").
 
--export([new/1,new/3]).
--export([handle_incoming/5]).
+-export([new/2,new/3]).
+-export([recv_packet/5,send_packet/4,send_packet/5]).
 
 
 -define(INITIAL_CWND, 3000).
@@ -54,6 +54,7 @@
                }).
 
 -record(network,{
+                 peer_conn_id,
                  %% Size of the window the Peer advertises to us.
                  peer_window = 4096 :: integer(),
                  %% The current window size in the send direction, in bytes.
@@ -90,22 +91,30 @@
                network
               }).
 
-send_buf_size(undefined) -> ?OPT_SEND_BUF;
-send_buf_size(SendBufSize) -> SendBufSize.
-recv_buf_size(undefined) -> ?OPT_RECV_BUF;
-recv_buf_size(RecvBufSize) -> RecvBufSize.
+new_send_buf_size(undefined,undefined) -> ?OPT_SEND_BUF;
+new_send_buf_size(PacketSize,undefined) ->
+  PacketSize * ?OUTGOING_BUFFER_MAX_SIZE;
+new_send_buf_size(_,SendBufSize) -> SendBufSize.
+new_recv_buf_size(undefined) -> ?OPT_RECV_BUF;
+new_recv_buf_size(RecvBufSize) -> RecvBufSize.
+new_packet_size(undefined) -> ?PACKET_SIZE;
+new_packet_size(PacketSize) -> PacketSize.
 
-new(PacketSize)->
-  new(PacketSize,?OPT_RECV_BUF,?OPT_SEND_BUF).
+new(PeerConnID,InitialSeqNo)->
+  new(PeerConnID,InitialSeqNo,[]).
 
-new(PacketSize,RecvBufSize,SendBufSize)->
+new(PeerConnID,InitialSeqNo,Options)->
+  PacketSize = proplists:get_value(packet_size, Options),
+  RecvBufSize = proplists:get_value(recv_buf_size, Options),
+  SendBufSize = proplists:get_value(send_buf_size, Options),
   Now = ai_utp_util:millisecond(),
   Options = #options{
-               recv_buf_size = recv_buf_size(RecvBufSize),
-               send_buf_size = send_buf_size(SendBufSize),
-               packet_size = PacketSize
+               recv_buf_size = new_recv_buf_size(RecvBufSize),
+               send_buf_size = new_send_buf_size(PacketSize,SendBufSize),
+               packet_size = new_packet_size(PacketSize)
               },
   Network = #network {
+               peer_conn_id = PeerConnID,
                reply_micro = 0,
                round_trip = none,
                cwnd = ?INITIAL_CWND,
@@ -115,7 +124,7 @@ new(PacketSize,RecvBufSize,SendBufSize)->
   #state{
      options = Options,
      network = Network,
-     buffer = #buffer{}
+     buffer = #buffer{seq_no = InitialSeqNo}
     }.
 
 
@@ -425,7 +434,7 @@ update_network(Options,Network,ReplyMicro,TimeAcked,TSDiff,WindowSize,Acked)->
   Network4 = update_peer_window(Network3, WindowSize),
   update_window(Options,Network4, TimeAcked,Acked).
 
-handle_incoming(#packet{seq_no = SeqNo,ack_no = AckNo,payload = Payload,
+recv_packet(#packet{seq_no = SeqNo,ack_no = AckNo,payload = Payload,
                         win_sz = WindowSize,type = Type},
                 ReplyMicro,TimeAcked,TSDiff,
                #state{network = Network,buffer = Buffer,options = Opts} = State)->
@@ -445,4 +454,54 @@ handle_incoming(#packet{seq_no = SeqNo,ack_no = AckNo,payload = Payload,
                                 TSDiff,WindowSize,undefined),
       {ok,State#state{buffer = Buffer1,network = Network0},
        SendMessages}
+  end.
+
+%% @doc Return the size of the receive buffer
+%% @end
+recv_buf_size(Q) ->
+  L = queue:to_list(Q),
+  lists:sum([byte_size(Payload) || Payload <- L]).
+
+%% @doc Calculate the advertised window to use
+%% @end
+advertised_window(#options{recv_buf_size = RecvBufSize},
+                  #buffer {recv_buf = Q})->
+  FillValue = recv_buf_size(Q),
+  WindowSize = RecvBufSize - FillValue,
+  if
+    WindowSize > 0 -> WindowSize;
+    true -> 0
+  end.
+
+send_packet(Socket,Remote,Packet,State)->
+  send_packet(Socket,Remote,Packet,undefined,State).
+send_packet(Socket,Remote,Packet,ConnID,#state{
+                       network = Network,
+                       buffer = Buffer,
+                       options = Opts})->
+  WindowSize = advertised_window(Opts, Buffer),
+  send_packet(Socket,Remote,Network,WindowSize,ConnID,Packet).
+
+send_packet(Socket,Remote,
+            #network{reply_micro = TSDiff,peer_conn_id = PeerConnID},
+            WindowSize,ConnID,Packet)->
+  ConnID0 =
+    if
+      ConnID == undefined -> PeerConnID;
+      true -> ConnID
+    end,
+  send(Socket,Remote,
+       Packet#packet{conn_id = ConnID0,win_sz = WindowSize},TSDiff).
+
+send(Socket,Remote,Packet,TSDiff)->
+  send_aux(1,Socket,Remote,ai_utp_protocol:encode(Packet, TSDiff)).
+send_aux(0,Socket,Remote,Payload)->
+  gen_udp:send(Socket,Remote,Payload);
+send_aux(N,Socket,Remote,Payload) ->
+  case gen_udp:send(Socket,Remote,Payload) of
+    ok -> {ok,ai_utp_util:microsecond()};
+    {error,enobufs}->
+      timer:sleep(150), % Wait a bit for the queue to clear
+      send_aux(N-1, Socket, Remote, Payload);
+    Error -> Error
   end.

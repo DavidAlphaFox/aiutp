@@ -2,6 +2,7 @@
 -include("ai_utp.hrl").
 
 -export([decode/1,encode/2]).
+-export([make_syn_packet/0,make_ack_packet/2]).
 
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
@@ -16,6 +17,22 @@
 -define(ST_STATE, 2).
 -define(ST_RESET, 3).
 -define(ST_SYN,   4).
+
+
+make_syn_packet() ->
+     #packet { type = st_syn,
+               seq_no = 1,
+               ack_no = 0,
+               extension = ?SYN_EXTS
+             }. % Rest are defaults
+
+make_ack_packet(SeqNo, AckNo) ->
+  #packet {type = st_state,
+           seq_no = SeqNo,
+           ack_no = AckNo,
+           extension = ?SYN_EXTS
+          }.
+
 
 -spec decode(binary()) -> {ok, {packet(), timestamp(), timestamp(), timestamp()}}
                               | {error, term()}.

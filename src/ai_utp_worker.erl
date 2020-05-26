@@ -15,20 +15,30 @@
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
--export([idle/3]).
+-export([idle/3,syn_sent/3]).
+-export([connect/3,accept/2]).
 
 -define(SERVER, ?MODULE).
+-define(SYN_TIMEOUT, 3000).
 
 -record(data, {
                parent :: pid(),
                socket :: port(),
-               monitor :: reference()
+               monitor :: reference(),
+               remote,
+               conn_id,
+               stream,
+               restransmit_timer,
+               connector
               }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+connect(Pid,Address,Port)->
+  gen_statem:call(Pid, {connect,Address,Port}).
+accept(Pid,Packet)->
+  gen_statem:call(Pid,{accept,Packet}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates a gen_statem process which calls Module:init/1 to
@@ -92,10 +102,25 @@ init([Parent,Socket]) ->
                  Msg :: term(),
                  Data :: term()) ->
         gen_statem:event_handler_result(atom()).
-idle({call,Caller}, _Msg, Data) ->
-  {keep_state, Data, [{reply,Caller,ok}]};
+idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
+  case connection_id({Address,Port}) of
+    {ok,ConnID}->
+      Remote = {Address,Port},
+      Stream = ai_utp_stream:new(ConnID + 1,2),
+      Packet = ai_utp_protocol:make_syn_packet(),
+      {ok,_} = ai_utp_stream:send_packet(Socket, Remote,
+                                         Packet, ConnID, Stream),
+      Data0 = Data#data{remote = Remote,
+                        conn_id = ConnID,
+                        stream = Stream,
+                        retransmit_timer = set_retransmit_timer(?SYN_TIMEOUT, undefined),
+                        connector = Caller},
+      {next_state,syn_sent,Data0};
+    Error -> {stop,Error}
+  end;
 idle(info,Msg,Data) -> handle_info(Msg,Data).
-
+syn_sent(info,{timeout, _TimerRef,Msg},Data)->
+  
 
 %%--------------------------------------------------------------------
 %% @private
@@ -136,3 +161,26 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
 handle_info(Info,Data) ->
   error_logger:info_report({error,unknown,Info}),
   {keep_state,Data}.
+
+
+connection_id(Remote)->
+  connection_id(Remote,3).
+connection_id(_,0)-> {error,exist};
+connection_id(Remote,N)->
+  ConnID = ai_utp_util:connection_id(),
+  case ai_utp_conn:alloc(Remote, ConnID) of
+    ok -> {ok,ConnID};
+    _ -> connection_id(Remote,N-1)
+  end.
+
+
+set_retransmit_timer(N, Timer) ->
+  set_retransmit_timer(N, N, Timer).
+
+set_retransmit_timer(N, K, undefined) ->
+  Ref = erlang:send_after(N, self(),{retransmit_timeout,K}),
+  {set, Ref};
+set_retransmit_timer(N, K, {set, Ref}) ->
+  erlang:cancel_timer(Ref)
+  NewRef = erlang:send_after(N, self(),{retransmit_timeout,K}),
+  {set, NewRef}.
