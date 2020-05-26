@@ -30,7 +30,7 @@ decode(Packet) ->
 -spec decode_packet(binary()) ->
         {packet(),integer(),integer(),integer()}.
 decode_packet(Packet) ->
-  TS = os:system_time(microsecond),
+  TS = ai_utp_util:microsecond(),
 
   %% Decode packet
   <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
@@ -89,7 +89,7 @@ encode(#packet {type = Type,
                 payload = Payload}, TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  TS = os:system_time(micosecond),
+  TS = ai_utp_util:microsecond(),
   <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
     TS:32/integer,TSDiff:32/integer,
     WSize:32/integer,
