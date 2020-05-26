@@ -491,21 +491,9 @@ send_packet(Socket,Remote,
       ConnID == undefined -> PeerConnID;
       true -> ConnID
     end,
-  send(Socket,Remote,
+  ai_utp_util:send(Socket,Remote,
        Packet#packet{conn_id = ConnID0,win_sz = WindowSize},TSDiff).
 
-send(Socket,Remote,Packet,TSDiff)->
-  send_aux(1,Socket,Remote,ai_utp_protocol:encode(Packet, TSDiff)).
-send_aux(0,Socket,Remote,Payload)->
-  gen_udp:send(Socket,Remote,Payload);
-send_aux(N,Socket,Remote,Payload) ->
-  case gen_udp:send(Socket,Remote,Payload) of
-    ok -> {ok,ai_utp_util:microsecond()};
-    {error,enobufs}->
-      timer:sleep(150), % Wait a bit for the queue to clear
-      send_aux(N-1, Socket, Remote, Payload);
-    Error -> Error
-  end.
 
 connected(#state{
              network = Network,buffer = Buf

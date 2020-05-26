@@ -16,13 +16,14 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/4,connect/3]).
+-export([incoming/3,connect/3]).
 
 -define(SERVER, ?MODULE).
 
 -record(state, {
                 socket,
-                dispatch
+                dispatch,
+                acceptor = closed
                }).
 
 %%%===================================================================
@@ -34,13 +35,13 @@ connect(UTPSocket,Address,Port)->
   Address0 = ai_utp_util:getaddr(Address),
   ai_utp_worker:connect(Worker, Address0, Port).
  
-incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
+incoming(Socket,#packet{type = Type} = Packet,Remote)->
   case Type of
     st_reset -> ok;
     st_syn ->
-      gen_server:cast(Socket,{syn,Packet,Timing,Remote});
+      gen_server:cast(Socket,{syn,Packet,Remote});
     _ ->
-      gen_server:cast(Socket,{reset,Packet,Timing,Remote})
+      gen_server:cast(Socket,{reset,Packet,Remote})
   end.
 %%--------------------------------------------------------------------
 %% @doc
@@ -109,7 +110,12 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-
+handle_cast({reset,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
+            #state{socket = Socket} = State)->
+  reset(Socket, Remote, ConnID, SeqNo),
+  {noreply,State};
+%handle_cast({syn,Packet,Timing,Remote},State)->
+  
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -180,3 +186,6 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+reset(Socket,Remote,ConnID,AckNo)->
+  Packet = ai_utp_protocol:make_reset_packet(ConnID, AckNo),
+  ai_utp_util:send(Socket, Remote, Packet, 0).

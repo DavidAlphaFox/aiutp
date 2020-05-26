@@ -1,8 +1,9 @@
 -module(ai_utp_util).
 
 -export([bit16/1,bit32/1,getaddr/1]).
+-export([bit16_random/0,bit32_random/0]).
 -export([microsecond/0,millisecond/0]).
--export([connection_id/0]).
+-export([send/4]).
 
 -spec bit16(integer()) -> integer().
 bit16(N) when is_integer(N) ->
@@ -20,7 +21,23 @@ getaddr({_, _, _, _} = Addr) ->
 microsecond()-> os:system_time(microsecond).
 millisecond()-> os:system_time(millisecond).
 
--spec connection_id() -> integer().
-connection_id() ->
+
+bit16_random() ->
   <<N:16/integer>> = crypto:strong_rand_bytes(2),
   N.
+bit32_random()->
+  <<N:32/integer>> = crypto:strong_rand_bytes(4),
+  N.
+
+send(Socket,Remote,Packet,TSDiff)->
+  send_aux(1,Socket,Remote,ai_utp_protocol:encode(Packet, TSDiff)).
+send_aux(0,Socket,Remote,Payload)->
+  gen_udp:send(Socket,Remote,Payload);
+send_aux(N,Socket,Remote,Payload) ->
+  case gen_udp:send(Socket,Remote,Payload) of
+    ok -> {ok,ai_utp_util:microsecond()};
+    {error,enobufs}->
+      timer:sleep(150), % Wait a bit for the queue to clear
+      send_aux(N-1, Socket, Remote, Payload);
+    Error -> Error
+  end.

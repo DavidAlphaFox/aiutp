@@ -163,7 +163,7 @@ handle_packet(#packet{conn_id = ConnID} = Packet,
               TS,TSDiff,RecvTime,Remote,Parent)->
   case aiutp_conn_manager:lookup(Remote, ConnID) of
     {error,not_exist} ->
-      aiutp_socket:incoming(Parent,Packet,{TS,TSDiff,RecvTime},Remote);
+      aiutp_socket:incoming(Parent,Packet,Remote);
     {ok,Worker} ->
       aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime})
   end.

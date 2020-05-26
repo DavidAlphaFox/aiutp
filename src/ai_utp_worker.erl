@@ -224,7 +224,7 @@ connection_id(Remote)->
   connection_id(Remote,3).
 connection_id(_,0)-> {error,exist};
 connection_id(Remote,N)->
-  ConnID = ai_utp_util:connection_id(),
+  ConnID = ai_utp_util:bit16_random(),
   case ai_utp_conn:alloc(Remote, ConnID) of
     ok -> {ok,ConnID};
     _ -> connection_id(Remote,N-1)

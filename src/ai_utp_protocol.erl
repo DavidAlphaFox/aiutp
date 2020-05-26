@@ -2,7 +2,7 @@
 -include("ai_utp.hrl").
 
 -export([decode/1,encode/2]).
--export([make_syn_packet/0,make_ack_packet/2]).
+-export([make_syn_packet/0,make_ack_packet/2,make_reset_packet/2]).
 
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
@@ -19,12 +19,20 @@
 -define(ST_SYN,   4).
 
 
+make_reset_packet(ConnID,AckNo)->
+  #packet{type = st_reset,
+          ack_no = AckNo,
+          seq_no = ai_utp_util:bit16_random(),
+          win_sz = 0,
+          extension = ?SYN_EXTS,
+          conn_id = ConnID
+         }.
 make_syn_packet() ->
-     #packet { type = st_syn,
-               seq_no = 1,
-               ack_no = 0,
-               extension = ?SYN_EXTS
-             }. % Rest are defaults
+  #packet { type = st_syn,
+            seq_no = 1,
+            ack_no = 0,
+            extension = ?SYN_EXTS
+          }. % Rest are defaults
 
 make_ack_packet(SeqNo, AckNo) ->
   #packet {type = st_state,
