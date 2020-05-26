@@ -90,13 +90,19 @@
                network
               }).
 
+send_buf_size(undefined) -> ?OPT_SEND_BUF;
+send_buf_size(SendBufSize) -> SendBufSize.
+recv_buf_size(undefined) -> ?OPT_RECV_BUF;
+recv_buf_size(RecvBufSize) -> RecvBufSize.
+
 new(PacketSize)->
   new(PacketSize,?OPT_RECV_BUF,?OPT_SEND_BUF).
+
 new(PacketSize,RecvBufSize,SendBufSize)->
   Now = ai_utp_util:millisecond(),
   Options = #options{
-               recv_buf_size = RecvBufSize,
-               send_buf_size = SendBufSize,
+               recv_buf_size = recv_buf_size(RecvBufSize),
+               send_buf_size = send_buf_size(SendBufSize),
                packet_size = PacketSize
               },
   Network = #network {
@@ -341,7 +347,7 @@ ack_packet_rtt(#network { round_trip = RTT,
 consider_last_maxed_window(LastMaxedOutTime) ->
   Now = ai_utp_util:millisecond(),
   %% 300毫秒内跑满了自己的窗口
-  case Now - LastMaxedOutTime > 300 of
+  case Now - LastMaxedOutTime < 300 of
     true -> too_soon;
     false -> ok
   end.
@@ -394,7 +400,7 @@ congestion_control(Opts,#network {cwnd = Cwnd,our_ledbat = OurHistory,
       too_soon -> 0;
       ok -> ScaledGain
     end,
-  NewCwnd = clamp(Cwnd + Alteration, ?MIN_WINDOW_SIZE,Opts#options.send_buf_size),
+  NewCwnd = clamp(Cwnd + Alteration,?MIN_WINDOW_SIZE,Opts#options.send_buf_size),
   Network#network {cwnd = round(NewCwnd)}.
 
 clamp(Val, Min, _Max) when Val < Min -> Min;
