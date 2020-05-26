@@ -114,8 +114,10 @@ handle_cast({reset,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
             #state{socket = Socket} = State)->
   reset(Socket, Remote, ConnID, SeqNo),
   {noreply,State};
-%handle_cast({syn,Packet,Timing,Remote},State)->
-  
+handle_cast({syn,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
+            #state{socket = Socket,acceptor = closed} = State)->
+  reset(Socket,Remote,ConnID,SeqNo),
+  {noreply,State};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
