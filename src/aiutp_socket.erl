@@ -31,10 +31,8 @@
 incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
   case Type of
     st_reset -> ok;
-    st_syn ->
-      gen_server:cast(Socket,{syn,Packet,Timing,Remote});
-    _ ->
-      gen_server:cast(Socket,{reset,Packet,Timing,Remote})
+    st_syn -> gen_server:cast(Socket,{syn,Packet,Timing,Remote});
+    _ -> gen_server:cast(Socket,{reset,Packet,Timing,Remote})
   end.
 
 %%--------------------------------------------------------------------
@@ -116,7 +114,8 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
-handle_info({'EXIT',Dispatch,Reason},#state{dispatch = Dispatch} = State)->
+handle_info({'EXIT',Dispatch,Reason},
+            #state{dispatch = Dispatch} = State)->
   {stop,Reason,State};
 handle_info({udp, Socket, IP, InPortNo, Packet},
             #state{socket = Socket,dispatch = Dispatch} = State)->

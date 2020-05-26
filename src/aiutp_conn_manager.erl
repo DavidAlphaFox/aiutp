@@ -44,10 +44,10 @@ free(Remote,ConnectionID)->
 -spec lookup({inet:ip_address(),inet:port_number()},integer())->
         {ok,pid()} | {error,not_exist}.
 lookup(Remote,ConnectionID)->
-  Conn = {conn,Remote,ConnectionID},
+  Conn = conn(ConnectionID,Remote),
   case ets:lookup(?TAB, Conn) of
     [] -> {error,not_exist};
-    [{Conn,Socket,_}] -> {ok,Socket}
+    [{Conn,Socket}] -> {ok,Socket}
   end.
 
 %%--------------------------------------------------------------------
@@ -180,43 +180,36 @@ format_status(_Opt, Status) ->
 %%% Internal functions
 %%%===================================================================
 alloc(Socket,Remote,ConnectionID)->
-  RefSocket = {ref, Socket},
-  %% 先尝试 +1 如果 +1 失败
-  %% 说明pid不在ets表中，那么需要先Monitor再添加
-  try _ = ets:update_counter(?TAB, RefSocket, {3, +1})
-  catch _:_ ->
+  Conn = conn(ConnectionID,Remote),
+  case ets:member(?TAB,Conn) of
+    true -> {error,exist};
+    false ->
+      true = ets:insert(?TAB, {Conn,Socket}),
       Ref = erlang:monitor(process, Socket),
-      true = ets:insert(?TAB, {RefSocket, Ref, 1}),
-      true = ets:insert(?TAB, {{ref, Ref}, Socket})
-  end,
-  Conn = {conn,Remote,ConnectionID},
-  try
-    _ = ets:update_counter(?TAB, Conn, {3, +1}),
-    {error,exist}
-  catch _:_->
-      true = ets:insert(?TAB, {Conn,Socket,1}),
-      true = ets:insert(?TAB, {{socket,Socket},Conn}),
+      RefSocket = {ref, Socket},
+      true = ets:insert(?TAB, {RefSocket, Ref}),
+      true = ets:insert(?TAB, {{ref, Ref}, Socket}),
       ok
   end.
 
 free(Socket,Remote,ConnectionID)->
-  Conn = {conn,Remote,ConnectionID},
   try
-    _ = ets:update_counter(?TAB,Conn, {3, -1}),
-    true = ets:delete(?TAB, Conn),
-    true = ets:delete(?TAB, {socket, Socket}),
+    Conn = conn(ConnectionID,Remote),
+    true = ets:delete(?TAB,Conn),
     RefSocket = {ref, Socket},
-    [{RefSocket,Ref,_}] = ets:lookup(?TAB, RefSocket),
+    [{RefSocket,Ref}] = ets:lookup(?TAB, RefSocket),
+    erlang:demonitor(Ref, [flush]),
     true = ets:delete(?TAB, {ref, Ref}),
     true = ets:delete(?TAB, RefSocket),
-    true = erlang:demonitor(Ref, [flush]),
     ok
   catch _:_ ->
       ok
   end.
-
+  
 close(Ref) ->
   [{{ref, Ref}, Socket}] = ets:lookup(?TAB, {ref, Ref}),
-  [{conn,Remote,ConnectionID}] =
-    [Conn || [Conn] <-  ets:match(?TAB, {{socket, Socket}, '$1'})],
+  [{conn,ConnectionID,Remote}] =
+    [Conn || [Conn] <-  ets:match(?TAB, {'$1', Socket})],
   free(Socket,Remote,ConnectionID).
+
+conn(ConnectionID,Remote)-> {conn,ConnectionID,Remote}.
