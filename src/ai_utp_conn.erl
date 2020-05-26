@@ -6,39 +6,61 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(aiutp_dispatch).
+-module(ai_utp_conn).
+
 -behaviour(gen_server).
--include("aiutp.hrl").
 
 %% API
--export([start_link/1]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
 
--export([dispatch/3]).
+-export([alloc/2,free/2,lookup/2]).
 
--record(state, {
-                socket
-               }).
+-define(SERVER, ?MODULE).
+-define(TAB,?MODULE).
+
+-record(state, {}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-dispatch(Dispatch,Remote,Payload)->
-  gen_server:cast(Dispatch,{dispatch,Remote,Payload}).
+%%% C: ConnectionID = 1, ReceiverID = ConnectionID, SenderID = ConnectionID + 1
+%%% S: ConnectionID = 2, ReceiverID = ConnectionID, SenderID = ConnectionID - 1
+-spec alloc({inet:ip_address() ,inet:port_number()},integer())->
+        ok | {error,exist}.
+alloc(Remote,ConnectionID)->
+  Socket = self(),
+  gen_server:call(?SERVER,{alloc,Socket,Remote,ConnectionID}).
+
+
+-spec free({inet:ip_address() ,inet:port_number()},integer())-> ok.
+free(Remote,ConnectionID)->
+  Socket = self(),
+  gen_server:call(?SERVER,{free,Socket,Remote,ConnectionID}).
+
+-spec lookup({inet:ip_address(),inet:port_number()},integer())->
+        {ok,pid()} | {error,not_exist}.
+lookup(Remote,ConnectionID)->
+  Conn = conn(ConnectionID,Remote),
+  case ets:lookup(?TAB, Conn) of
+    [] -> {error,not_exist};
+    [{Conn,Socket}] -> {ok,Socket}
+  end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid()) -> {ok, Pid :: pid()} |
+-spec start_link() -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link(Parent) ->
-  gen_server:start_link(?MODULE, [Parent], []).
+start_link() ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -55,10 +77,9 @@ start_link(Parent) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Parent]) ->
-  {ok, #state{
-          socket = Parent
-         }}.
+init([]) ->
+  ?TAB = ets:new(?TAB, [ordered_set, protected, named_table]),
+  {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -75,10 +96,14 @@ init([Parent]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call(_Request, _From, State) ->
-  Reply = ok,
-  {reply, Reply, State}.
 
+handle_call({free,Socket,Remote,ConnectionID},_From,State)->
+  Reply = free(Socket,Remote,ConnectionID),
+  {reply,Reply,State};
+handle_call({alloc,Socket,Remote,ConnectionID},_From,State)->
+  Reply = alloc(Socket,Remote,ConnectionID),
+  {reply, Reply, State}.
+  
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -90,17 +115,6 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({dispatch,Remote,Payload},
-            #state{socket = Socket} = State)->
-  case aiutp_protocol:decode(Payload) of
-    {ok,Packet,TS,TSDiff,RecvTime} ->
-      handle_packet(Packet,TS,TSDiff,RecvTime,Remote,Socket);
-    {error,Reason}->
-      error_logger:info_report([decode_error,Reason]),
-      ok
-  end,
-  {noreply,State};
-
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -115,6 +129,10 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
+
+handle_info({'DOWN', MonitorRef, process, _Pid, _Info}, S) ->
+  close(MonitorRef),
+  {noreply, S};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -161,11 +179,37 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-handle_packet(#packet{conn_id = ConnID} = Packet,
-              TS,TSDiff,RecvTime,Remote,Socket)->
-  case aiutp_conn_manager:lookup(Remote, ConnID) of
-    {error,not_exist} ->
-      aiutp_socket:incoming(Socket,Packet,{TS,TSDiff,RecvTime},Remote);
-    {ok,Worker} ->
-      aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime},Remote)
+alloc(Socket,Remote,ConnectionID)->
+  Conn = conn(ConnectionID,Remote),
+  case ets:member(?TAB,Conn) of
+    true -> {error,exist};
+    false ->
+      true = ets:insert(?TAB, {Conn,Socket}),
+      Ref = erlang:monitor(process, Socket),
+      RefSocket = {ref, Socket},
+      true = ets:insert(?TAB, {RefSocket, Ref}),
+      true = ets:insert(?TAB, {{ref, Ref}, Socket}),
+      ok
   end.
+
+free(Socket,Remote,ConnectionID)->
+  try
+    Conn = conn(ConnectionID,Remote),
+    true = ets:delete(?TAB,Conn),
+    RefSocket = {ref, Socket},
+    [{RefSocket,Ref}] = ets:lookup(?TAB, RefSocket),
+    erlang:demonitor(Ref, [flush]),
+    true = ets:delete(?TAB, {ref, Ref}),
+    true = ets:delete(?TAB, RefSocket),
+    ok
+  catch _:_ ->
+      ok
+  end.
+  
+close(Ref) ->
+  [{{ref, Ref}, Socket}] = ets:lookup(?TAB, {ref, Ref}),
+  [{conn,ConnectionID,Remote}] =
+    [Conn || [Conn] <-  ets:match(?TAB, {'$1', Socket})],
+  free(Socket,Remote,ConnectionID).
+
+conn(ConnectionID,Remote)-> {conn,ConnectionID,Remote}.

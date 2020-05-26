@@ -6,10 +6,10 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(aiutp_socket).
+-module(ai_utp_socket).
 
 -behaviour(gen_server).
--include("aiutp.hrl").
+-include("ai_utp.hrl").
 %% API
 -export([start_link/2]).
 
@@ -31,10 +31,11 @@
 incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
   case Type of
     st_reset -> ok;
-    st_syn -> gen_server:cast(Socket,{syn,Packet,Timing,Remote});
-    _ -> gen_server:cast(Socket,{reset,Packet,Timing,Remote})
+    st_syn ->
+      gen_server:cast(Socket,{syn,Packet,Timing,Remote});
+    _ ->
+      gen_server:cast(Socket,{reset,Packet,Timing,Remote})
   end.
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -65,8 +66,8 @@ start_link(Port,Options) ->
 init([Port,Options]) ->
   process_flag(trap_exit, true),
   Parent = self(),
-  {ok,Dispatch} = aiutp_dispatch:start_link(Parent),
   {ok,Socket} = gen_udp:open(Port,Options),
+  {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
   ok = inet:setopts(Socket, [{active,once}]),
   {ok, #state{socket = Socket,dispatch = Dispatch}}.
 
@@ -100,6 +101,7 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
+
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -119,7 +121,7 @@ handle_info({'EXIT',Dispatch,Reason},
   {stop,Reason,State};
 handle_info({udp, Socket, IP, InPortNo, Packet},
             #state{socket = Socket,dispatch = Dispatch} = State)->
-  aiutp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
+  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
 handle_info(_Info, State) ->
@@ -136,6 +138,7 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
+terminate(_Reason,#state{socket = undefined})-> ok;
 terminate(_Reason, #state{socket = Socket }) ->
   gen_udp:close(Socket),
   ok.

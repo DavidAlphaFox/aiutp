@@ -1,5 +1,5 @@
--module(aiutp_protocol).
--include("aiutp.hrl").
+-module(ai_utp_protocol).
+-include("ai_utp.hrl").
 
 -export([decode/1,encode/2]).
 

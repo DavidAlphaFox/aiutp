@@ -6,7 +6,7 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(aiutp_worker_sup).
+-module(ai_utp_worker_sup).
 
 -behaviour(supervisor).
 
@@ -15,14 +15,14 @@
 
 %% Supervisor callbacks
 -export([init/1]).
--export([new/1]).
+-export([new/2]).
 
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
-new(Socket)-> supervisor:start_child(?SERVER, [Socket]).
+new(Parent,Socket)-> supervisor:start_child(?SERVER, [Parent,Socket]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -58,12 +58,12 @@ init([]) ->
   SupFlags = #{strategy => simple_one_for_one,
                intensity => 1,
                period => 5},
-  Worker = #{id => aiutp_worker,
-             start => {aiutp_worker,start_link,[]},
+  Worker = #{id => ai_utp_worker,
+             start => {ai_utp_worker,start_link,[]},
              restart => temporary,
              shutdown => 5000,
              type => worker,
-             modules => [aiutp_worker]
+             modules => [ai_utp_worker]
             },
   {ok, {SupFlags, [Worker]}}.
 

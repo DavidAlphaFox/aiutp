@@ -6,12 +6,12 @@
 %%% @end
 %%% Created :  8 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(aiutp_worker).
+-module(ai_utp_worker).
 
 -behaviour(gen_statem).
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
@@ -20,7 +20,8 @@
 -define(SERVER, ?MODULE).
 
 -record(data, {
-               socket :: pid(),
+               parent :: pid(),
+               socket :: port(),
                monitor :: reference()
               }).
 
@@ -36,12 +37,12 @@
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid()) ->
+-spec start_link(pid(),port()) ->
         {ok, Pid :: pid()} |
         ignore |
         {error, Error :: term()}.
-start_link(Socket) ->
-  gen_statem:start_link(?MODULE, [Socket], []).
+start_link(Parent,Socket) ->
+  gen_statem:start_link(?MODULE, [Parent,Socket], []).
 
 %%%===================================================================
 %%% gen_statem callbacks
@@ -66,9 +67,10 @@ callback_mode() -> state_functions.
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
         gen_statem:init_result(atom()).
-init([Socket]) ->
-  Monitor = erlang:monitor(process, Socket),
+init([Parent,Socket]) ->
+  Monitor = erlang:monitor(process, Parent),
   {ok, idle, #data{
+                parent = Parent,
                 socket = Socket,
                 monitor = Monitor
                }}.
@@ -91,7 +93,9 @@ init([Socket]) ->
                  Data :: term()) ->
         gen_statem:event_handler_result(atom()).
 idle({call,Caller}, _Msg, Data) ->
-  {next_state, idle, Data, [{reply,Caller,ok}]}.
+  {keep_state, Data, [{reply,Caller,ok}]};
+idle(info,Msg,Data) -> handle_info(Msg,Data).
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,7 +108,9 @@ idle({call,Caller}, _Msg, Data) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: term(), State :: term(), Data :: term()) ->
         any().
-terminate(_Reason, _State, _Data) ->
+terminate(_Reason, _State, #data{monitor = undefined}) -> void;
+terminate(_Reason, _State, #data{monitor = MRef}) ->
+  erlang:demonitor(MRef,[flush]),
   void.
 
 %%--------------------------------------------------------------------
@@ -124,3 +130,9 @@ code_change(_OldVsn, State, Data, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+handle_info({'DOWN', MRef, process, Parent, _Reason},
+            #data{parent = Parent,monitor = MRef})->
+  {stop,shutdown,#data{}};
+handle_info(Info,Data) ->
+  error_logger:info_report({error,unknown,Info}),
+  {keep_state,Data}.
