@@ -165,5 +165,5 @@ handle_packet(#packet{conn_id = ConnID} = Packet,
     {error,not_exist} ->
       aiutp_socket:incoming(Parent,Packet,{TS,TSDiff,RecvTime},Remote);
     {ok,Worker} ->
-      aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime},Remote)
+      aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime})
   end.

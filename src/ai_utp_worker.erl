@@ -7,8 +7,8 @@
 %%% Created :  8 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
 -module(ai_utp_worker).
-
 -behaviour(gen_statem).
+-include("ai_utp.hrl").
 
 %% API
 -export([start_link/2]).
@@ -16,7 +16,8 @@
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
 -export([idle/3,syn_sent/3]).
--export([connect/3,accept/2]).
+
+-export([incoming/3,connect/3,accept/3,connected/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -39,8 +40,11 @@
 %%%===================================================================
 connect(Pid,Address,Port)->
   gen_statem:call(Pid, {connect,Address,Port}).
-accept(Pid,Packet)->
-  gen_statem:call(Pid,{accept,Packet}).
+accept(Pid,Remote,Packet)->
+  gen_statem:call(Pid,{accept,Packet,Remote}).
+incoming(Pid,Packet,Timing)->
+  gen_statem:cast(Pid,{packet,Packet,Timing}).
+  
 %%--------------------------------------------------------------------
 %% @doc
 %% Creates a gen_statem process which calls Module:init/1 to
@@ -115,32 +119,64 @@ idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
       Data0 = Data#data{remote = Remote,
                         conn_id = ConnID,
                         stream = Stream,
-                        retransmit_timer = retransmit_timer(?SYN_TIMEOUT, undefined),
-                        connector = Caller},
+                        retransmit_timer = set_retransmit_timer(?SYN_TIMEOUT, undefined),
+                        connector = {Caller,[]}},
       {next_state,syn_sent,Data0};
-    Error -> {stop,Error}
+    _ -> {stop_and_reply,normal,[{reply,Caller,system_limit}]}
   end;
 idle(info,Msg,Data) -> handle_info(Msg,Data).
+syn_sent(cast,{packet,#packet{type = st_reset},_},
+         #data{ connector = {Caller,_}} = Data)->
+  Actions = [{reply,Caller,econnrefused}],
+  {stop_and_reply,normal,Actions,
+   Data#data{connector = undefined}};
+syn_sent(cast,{packet,#packet{
+                         type = st_state,
+                         win_sz = WindowSize,
+                         seq_no = SeqNo},
+               {TS,TSDiff,RecvTime}},
+         #data{
+            stream = Stream,
+            retransmit_timer = RTimer,
+            connector = {Caller,Packets}
+           } = Data)->
+  ReplyMicro = ai_utp_util:bit32(TS - RecvTime),
+  AckNo = ai_utp_util:bit16(SeqNo + 1),
+  Stream0 = ai_utp_stream:connected(Stream,WindowSize,AckNo,
+                                    ReplyMicro,TSDiff),
+  Self = self(),
+  [incoming(Self, P, T) || {packet, P, T} <- lists:reverse(Packets)],
+  {next_state,connected,
+   Data#data{
+     stream = Stream0,
+     retransmit_timer = clear_retransmit_timer(RTimer),
+     connector = undefined},[{reply,Caller,ok}]};
+syn_sent(cast,{packet,_,_} = Packet,
+         #data{ connector = {Caller,Packets} } =Data )->
+  {keep_state,Data#data{connector = {Caller,[Packet|Packets]}}};
 syn_sent(info,{timeout, TRef,{retransmit_timeout,N}},
          #data{socket = Socket,
                remote = Remote,
                conn_id = ConnID,
                retransmit_timer = {set,TRef},
                stream = Stream,
-               connector = Caller
+               connector = {Caller,_}
               } = Data)->
   if
     N > ?SYN_TIMEOUT_THRESHOLD ->
-      {stop_and_reply,etimedout,[{reply,Caller,{error,etimedout}}]};
+      Actions = [{reply,Caller,etimeout}],
+      {stop_and_reply,normal,
+       Actions,Data#data{connector = undefined}};
     true ->
       Packet = ai_utp_protocol:make_syn_packet(),
       {ok,_} = ai_utp_stream:send_packet(Socket, Remote,
                                          Packet, ConnID, Stream),
       {keep_state,Data#data{
-                    retransmit_timer = retransmit_timer(N*2, undefined)
+                    retransmit_timer = set_retransmit_timer(N*2, undefined)
                    }}
   end;
 syn_sent(info,Msg,Data) -> handle_info(Msg,Data).
+connected(_Type,_Msg,Data)-> {keep_state,Data}.
 
 
 %%--------------------------------------------------------------------
@@ -195,12 +231,16 @@ connection_id(Remote,N)->
   end.
 
 
-retransmit_timer(N, Timer) ->
-  retransmit_timer(N, N, Timer).
-retransmit_timer(N, K, undefined) ->
+set_retransmit_timer(N, Timer) ->
+  set_retransmit_timer(N, N, Timer).
+set_retransmit_timer(N, K, undefined) ->
   Ref = erlang:start_timer(N, self(),{retransmit_timeout,K}),
   {set, Ref};
-retransmit_timer(N, K, {set, Ref}) ->
+set_retransmit_timer(N, K, {set, Ref}) ->
   erlang:cancel_timer(Ref),
   NewRef = erlang:start_timer(N, self(),{retransmit_timeout,K}),
   {set, NewRef}.
+clear_retransmit_timer(undefined) ->undefined;
+clear_retransmit_timer({set, Ref}) ->
+  erlang:cancel_timer(Ref),
+  undefined.

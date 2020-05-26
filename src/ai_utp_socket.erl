@@ -32,12 +32,8 @@ connect(UTPSocket,Address,Port)->
   {ok,Socket} = gen_server:call(UTPSocket,socket),
   {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket),
   Address0 = ai_utp_util:getaddr(Address),
-  try
-    ai_utp_worker:connect(Worker, Address0, Port)
-  catch
-    exit:Reason-> Reason
-  end.
-
+  ai_utp_worker:connect(Worker, Address0, Port).
+ 
 incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
   case Type of
     st_reset -> ok;

@@ -2,6 +2,7 @@
 -include("ai_utp.hrl").
 
 -export([new/2,new/3]).
+-export([connected/5]).
 -export([recv_packet/5,send_packet/4,send_packet/5]).
 
 
@@ -505,3 +506,12 @@ send_aux(N,Socket,Remote,Payload) ->
       send_aux(N-1, Socket, Remote, Payload);
     Error -> Error
   end.
+
+connected(#state{
+             network = Network,buffer = Buf
+            } = Stream,WindowSize,AckNo,ReplyMicro,TSDiff)->
+  Network0 = update_peer_window(Network, WindowSize),
+  Network1 = update_reply_micro(Network0, ReplyMicro),
+  Network2 = update_our_ledbat(Network1, TSDiff),
+  Buf0 = Buf#buffer{expected_seq_no = AckNo},
+  Stream#state{ network = Network2,buffer = Buf0}.
