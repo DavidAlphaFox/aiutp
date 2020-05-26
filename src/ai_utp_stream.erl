@@ -108,7 +108,7 @@ new(PeerConnID,InitialSeqNo,Options)->
   RecvBufSize = proplists:get_value(recv_buf_size, Options),
   SendBufSize = proplists:get_value(send_buf_size, Options),
   Now = ai_utp_util:millisecond(),
-  Options = #options{
+  Opts = #options{
                recv_buf_size = new_recv_buf_size(RecvBufSize),
                send_buf_size = new_send_buf_size(PacketSize,SendBufSize),
                packet_size = new_packet_size(PacketSize)
@@ -122,7 +122,7 @@ new(PeerConnID,InitialSeqNo,Options)->
                last_window_decay     = Now
               },
   #state{
-     options = Options,
+     options = Opts,
      network = Network,
      buffer = #buffer{seq_no = InitialSeqNo}
     }.

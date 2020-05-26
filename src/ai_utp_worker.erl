@@ -19,7 +19,9 @@
 -export([connect/3,accept/2]).
 
 -define(SERVER, ?MODULE).
+
 -define(SYN_TIMEOUT, 3000).
+-define(SYN_TIMEOUT_THRESHOLD, ?SYN_TIMEOUT*2).
 
 -record(data, {
                parent :: pid(),
@@ -28,7 +30,7 @@
                remote,
                conn_id,
                stream,
-               restransmit_timer,
+               retransmit_timer,
                connector
               }).
 
@@ -113,14 +115,33 @@ idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
       Data0 = Data#data{remote = Remote,
                         conn_id = ConnID,
                         stream = Stream,
-                        retransmit_timer = set_retransmit_timer(?SYN_TIMEOUT, undefined),
+                        retransmit_timer = retransmit_timer(?SYN_TIMEOUT, undefined),
                         connector = Caller},
       {next_state,syn_sent,Data0};
     Error -> {stop,Error}
   end;
 idle(info,Msg,Data) -> handle_info(Msg,Data).
-syn_sent(info,{timeout, _TimerRef,Msg},Data)->
-  
+syn_sent(info,{timeout, TRef,{retransmit_timeout,N}},
+         #data{socket = Socket,
+               remote = Remote,
+               conn_id = ConnID,
+               retransmit_timer = {set,TRef},
+               stream = Stream,
+               connector = Caller
+              } = Data)->
+  if
+    N > ?SYN_TIMEOUT_THRESHOLD ->
+      {stop_and_reply,etimedout,[{reply,Caller,{error,etimedout}}]};
+    true ->
+      Packet = ai_utp_protocol:make_syn_packet(),
+      {ok,_} = ai_utp_stream:send_packet(Socket, Remote,
+                                         Packet, ConnID, Stream),
+      {keep_state,Data#data{
+                    retransmit_timer = retransmit_timer(N*2, undefined)
+                   }}
+  end;
+syn_sent(info,Msg,Data) -> handle_info(Msg,Data).
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -174,13 +195,12 @@ connection_id(Remote,N)->
   end.
 
 
-set_retransmit_timer(N, Timer) ->
-  set_retransmit_timer(N, N, Timer).
-
-set_retransmit_timer(N, K, undefined) ->
-  Ref = erlang:send_after(N, self(),{retransmit_timeout,K}),
+retransmit_timer(N, Timer) ->
+  retransmit_timer(N, N, Timer).
+retransmit_timer(N, K, undefined) ->
+  Ref = erlang:start_timer(N, self(),{retransmit_timeout,K}),
   {set, Ref};
-set_retransmit_timer(N, K, {set, Ref}) ->
-  erlang:cancel_timer(Ref)
-  NewRef = erlang:send_after(N, self(),{retransmit_timeout,K}),
+retransmit_timer(N, K, {set, Ref}) ->
+  erlang:cancel_timer(Ref),
+  NewRef = erlang:start_timer(N, self(),{retransmit_timeout,K}),
   {set, NewRef}.

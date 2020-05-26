@@ -16,7 +16,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/4]).
+-export([incoming/4,connect/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -28,6 +28,16 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+connect(UTPSocket,Address,Port)->
+  {ok,Socket} = gen_server:call(UTPSocket,socket),
+  {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket),
+  Address0 = ai_utp_util:getaddr(Address),
+  try
+    ai_utp_worker:connect(Worker, Address0, Port)
+  catch
+    exit:Reason-> Reason
+  end.
+
 incoming(Socket,#packet{type = Type} = Packet,Timing,Remote)->
   case Type of
     st_reset -> ok;
@@ -86,6 +96,8 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
+handle_call(socket,_From,#state{socket = Socket} = State)->
+  {reply,{ok,Socket},State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
   {reply, Reply, State}.

@@ -47,7 +47,7 @@ lookup(Remote,ConnectionID)->
   Conn = conn(ConnectionID,Remote),
   case ets:lookup(?TAB, Conn) of
     [] -> {error,not_exist};
-    [{Conn,Socket}] -> {ok,Socket}
+    [{Conn,{socket,Socket}}] -> {ok,Socket}
   end.
 
 %%--------------------------------------------------------------------
@@ -184,7 +184,7 @@ alloc(Socket,Remote,ConnectionID)->
   case ets:member(?TAB,Conn) of
     true -> {error,exist};
     false ->
-      true = ets:insert(?TAB, {Conn,Socket}),
+      true = ets:insert(?TAB, {Conn,{socket,Socket}}),
       Ref = erlang:monitor(process, Socket),
       RefSocket = {ref, Socket},
       true = ets:insert(?TAB, {RefSocket, Ref}),
@@ -209,7 +209,7 @@ free(Socket,Remote,ConnectionID)->
 close(Ref) ->
   [{{ref, Ref}, Socket}] = ets:lookup(?TAB, {ref, Ref}),
   [{conn,ConnectionID,Remote}] =
-    [Conn || [Conn] <-  ets:match(?TAB, {'$1', Socket})],
+    [Conn || [Conn] <-  ets:match(?TAB, {'$1', {socket,Socket}})],
   free(Socket,Remote,ConnectionID).
 
 conn(ConnectionID,Remote)-> {conn,ConnectionID,Remote}.
