@@ -59,7 +59,7 @@ decode_packet(Packet) ->
 
   %% Decode packet
   <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
-    TimeStamp:32/integer,TimeStampdiff:32/integer,
+    TimeStamp:32/integer,TimeStampDiff:32/integer,
     WindowSize:32/integer,
     SeqNo:16/integer,AckNo:16/integer,
     ExtPayload/binary>> = Packet,
@@ -77,7 +77,7 @@ decode_packet(Packet) ->
            extension = Extensions,
            payload = Payload},
    TimeStamp,
-   TimeStampdiff,
+   TimeStampDiff,
    TS}.
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
 decode_extensions(?EXT_SACK, <<Next:8/integer,
