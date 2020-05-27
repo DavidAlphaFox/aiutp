@@ -55,11 +55,11 @@ decode(Packet) ->
 -spec decode_packet(binary()) ->
         {packet(),integer(),integer(),integer()}.
 decode_packet(Packet) ->
-  TS = ai_utp_util:microsecond(),
+  RecvTS = ai_utp_util:microsecond(),
 
   %% Decode packet
   <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
-    TimeStamp:32/integer,TimeStampDiff:32/integer,
+    TS:32/integer,TSDiff:32/integer,
     WindowSize:32/integer,
     SeqNo:16/integer,AckNo:16/integer,
     ExtPayload/binary>> = Packet,
@@ -76,9 +76,8 @@ decode_packet(Packet) ->
            ack_no = AckNo,
            extension = Extensions,
            payload = Payload},
-   TimeStamp,
-   TimeStampDiff,
-   TS}.
+   {TS,TSDiff,RecvTS}}.
+
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
 decode_extensions(?EXT_SACK, <<Next:8/integer,
                                Len:8/integer, R/binary>>, Acc) ->
