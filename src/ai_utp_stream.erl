@@ -499,7 +499,15 @@ connected(#state{
              network = Network,buffer = Buf
             } = Stream,WindowSize,AckNo,ReplyMicro,TSDiff)->
   Network0 = update_peer_window(Network, WindowSize),
-  Network1 = update_reply_micro(Network0, ReplyMicro),
-  Network2 = update_our_ledbat(Network1, TSDiff),
+  Network1 =
+    if
+      ReplyMicro == undefined -> Network0;
+      true -> update_reply_micro(Network0, ReplyMicro)
+    end,
+  Network2 =
+    if
+      TSDiff == undefined -> Network1;
+      true -> update_our_ledbat(Network1, TSDiff)
+    end,
   Buf0 = Buf#buffer{expected_seq_no = AckNo},
   Stream#state{ network = Network2,buffer = Buf0}.

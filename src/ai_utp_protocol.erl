@@ -24,7 +24,7 @@ make_reset_packet(ConnID,AckNo)->
           ack_no = AckNo,
           seq_no = ai_utp_util:bit16_random(),
           win_sz = 0,
-          extension = ?SYN_EXTS,
+          extension = [],
           conn_id = ConnID
          }.
 make_syn_packet() ->
@@ -45,12 +45,12 @@ make_ack_packet(SeqNo, AckNo) ->
 -spec decode(binary()) -> {ok, {packet(), timestamp(), timestamp(), timestamp()}}
                               | {error, term()}.
 decode(Packet) ->
-  try
+  %try
     P = decode_packet(Packet),
-    {ok, P}
-  catch
-    error:Reason -> {error, Reason}
-  end.
+    {ok, P}.
+  %catch
+  %  error:Reason -> {error, Reason}
+  %end.
 
 -spec decode_packet(binary()) ->
         {packet(),integer(),integer(),integer()}.

@@ -23,7 +23,9 @@
 %%% API functions
 %%%===================================================================
 open(Port)-> open(Port,[]).
-open(Port,Options)-> supervisor:start_child(?SERVER, [Port,Options]).
+open(Port,Options)->
+  {ok,UTPSocket} = supervisor:start_child(?SERVER, [Port,Options]),
+  {ok,{ai_utp,UTPSocket}}.
 
 %%--------------------------------------------------------------------
 %% @doc

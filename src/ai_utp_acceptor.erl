@@ -4,62 +4,51 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
+%%% Created : 27 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_socket).
+-module(ai_utp_acceptor).
 
 -behaviour(gen_server).
 -include("ai_utp.hrl").
 %% API
--export([start_link/2]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/3,connect/3,listen/2,accept/1]).
+
+-export([accept/2,incoming/2]).
 
 -define(SERVER, ?MODULE).
-
+-define(BACKLOG, 128).
 -record(state, {
+                parent,
                 socket,
-                dispatch,
-                acceptor = closed
+                acceptors,
+                monitors,
+                syns,
+                syn_len,
+                max_syn_len
                }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-connect(UTPSocket,Address,Port)->
-  {ok,Socket} = gen_server:call(UTPSocket,socket),
-  {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket),
-  Address0 = ai_utp_util:getaddr(Address),
-  case ai_utp_worker:connect(Worker, Address0, Port) of
-    ok -> {ok,{ai_utp,UTPSocket,Worker}};
-    Error -> Error
-  end.
-
-listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
-accept(UTPSocket)->
-  gen_server:call(UTPSocket,accept,infinity).
-incoming(Socket,#packet{type = Type} = Packet,Remote)->
-  case Type of
-    st_reset -> ok;
-    st_syn ->
-      gen_server:cast(Socket,{syn,Packet,Remote});
-    _ ->
-      gen_server:cast(Socket,{reset,Packet,Remote})
-  end.
+accept(Pid,Acceptor)->
+  gen_server:cast(Pid,{accept,Acceptor}).
+incoming(Pid,Req)->
+  gen_server:cast(Pid,Req).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(integer(),list()) -> {ok, Pid :: pid()} |
+-spec start_link(pid(),port(),list()) -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link(Port,Options) ->
-  gen_server:start_link(?MODULE, [Port,Options], []).
+start_link(Parent,Socket,Options) ->
+  gen_server:start_link(?MODULE, [Parent,Socket,Options], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -76,18 +65,20 @@ start_link(Port,Options) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Port,Options]) ->
-  process_flag(trap_exit, true),
-  Parent = self(),
-  Options0 =
-    case proplists:is_defined(binary,Options) of
-      false -> [binary|Options];
-      true -> Options
+init([Parent,Socket,Options]) ->
+  Backlog =
+    case Options of
+      undefined -> ?BACKLOG;
+      _ ->proplists:get_value(backlog, Options,?BACKLOG)
     end,
-  {ok,Socket} = gen_udp:open(Port,Options0),
-  {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
-  ok = inet:setopts(Socket, [{active,once}]),
-  {ok, #state{socket = Socket,dispatch = Dispatch}}.
+  {ok, #state{
+          parent = Parent,
+          socket = Socket,
+          acceptors = queue:new(),
+          syns = queue:new(),
+          syn_len = 0,
+          max_syn_len = Backlog
+         }}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,20 +95,6 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call(socket,_From,#state{socket = Socket} = State)->
-  {reply,{ok,Socket},State};
-handle_call({listen,Options},_From,
-            #state{socket = Socket,acceptor = closed} = State)->
-  Parent = self(),
-  {ok,Acceptor} = ai_utp_acceptor:start_link(Parent,Socket,Options),
-  {reply,ok,State#state{acceptor = Acceptor}};
-handle_call({listen,_},_From,State) ->
-  {reply,{error,is_listen_socket},State};
-handle_call(accept,_From,#state{acceptor = closed} = State)->
-  {reply,{error,not_listen_socket},State};
-handle_call(accept,From,#state{acceptor = Acceptor} = State)->
-  ai_utp_acceptor:accept(Acceptor,From),
-  {noreply,State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
   {reply, Reply, State}.
@@ -133,18 +110,14 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({reset,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
-            #state{socket = Socket} = State)->
-  reset(Socket, Remote, ConnID, SeqNo),
-  {noreply,State};
-
-handle_cast({syn,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
-            #state{socket = Socket,acceptor = closed} = State)->
-  reset(Socket,Remote,ConnID,SeqNo),
-  {noreply,State};
-handle_cast({syn,_,_} = Req,#state{acceptor = Acceptor} = State)->
-  ai_utp_acceptor:incoming(Acceptor,Req),
-  {noreply,State};
+handle_cast({accept,Acceptor},
+            #state{acceptors = Acceptors, syn_len = SynLen} = State)->
+  if
+    SynLen > 0 -> accept_incoming(Acceptor,State);
+    true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
+  end;
+handle_cast({syn,Packet,Remote},State)->
+  pair_incoming(Packet,Remote,State);
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -159,17 +132,6 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
-handle_info({'EXIT',Dispatch,Reason},
-            #state{dispatch = Dispatch} = State)->
-  {stop,Reason,State};
-handle_info({'EXIT',Acceptor,Reason},
-            #state{acceptor = Acceptor} = State) ->
-  {stop,Reason,State};
-handle_info({udp, Socket, IP, InPortNo, Packet},
-            #state{socket = Socket,dispatch = Dispatch} = State)->
-  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
-  ok = inet:setopts(Socket, [{active,once}]),
-  {noreply,State};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -184,9 +146,7 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(_Reason,#state{socket = undefined})-> ok;
-terminate(_Reason, #state{socket = Socket }) ->
-  gen_udp:close(Socket),
+terminate(_Reason, _State) ->
   ok.
 
 %%--------------------------------------------------------------------
@@ -218,6 +178,57 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-reset(Socket,Remote,ConnID,AckNo)->
-  Packet = ai_utp_protocol:make_reset_packet(ConnID, AckNo),
-  ai_utp_util:send(Socket, Remote, Packet, 0).
+accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
+  {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
+accept_incoming(Acceptor,
+                #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
+                      parent = Parent,socket = Socket } = State)->
+  {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket),
+  {{value,{Packet,Remote}},Syns0} = queue:out(Syns),
+  case ai_utp_worker:accept(Worker, Remote, Packet) of
+    ok ->
+      gen_server:reply(Acceptor, {ok,{ai_utp,Parent,Worker}}),
+      {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
+    {error,exist}->
+      ResetPacket = ai_utp_protocol:make_reset_packet(
+                      Packet#packet.conn_id,Packet#packet.seq_no),
+      ai_utp_util:send(Socket, Remote, ResetPacket, 0),
+      accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
+    _ ->
+      {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors)},1000}
+  end.
+pair_incoming(Packet,Remote,#state{
+                               socket = Socket,
+                               syn_len = SynLen,
+                               max_syn_len = MaxSynLen
+                              } = State) when SynLen >= MaxSynLen ->
+  ResetPacket = ai_utp_protocol:make_reset_packet(
+                  Packet#packet.conn_id,Packet#packet.seq_no),
+  ai_utp_util:send(Socket, Remote, ResetPacket, 0),
+  {noreply,State};
+pair_incoming(Packet,Remote,#state{
+                               acceptors = Acceptors,
+                               syns = Syns
+                              } = State) ->
+  Syns0 = queue:filter(
+            fun({SYN,Remote0})->
+                if
+                  (Remote ==  Remote0) andalso
+                  (SYN#packet.conn_id == Packet#packet.conn_id) ->
+                    false;
+                  true -> true
+                end
+            end, Syns),
+  Syns1 = queue:in({Packet,Remote},Syns0),
+  Empty = queue:is_empty(Acceptors),
+  if
+    Empty == true ->
+      {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
+    true ->
+      {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
+      accept_incoming(Acceptor, State#state{
+                                  syns = Syns1,
+                                  syn_len = queue:len(Syns1),
+                                  acceptors = Acceptors0
+                                 })
+  end.

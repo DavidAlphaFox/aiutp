@@ -109,7 +109,7 @@ init([Parent,Socket]) ->
                  Data :: term()) ->
         gen_statem:event_handler_result(atom()).
 idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
-  case connection_id({Address,Port}) of
+  case register_conn({Address,Port}) of
     {ok,ConnID}->
       Remote = {Address,Port},
       Stream = ai_utp_stream:new(ConnID + 1,2),
@@ -123,6 +123,24 @@ idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
                         connector = {Caller,[]}},
       {next_state,syn_sent,Data0};
     _ -> {stop_and_reply,normal,[{reply,Caller,system_limit}]}
+  end;
+idle({call,Caller},{accept,#packet{
+                              conn_id = ConnID,
+                              seq_no = SeqNo,
+                              win_sz = WindowSize
+                             },Remote},#data{socket = Socket} = Data)->
+  case ai_utp_conn:alloc(Remote, ai_utp_util:bit16(ConnID + 1)) of
+    ok ->
+      OurSeqNo = ai_utp_util:bit16_random(),
+      Stream = ai_utp_stream:new(ConnID,OurSeqNo + 1),
+      Stream0 = ai_utp_stream:connected(Stream,WindowSize,SeqNo + 1,
+                                        undefined,undefined),
+      Packet = ai_utp_protocol:make_ack_packet(OurSeqNo, SeqNo),
+      ai_utp_stream:send_packet(Socket, Remote, Packet, Stream0),
+      {next_state,connected,
+       Data#data{stream = Stream0,remote = Remote},[{reply,Caller,ok}]};
+    Error ->
+      {stop_and_reply,normal,[{reply,Caller,Error}]}
   end;
 idle(info,Msg,Data) -> handle_info(Msg,Data).
 syn_sent(cast,{packet,#packet{type = st_reset},_},
@@ -220,14 +238,13 @@ handle_info(Info,Data) ->
   {keep_state,Data}.
 
 
-connection_id(Remote)->
-  connection_id(Remote,3).
-connection_id(_,0)-> {error,exist};
-connection_id(Remote,N)->
+register_conn(Remote)-> register_conn(Remote,3).
+register_conn(_,0)-> {error,exist};
+register_conn(Remote,N)->
   ConnID = ai_utp_util:bit16_random(),
   case ai_utp_conn:alloc(Remote, ConnID) of
     ok -> {ok,ConnID};
-    _ -> connection_id(Remote,N-1)
+    _ -> register_conn(Remote,N-1)
   end.
 
 

@@ -91,7 +91,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({dispatch,Remote,Payload},
             #state{parent = Parent} = State)->
   case ai_utp_protocol:decode(Payload) of
-    {ok,Packet,TS,TSDiff,RecvTime} ->
+    {ok,{Packet,TS,TSDiff,RecvTime}} ->
       handle_packet(Packet,TS,TSDiff,RecvTime,Remote,Parent);
     {error,Reason}->
       error_logger:info_report([decode_error,Reason]),
@@ -161,9 +161,9 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 handle_packet(#packet{conn_id = ConnID} = Packet,
               TS,TSDiff,RecvTime,Remote,Parent)->
-  case aiutp_conn_manager:lookup(Remote, ConnID) of
+  case ai_utp_conn:lookup(Remote, ConnID) of
     {error,not_exist} ->
-      aiutp_socket:incoming(Parent,Packet,Remote);
+      ai_utp_socket:incoming(Parent,Packet,Remote);
     {ok,Worker} ->
-      aiutp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime})
+      ai_utp_worker:incoming(Worker,Packet,{TS,TSDiff,RecvTime})
   end.
