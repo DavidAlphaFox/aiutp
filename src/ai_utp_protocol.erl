@@ -45,12 +45,12 @@ make_ack_packet(SeqNo, AckNo) ->
 -spec decode(binary()) -> {ok, {packet(), timestamp(), timestamp(), timestamp()}}
                               | {error, term()}.
 decode(Packet) ->
-  %try
+  try
     P = decode_packet(Packet),
-    {ok, P}.
-  %catch
-  %  error:Reason -> {error, Reason}
-  %end.
+    {ok, P}
+  catch
+    error:Reason -> {error, Reason}
+  end.
 
 -spec decode_packet(binary()) ->
         {packet(),integer(),integer(),integer()}.

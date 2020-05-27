@@ -132,6 +132,9 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
+handle_info(timeout,#state{acceptors = Acceptors} = State)->
+  {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
+  accept_incoming(Acceptor, State#state{acceptors = Acceptors0});
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -184,7 +187,8 @@ accept_incoming(Acceptor,
                 #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
                       parent = Parent,socket = Socket } = State)->
   {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket),
-  {{value,{Packet,Remote}},Syns0} = queue:out(Syns),
+  {{value,Req},Syns0} = queue:out(Syns),
+  {Packet,Remote} = Req,
   case ai_utp_worker:accept(Worker, Remote, Packet) of
     ok ->
       gen_server:reply(Acceptor, {ok,{ai_utp,Parent,Worker}}),
@@ -194,8 +198,11 @@ accept_incoming(Acceptor,
                       Packet#packet.conn_id,Packet#packet.seq_no),
       ai_utp_util:send(Socket, Remote, ResetPacket, 0),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
-    _ ->
-      {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors)},1000}
+    Error ->
+      logger:error(Error),
+      {noreply,State#state{
+                 acceptors = queue:in(Acceptor,Acceptors),
+                 syns = queue:in(Req,Syns0)},1000}
   end.
 pair_incoming(Packet,Remote,#state{
                                socket = Socket,
