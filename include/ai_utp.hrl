@@ -10,6 +10,10 @@
 -define(ACK_NO_MASK, 16#FFFF).
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE, 1024).
+-define(PACKET_SIZE, 350).
+-define(OPT_RECV_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
+-define(OPT_SEND_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
+
 -define(REORDER_BUFFER_SIZE, 32).
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
@@ -43,6 +47,7 @@
          opt_sndbuf = 0,
          %%rcvbuf setting, in bytes
          opt_rcvbuf = 0,
+         state,
          retransmit_count = 0,
          reorder_count = 0,
          %% the number of packets in the send queue. Packets that haven't
@@ -82,6 +87,8 @@
          last_maxed_out_window :: integer(),
          fin_sent = false,
          fin_acked = false,
+         got_fin = false,
+         eof_seq_no = -1,
          fast_timeout = false,
          duplicate_ack = 0
         }).

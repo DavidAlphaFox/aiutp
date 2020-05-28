@@ -1,48 +1,65 @@
 -module(ai_utp_net).
 -include("ai_utp.hrl").
 
--export([process_incoming/4]).
+-export([process_incoming/3]).
+  
+enqueue_transmit(Seq,Actions)->
+  Transmit = proplists:get_value(transmist, Actions, []),
+  Transmit0 = [Seq|Transmit],
+  [{transmit,Transmit0}| proplists:delete(transmist, Actions)].
 
-schedule_ack(Type,SeqNR,Actions)->
-  if SeqNR >= ?REORDER_BUFFER_MAX_SIZE ->
+
+
+update_fast_resend_seq_nr(#utp_net{fast_resend_seq_nr = FastResendSeqNR} = Net,AckNo)->
+  NextAckNo = ai_utp_util:bit16(AckNo + 1),
+  IsLess = ai_utp_util:wrapping_compare_less(
+             FastResendSeqNR,NextAckNo,?ACK_NO_MASK),
+  if
+    IsLess == true -> Net#utp_net{fast_resend_seq_nr = NextAckNo};
+    true -> Net
+  end.
+
+update_net(#utp_net{state = 'CS_SYN_SENT'} = Net,
+           #utp_packet{seq_no = SeqNo})->
+  Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo-1)};
+update_net(Net,_) -> Net.
+
+
+schedule_ack(Type,PeerUnAcks,Actions)->
+  if PeerUnAcks >= ?REORDER_BUFFER_MAX_SIZE ->
       Max = ai_utp_util:bit16((?SEQ_NO_MASK + 1) - ?REORDER_BUFFER_MAX_SIZE),
-      if SeqNR >= Max andalso Type == st_state ->
-          [schedule_ack|Actions];
+      if PeerUnAcks >= Max andalso Type == st_state ->
+          [{ack,true}|Actions];
          true -> Actions
       end;
      true -> Actions
   end.
 
-acked_size(AckNo,SeqNR,CurWindowPackets)->
+ack_count(AckNo,SeqNR,CurWindowPackets)->
   Acks = ai_utp_util:bit16(CurWindowPackets - (SeqNR - 1 - AckNo)),
   if Acks > CurWindowPackets -> 0;
      true -> Acks
   end.
 
-acked_packet(OutBuf,Seq,Now,RTT,Bytes)->
+ack_packet(OutBuf,Seq,Acc)->
   case array:get(Seq,OutBuf) of
-    undefined -> {RTT,Bytes};
+    undefined -> Acc;
     WrapPacket ->
       if WrapPacket#utp_packet_wrap.transmissions > 0 ->
-          Bytes0 = Bytes + WrapPacket#utp_packet_wrap.payload,
-          SendTime = WrapPacket#utp_packet_wrap.send_time,
-          RTT0 =
-            if SendTime < Now -> min(RTT, Now - SendTime );
-               true -> min(RTT,50000)
-            end,
-          {RTT0,Bytes0};
-         true -> {RTT,Bytes}
+          [{Seq,WrapPacket}];
+         true -> Acc
       end
   end.
+
 %% 常规的ack
-acked_bytes(_,_,_,RTT,-1,Bytes)-> {RTT,Bytes};
-acked_bytes(OutBuf,WindowStart,Now,RTT,Acks,Bytes) ->
+ack_packets(_,_,-1,Acc)->Acc;
+ack_packets(OutBuf,WindowStart,Acks,Acc) ->
   Seq = ai_utp_util:bit16(WindowStart + Acks),
-  {RTT0,Bytes0}  = acked_packet(OutBuf,Seq, Now, RTT, Bytes),
-  acked_bytes(OutBuf,WindowStart,Now,RTT0,Acks - 1,Bytes0).
+  Acc0 = ack_packet(OutBuf, Seq, Acc),
+  ack_packets(OutBuf,WindowStart,Acks,Acc0).
 
-
-acked(Bits,Len)->
+%% selective ack
+sack_bit_set(Bits,Len)->
   Pos = Len bsr 3,
   Mask = 1 bsr (Len band 7),
   if
@@ -56,64 +73,132 @@ acked(Bits,Len)->
   end,
   Bit band Mask.
 
-%% SeqNR -1  - (AckNo + 2 + Len)  >= cur_window_packets - 1
-%% selective ack
-sacked(_,_,_,_,_,-1,_,RTT,Bytes)->{RTT,Bytes};
-sacked(OutBuf,SeqNR,CurWindowPackets,Base,Bits,Len,Now,RTT,Bytes)->
-  Index = Base + Len,
+sack_need_resend(Index,FastResendSeqNR,Count,Acc)->
+  Out = ai_utp_util:bit16(Index - FastResendSeqNR),
+  if Out =< ?OUTGOING_BUFFER_MAX_SIZE andalso
+     Count >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
+      [Index|Acc];
+     true  -> Acc
+  end.
+sack_packets(_,_,_,_,_,_,-1, SAckPackets,Acc)-> {SAckPackets,Acc};
+sack_packets(OutBuf,SeqNR,CurWindowPackets,FastResendSeqNR,
+             Base,Bits,Len,SAckPackets,{Count,Miss} = Acc) ->
+  Index = ai_utp_util:bit16(Base + Len),
   Count = ai_utp_util:bit16(SeqNR - 1 - Index),
-  if Count >= CurWindowPackets - 1 -> {RTT,Bytes};
+  if Count >= CurWindowPackets - 1 -> {SAckPackets,Acc};
      true ->
-      Acked = acked(Bits,Len),
-      if
-        Acked == 0 ->
-          sacked(OutBuf,SeqNR,CurWindowPackets,Base,Bits,
-                 Len-1,Now,RTT,Bytes);
-        true ->
-          {RTT0,Bytes0}  = acked_packet(OutBuf,Index, Now, RTT, Bytes),
-          sacked(OutBuf,SeqNR,CurWindowPackets,Base,Bits,
-                 Len-1,Now,RTT0,Bytes0)
+      BitSet = sack_bit_set(Bits, Len),
+      if BitSet == true ->
+          SAckPackets0 = ack_packet(OutBuf, Index,SAckPackets),
+          sack_packets(OutBuf,SeqNR,CurWindowPackets,FastResendSeqNR,
+                       Base,Bits,Len - 1,SAckPackets0,{Count + 1,Miss});
+         true ->
+          Miss0 = sack_need_resend(Index, FastResendSeqNR, Count, Miss),
+          sack_packets(OutBuf,SeqNR,CurWindowPackets,FastResendSeqNR,
+                       Base,Bits,Len - 1,SAckPackets,{Count,Miss0})
       end
   end.
-sacked_bytes(_,_,_,_,_,RTT,[],Bytes) -> {RTT,Bytes};
-sacked_bytes(OutBuf,SeqNR,CurWindowPackets,
-             Base,Now,RTT,[H|T],Bytes) ->
+
+sack_packets(_,_,_,_,_,[])-> {[],{0,[]}};
+sack_packets(OutBuf,SeqNR,CurWindowPackets,
+             FastResendSeqNR,Base,[H|T]) ->
   case H of
     {sack,Bits}->
       Len = erlang:byte_size(Bits) * 8 - 1,
-      sacked(OutBuf,SeqNR,CurWindowPackets,Base,
-               Bits,Len,Now,RTT,Bytes);
-    _ ->
-      sacked_bytes(OutBuf,SeqNR,CurWindowPackets,
-                   Base,Now,RTT,T, Bytes)
+      {SAckPackets,{Count,Miss} } =
+        sack_packets(OutBuf,SeqNR,CurWindowPackets,FastResendSeqNR,
+                     Base,Bits,Len,[],{0,[]}),
+      MissStart = ai_utp_util:bit16(Base - 1),
+      Miss1 = sack_need_resend(MissStart, FastResendSeqNR, Count,Miss),
+      {SAckPackets,{Count,Miss1}};
+    _->
+      sack_packets(OutBuf, SeqNR,CurWindowPackets,
+                   FastResendSeqNR,Base,T)
   end.
 
-acked_bytes(OutBuf,SeqNR,CurWindowPackets,AckNo,Now,RTT,Acks,SAcks)->
-  WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-  {MinRTT,AckedBytes} = acked_bytes(OutBuf,WindowStart,Now,RTT,Acks - 1,0),
-  AckNo0 = ai_utp_util:bit16(AckNo + 2),
-  sacked_bytes(OutBuf,SeqNR,CurWindowPackets,AckNo0,
-               Now,MinRTT,SAcks,AckedBytes).
+ack_bytes(AckPackets,SAckPackets,Now)->
+  Fun = fun({_,WrapPacket},{RTT,Bytes})->
+            if WrapPacket#utp_packet_wrap.transmissions > 0 ->
+                Bytes0 = Bytes + WrapPacket#utp_packet_wrap.payload,
+                SendTime = WrapPacket#utp_packet_wrap.send_time,
+                RTT0 =
+                  if SendTime < Now -> min(RTT, Now - SendTime );
+                     true -> min(RTT,50000)
+                  end,
+                {RTT0,Bytes0};
+               true -> {RTT,Bytes}
+            end
+        end,
+  
+  Acc = lists:foldl(Fun,{?RTT_MAX,0},AckPackets),
+  lists:foldl(Fun, Acc,SAckPackets).
 
 
-update_our_ledbat(Net,0)-> Net;
-update_our_ledbat(#utp_net{ our_ledbat = none } = Net, Sample) ->
-  Net#utp_net{ our_ledbat = ai_utp_ledbat:new(Sample) };
-update_our_ledbat(#utp_net{ our_ledbat = Ledbat } = Net, Sample) ->
-  Net#utp_net{ our_ledbat = ai_utp_ledbat:add_sample(Ledbat, Sample) }.
+pure_ack_packet(#utp_net{outbuf = OutBuf,rtt = RTT, rtt_ledbat = RTTLedbat,
+                     cur_window = CurWindow,
+                     cur_window_packets = CurWindowPackets} = Net,Seq,Now)->
+  case array:get(Seq,OutBuf) of
+    undefined -> {continue,
+                  Net#utp_net{cur_window_packets = CurWindowPackets -1}};
+    WrapPacket ->
+      if
+        WrapPacket#utp_packet_wrap.transmissions == 0 ->
+          {stop,Net};
+        true ->
+          Net0 =
+            if WrapPacket#utp_packet_wrap.transmissions == 1 ->
+                TimeSent = WrapPacket#utp_packet_wrap.send_time,
+                {ok, _NewRTO, NewRTT, NewHistory} =
+                  ai_utp_rtt:ack(RTTLedbat,RTT,TimeSent,Now),
+                Net#utp_net{rtt = NewRTT,rtt_ledbat = NewHistory};
+               true -> Net
+            end,
+          Net1 =
+            if WrapPacket#utp_packet_wrap.need_resend == true -> Net0;
+               true ->
+                Net0#utp_net{cur_window = CurWindow - WrapPacket#utp_packet.payload}
+            end,
+          {continue,Net1#utp_net{cur_window_packets = CurWindowPackets -1,
+                       retransmit_count = 0,
+                       outbuf = array:set(Seq,undefined,OutBuf)}}
+      end
+  end.
 
+pure_prev_sack(#utp_net{cur_window_packets = CurWindowPackets,
+                        seq_nr = SeqNR,outbuf = OutBuf} = Net)
+  when CurWindowPackets > 0->
+  Seq = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+  case array:get(Seq,OutBuf) of
+    undefined ->
+      pure_prev_sack(Net#utp_net{cur_window_packets = CurWindowPackets - 1});
+    _ -> Net
+  end;
+pure_prev_sack(Net) -> Net.
+
+
+pure_ack(Net,_,-1)-> Net;
+pure_ack(#utp_net{cur_window_packets = CurWindowPackets,
+                    seq_nr = SeqNR} = Net,Now,Acks)->
+  Seq = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+  Net1 =
+    case pure_ack_packet(Net, Seq, Now) of
+      {stop,Net0} -> Net0;
+      {continue,Net0} -> pure_ack(Net0,Now,Acks - 1)
+    end,
+  pure_prev_sack(Net1).
+
+pure_sack(#utp_net{outbuf = OutBuf} = Net,SAckPackets)->
+  OutBuf0 = lists:foldl(
+              fun({Index,_},Acc)-> array:set(Index,undefined,Acc) end,
+              OutBuf,SAckPackets),
+  Net#utp_net{outbuf = OutBuf0}.
+
+%% 对Peer的计算
 update_peer_ledbat(Net,0)-> Net;
 update_peer_ledbat(#utp_net{ peer_ledbat = none } = Net, Sample) ->
   Net#utp_net{ peer_ledbat = ai_utp_ledbat:new(Sample) };
 update_peer_ledbat(#utp_net{ peer_ledbat = Ledbat } = Net, Sample) ->
   Net#utp_net{ peer_ledbat = ai_utp_ledbat:add_sample(Ledbat, Sample) }.
-
-update_reply_micro(Net,Now,TS)->
-  ReplyMicro =
-    if TS > 0 -> ai_utp_util:bit32(Now - TS);
-       true -> 0
-    end,
-  update_peer_ledbat(Net#utp_net{reply_micro = ReplyMicro},ReplyMicro).
 
 
 %% if their new delay base is less than their previous one
@@ -133,6 +218,23 @@ update_clock_skew(#utp_net{peer_ledbat = OldPeers },
       NW#utp_net{ our_ledbat = ai_utp_ledbat:shift(Ours, Diff) };
      true -> NW
   end.
+
+update_reply_micro(Net,Now,TS)->
+  ReplyMicro =
+    if TS > 0 -> ai_utp_util:bit32(Now - TS);
+       true -> 0
+    end,
+  Net0 = update_peer_ledbat(Net#utp_net{reply_micro = ReplyMicro},ReplyMicro),
+  update_clock_skew(Net, Net0).
+
+
+%% 对自己的计算
+update_our_ledbat(Net,0)-> Net;
+update_our_ledbat(#utp_net{ our_ledbat = none } = Net, Sample) ->
+  Net#utp_net{ our_ledbat = ai_utp_ledbat:new(Sample) };
+update_our_ledbat(#utp_net{ our_ledbat = Ledbat } = Net, Sample) ->
+  Net#utp_net{ our_ledbat = ai_utp_ledbat:add_sample(Ledbat, Sample) }.
+
 
 %% if the delay estimate exceeds the RTT, adjust the base_delay to
 %% compensate
@@ -177,102 +279,19 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,?MIN_WINDOW_SIZE,OptSndBuf),
   Net#utp_net{max_window = LedbatCwnd}.
 
-
-update_fast_resend_seq_nr(#utp_net{fast_resend_seq_nr = FastResendSeqNR} = Net,AckNo)->
-  NextAckNo = ai_utp_util:bit16(AckNo + 1),
-  IsLess = ai_utp_util:wrapping_compare_less(
-             FastResendSeqNR,NextAckNo,?ACK_NO_MASK),
-  if
-    IsLess == true ->
-      Net#utp_net{fast_resend_seq_nr = NextAckNo};
-    true -> Net
+do_congestion_control(Net,TSDiff,NowMS,MinRTT,AckBytes)->
+  TSDiff0 = ai_utp_util:bit32(TSDiff),
+  ActualDelay =
+    if TSDiff == ?TS_DIFF_MAX -> 0;
+       true -> TSDiff0
+    end,
+  Net0 = update_our_ledbat(Net, ActualDelay),
+  Net1 = update_estimate_exceed(Net0, MinRTT),
+  if ActualDelay > 0 andalso AckBytes > 0 ->
+      congestion_control(Net1,AckBytes,ActualDelay,NowMS,MinRTT);
+     true -> Net1
   end.
 
-
-update_net('SYN_SENT',Net,#utp_packet{seq_no = SeqNo})->
-  Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo-1)};
-update_net(_,Net,_) -> Net.
-
-pure_packet(#utp_net{outbuf = OutBuf,rtt = RTT, rtt_ledbat = RTTLedbat,
-                     cur_window = CurWindow,
-                     cur_window_packets = CurWindowPackets} = Net,Seq,Now)->
-  case array:get(Seq,OutBuf) of
-    undefined -> {continue,
-                  Net#utp_net{cur_window_packets = CurWindowPackets -1}};
-    WrapPacket ->
-      if
-        WrapPacket#utp_packet_wrap.transmissions == 0 ->
-          {stop,Net};
-        true ->
-          Net0 =
-            if WrapPacket#utp_packet_wrap.transmissions == 1 ->
-                TimeSent = WrapPacket#utp_packet_wrap.send_time,
-                {ok, _NewRTO, NewRTT, NewHistory} =
-                  ai_utp_rtt:ack(RTTLedbat,RTT,TimeSent,Now),
-                Net#utp_net{rtt = NewRTT,rtt_ledbat = NewHistory};
-               true -> Net
-            end,
-          Net1 =
-            if WrapPacket#utp_packet_wrap.need_resend == true -> Net0;
-               true ->
-                Net0#utp_net{cur_window = CurWindow - WrapPacket#utp_packet.payload}
-            end,
-          {continue,Net1#utp_net{cur_window_packets = CurWindowPackets -1,
-                       retransmit_count = 0,
-                       outbuf = array:set(Seq,undefined,OutBuf)}}
-      end
-  end.
-
-pure_acked(Net,_,-1)-> Net;
-pure_acked(#utp_net{cur_window_packets = CurWindowPackets,
-                    seq_nr = SeqNR} = Net,Now,Acks)->
-  Seq = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-  case pure_packet(Net, Seq, Now) of
-    {stop,Net0} -> Net0;
-    {continue,Net0} ->
-      pure_acked(Net0,Now,Acks - 1)
-  end.
-
-sacked_resend(Index,FastResendSeqNR,Count,Acc)->
-  Out = ai_utp_util:bit16(Index - FastResendSeqNR),
-  if Out =< ?OUTGOING_BUFFER_MAX_SIZE andalso
-     Count >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
-      [Index|Acc];
-     true  -> Acc
-  end.
-
-pure_sacked(Net,_,_,_,-1,Acc)-> {Net,Acc};
-pure_sacked(#utp_net{cur_window_packets = CurWindowPackets,
-                     seq_nr = SeqNR,fast_resend_seq_nr = FastResendSeqNR
-                    }=Net,Now,Base,
-            Bits,Len,{Count,Acc}) ->
-  Index = ai_utp_util:bit16(Base + Len),
-  Count = ai_utp_util:bit16(SeqNR - 1 - Index),
-  if Count >= CurWindowPackets - 1 ->  Net;
-     true ->
-      Acked = acked(Bits,Len),
-      if Acked == true->
-          {_,Net0} = pure_packet(Net, Index, Now),
-          pure_sacked(Net0,Now,Base,Bits,Len -1,{Count + 1,Acc});
-         true ->
-          Acc0 = sacked_resend(Index,FastResendSeqNR,Count,Acc),
-          pure_sacked(Net,Now,Base,Bits,Len - 1,{Count,Acc0 })
-      end
-  end.
-
-
-pure_sacked(Net,_,Base,[],Acc) -> {Net,Acc};
-pure_sacked(Net,Now,Base,[H|T],Acc) ->
-  case H of
-    {sack,Bits}->
-      Len = erlang:byte_size(Bits) * 8 - 1,
-      {Net0,{Count,Acc0}} = pure_sacked(Net,Now,Base,Bits,Len,{0,Acc}),
-      #utp_net{fast_resend_seq_nr = FastResendSeqNR} = Net0,
-      Out = ai_utp_util:bit16(Base - 1),
-      Acc1 = sacked_resend(Out, FastResendSeqNR, Count, Acc0),
-      {Net0#utp_net{duplicate_ack = Count},Acc1};
-    _ -> pure_sacked(Net,Now,Base,T,Acc)
-  end.
 nagle_send(#utp_net{outbuf = OutBuf,seq_nr = SeqNR,
                     cur_window_packets = CurWindowPackets},Actions)->
   if CurWindowPackets == 1 -> Actions;
@@ -305,62 +324,108 @@ fast_timeout(#utp_net{seq_nr = SeqNR, cur_window_packets = CurWindowPackets,
       end
   end.
 
+resend_on_ack(Net,DuplicateAck,[],Actions)->
+  {Net#utp_net{duplicate_ack = DuplicateAck},Actions};
+resend_on_ack(Net,DuplicateAck,Miss,Actions) ->
+  Miss1 =
+    if erlang:length(Miss) > 4 ->
+        {Miss0,_} = lists:split(4, Miss),
+        Miss0;
+       true -> Miss
+    end,
+  lists:foldl(fun(Seq,{Net0,Actions0})->
+                  Actions1 = enqueue_transmit(Seq, Actions0),
+                  FastResendSeqNR = ai_utp_util:bit16(Seq + 1),
+                  {Net0#utp_net{fast_resend_seq_nr = FastResendSeqNR},Actions1}
+              end, {Net,Actions}, Miss1).
+is_full(#utp_net{max_window = MaxWindow,opt_sndbuf = OptSndBuf,
+                 max_peer_window = MaxPeerWindow,cur_window = CurWindow,
+                 cur_window_packets = CurWindowPackets} = Net,Actions)->
+  MaxSend = min(MaxWindow, OptSndBuf),
+  MaxSend0 = min(MaxSend,MaxPeerWindow),
+  {Net0,Actions0} =
+    if CurWindowPackets >= ?OUTGOING_BUFFER_MAX_SIZE - 1 ->
+        {Net#utp_net{last_maxed_out_window = ai_utp_util:millisecond()},
+         [{is_full,true}|Actions]};
+       true -> {Net,Actions}
+    end,
+  if CurWindow + ?PACKET_SIZE > MaxSend0 ->
+      {Net0#utp_net{last_maxed_out_window = ai_utp_util:millisecond()},
+       [{is_full,true}| proplists:delete(is_full,Actions0)]};
+     true -> {Net0,Actions0}
+  end.
 
-process_incoming(State,NetBase,
+update_inbuf(#utp_net{ack_nr = AckNR, reorder_count = ReorderCount,
+                      got_fin = GotFin,eof_seq_no = EofSeqNo} = Net,
+             0,Actions)->
+  Net0 = Net#utp_net{ack_nr = AckNR + 1},
+  
+
+process_incoming(#utp_net{state = State } = NetBase,
                  #utp_packet{type = Type,seq_no = SeqNo,
-                             ack_no = AckNo,wnd_size = WndSize,
+                             ack_no = AckNo,win_sz = WndSize,
                              extension = Ext} = Packet,
                  {TS,TSDiff,Now} = Timing) ->
-  Net = update_net(State,NetBase,Packet),
+  Net = update_net(NetBase,Packet),
+  Net0 = update_fast_resend_seq_nr(Net, AckNo),
   #utp_net{ack_nr = AckNR,seq_nr = SeqNR,
            cur_window_packets = CurWindowPackets,
-           outbuf = OutBuf,fin_sent = FinSent} = Net,
+           outbuf = OutBuf,fin_sent = FinSent,got_fin = GotFin,
+           fast_resend_seq_nr = FastResendSeqNR} = Net0,
+
   NowMS = ai_utp_util:millisecond(),
-  SeqWindow = ai_utp_util:bit16(SeqNo - AckNR - 1),
-  Actions = schedule_ack(Type, SeqWindow, []),
-  Acks = acked_size(AckNo,SeqNR,CurWindowPackets),
-  {MinRTT,AckedBytes} = acked_bytes(OutBuf,SeqNR, CurWindowPackets,AckNo,
-                           Now,?RTT_MAX,Acks,Ext),
-  Net0 = update_reply_micro(Net, Now, TS),
-  Net1 = update_clock_skew(Net, Net0),
-  TSDiff0 = ai_utp_util:bit32(TSDiff),
-  ActualDelay =
-    if TSDiff == ?TS_DIFF_MAX -> 0;
-       true -> TSDiff0
-    end,
-  Net2 = update_our_ledbat(Net1, ActualDelay),
-  Net3 = update_estimate_exceed(Net2, MinRTT),
-  Net4 =
-    if ActualDelay > 0 andalso AckedBytes > 0 ->
-        congestion_control(Net3,AckedBytes,ActualDelay,NowMS,MinRTT);
-       true -> Net3
-    end,
-  Net5 = Net4#utp_net{max_peer_window = WndSize},
+  %% 计算有多少个包Peer没有收到ack
+  PeerUnAcks = ai_utp_util:bit16(SeqNo - AckNR - 1),
+  %% 判断是否需要发送ack包
+  Actions = schedule_ack(Type, PeerUnAcks, []),
+  %% 计算受到Acks的数量
+  Acks = ack_count(AckNo, SeqNR, CurWindowPackets),
+
+  Oldest = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+  AckPackets = ack_packets(OutBuf,Oldest,Acks -1,[]),
+
+  SAckOldest = ai_utp_util:bit16(AckNo + 2),
+  {SAckPackets,{DuplicateAck,Miss}} = 
+    sack_packets(OutBuf,SeqNR,CurWindowPackets,FastResendSeqNR,SAckOldest,Ext),
+  %% 计算所有已经ack的字节和最小的round trip
+  {MinRTT,AckBytes} = ack_bytes(AckPackets,SAckPackets,Now),
+
+  Net1 = update_reply_micro(Net0, Now, TS),
+  Net2 = do_congestion_control(Net1, TSDiff, NowMS, MinRTT, AckBytes),
+  Net3 = Net2#utp_net{max_peer_window = WndSize},
   Actions0 =
     if WndSize == 0->
         [{max_peer_window,NowMS}|Actions];
        true -> Actions
     end,
-  Actions1 =
+  {Net4,Actions1} =
     if State == 'SYN_RECV' andalso Type == st_data ->
-        [{next_state,'CONNECTED'}|Actions0];
-       true -> Actions0
+        {Net3#utp_net{state = 'CONNECTED'},
+         [{next_state,'CONNECTED'}|Actions0]};
+       true -> {Net3,Actions0}
     end,
-  Actions2 =
+  {Net5,Actions2} =
     if State == 'SYN_SENT' andalso Type == st_state ->
-        [{next_state,'CONNECTED'}|Actions1];
+        {Net4#utp_net{state = 'CONNECTED'},
+         [{next_state,'CONNECTED'}|Actions1]};
        FinSent == true andalso Acks == CurWindowPackets ->
-        [{next_state,'DESTROY'}|proplists:delete(next_state, Actions1)];
-       true -> Actions1
+        {Net4#utp_net{state = 'DESTROY'},
+         [{next_state,'DESTROY'}|proplists:delete(next_state, Actions1)]};
+       true -> {Net4,Actions1}
     end,
-  Net6 = update_fast_resend_seq_nr(Net5, AckNo),
-  Net7 = pure_acked(Net6,Now,Acks),
-  Actions3 = nagle_send(Net7,Actions2),
-  {Net8,Actions4} = fast_timeout(Net7, Actions3),
-  AckNo0 = ai_utp_util:bit16(AckNo + 2),
-  {Net9,NeedResend} = pure_sacked(Net8,Now,AckNo0,Ext,[]),
-  
-  
-
-
-%%recv_packet(State,Net,Packet,Timing)->
+  Net5 = pure_ack(Net4,Now,Acks),
+  Net6 = pure_sack(Net5, SAckPackets),
+  Actions3 = nagle_send(Net6,Actions2),
+  {Net7,Actions4} = fast_timeout(Net6, Actions3),
+  {Net8,Actions5} = resend_on_ack(Net7,DuplicateAck,Miss,Actions4),
+  {Net9,Actions6} = is_full(Net8,Actions5),
+  if Type == st_state -> {Net9,Actions6};
+     true ->
+      Net10 =
+        if Type == st_fin andalso
+           GotFin == false ->
+            Net9#utp_net{got_fin = true,eof_seq_no = SeqNo};
+           true -> Net9
+        end,
+      update_inbuf(Net10,PeerUnAcks,Actions6)
+  end.
