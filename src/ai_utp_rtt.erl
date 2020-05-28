@@ -36,14 +36,9 @@ update(Estimate,#ai_utp_rtt { rtt = LastRTT, var = Var} ) ->
          var = round(Var + (abs(Delta) - Var) / 4) };
 
 update(Estimate,none)->
-  case Estimate < 6000 of
-    true ->
-      #ai_utp_rtt {
-         rtt = round(Estimate),
-         var = round(Estimate / 2)};
-    false ->
-      error({estimate_too_high, Estimate})
-  end.
+  #ai_utp_rtt {
+     rtt = round(Estimate),
+     var = round(Estimate / 2)}.
 
 %% 计算重新传输超时
 %% The default timeout for packets associated with the socket is also

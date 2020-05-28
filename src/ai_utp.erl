@@ -7,13 +7,13 @@
 open(Port) -> ai_utp_socket_sup:open(Port,[]).
 open(Port,Options) -> ai_utp_socket_sup:open(Port,Options).
 
-connect({ai_utp,UTPSocket},Address,Port)->
+connect({utp,UTPSocket},Address,Port)->
   ai_utp_socket:connect(UTPSocket, Address, Port).
 
-listen({ai_utp,UTPSocket})->
+listen({utp,UTPSocket})->
   ai_utp_socket:listen(UTPSocket, []).
-listen({ai_utp,UTPSocket},Options)->
+listen({utp,UTPSocket},Options)->
   ai_utp_socket:listen(UTPSocket, Options).
 
-accept({ai_utp,UTPSocket})->
+accept({utp,UTPSocket})->
   ai_utp_socket:accept(UTPSocket).

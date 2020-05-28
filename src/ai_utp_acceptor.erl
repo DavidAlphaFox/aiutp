@@ -9,6 +9,7 @@
 -module(ai_utp_acceptor).
 
 -behaviour(gen_server).
+
 -include("ai_utp.hrl").
 %% API
 -export([start_link/3]).
@@ -116,8 +117,8 @@ handle_cast({accept,Acceptor},
     SynLen > 0 -> accept_incoming(Acceptor,State);
     true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
   end;
-handle_cast({syn,Packet,Remote},State)->
-  pair_incoming(Packet,Remote,State);
+handle_cast({syn,Remote,Packet},State)->
+  pair_incoming(Remote,Packet,State);
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -191,11 +192,11 @@ accept_incoming(Acceptor,
   {Packet,Remote} = Req,
   case ai_utp_worker:accept(Worker, Remote, Packet) of
     ok ->
-      gen_server:reply(Acceptor, {ok,{ai_utp,Parent,Worker}}),
+      gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
     {error,exist}->
       ResetPacket = ai_utp_protocol:make_reset_packet(
-                      Packet#packet.conn_id,Packet#packet.seq_no),
+                      Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
       ai_utp_util:send(Socket, Remote, ResetPacket, 0),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
     Error ->
@@ -204,28 +205,28 @@ accept_incoming(Acceptor,
                  acceptors = queue:in(Acceptor,Acceptors),
                  syns = queue:in(Req,Syns0)},1000}
   end.
-pair_incoming(Packet,Remote,#state{
-                               socket = Socket,
-                               syn_len = SynLen,
-                               max_syn_len = MaxSynLen
-                              } = State) when SynLen >= MaxSynLen ->
+pair_incoming(Remote,Packet,
+              #state{socket = Socket,
+                     syn_len = SynLen,
+                     max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
   ResetPacket = ai_utp_protocol:make_reset_packet(
-                  Packet#packet.conn_id,Packet#packet.seq_no),
+                  Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
   ai_utp_util:send(Socket, Remote, ResetPacket, 0),
   {noreply,State};
-pair_incoming(Packet,Remote,#state{
-                               acceptors = Acceptors,
-                               syns = Syns
-                              } = State) ->
-  Syns0 = queue:filter(
-            fun({SYN,Remote0})->
-                if
-                  (Remote ==  Remote0) andalso
-                  (SYN#packet.conn_id == Packet#packet.conn_id) ->
-                    false;
-                  true -> true
-                end
-            end, Syns),
+
+pair_incoming(Remote,Packet,
+              #state{acceptors = Acceptors,
+                     syns = Syns} = State) ->
+  Syns0 =
+    queue:filter(
+      fun({SYN,Remote0})->
+          if
+            (Remote ==  Remote0) andalso
+            (SYN#utp_packet.conn_id == Packet#utp_packet.conn_id) ->
+              false;
+            true -> true
+          end
+      end, Syns),
   Syns1 = queue:in({Packet,Remote},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
@@ -233,8 +234,8 @@ pair_incoming(Packet,Remote,#state{
       {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
     true ->
       {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
-      accept_incoming(Acceptor, State#state{
-                                  syns = Syns1,
+      accept_incoming(Acceptor,
+                      State#state{syns = Syns1,
                                   syn_len = queue:len(Syns1),
                                   acceptors = Acceptors0
                                  })

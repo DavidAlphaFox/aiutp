@@ -10,18 +10,8 @@
 % ms, we can only decay the window at this time
 -define(MAX_WINDOW_DECAY, 100).
 
-% ms, perhaps we should run this in us
--define(CONGESTION_CONTROL_TARGET, 100).
-%% 每个来回最大可以增加3000 bytes的窗口
-% bytes
--define(MAX_CWND_INCREASE_BYTES_PER_RTT, 3000).
-%% 最小的传输窗口是3000 bytes 
-% bytes
--define(MIN_WINDOW_SIZE, 3000).
-
 %% The default RecvBuf size: 8K
 -define(OPT_RECV_BUF, 8192).
--define(REORDER_BUFFER_MAX_SIZE, 511).
 
 -define(OUTGOING_BUFFER_MAX_SIZE, 511).
 -define(PACKET_SIZE, 350).
@@ -256,7 +246,7 @@ has_inflight(#buffer { retrans_queue = [] }) -> false;
 has_inflight(#buffer { retrans_queue = [_|_] }) -> true.
 
 contains_fin([]) -> false;
-contains_fin([#packet_wrap {packet = #packet { type = st_fin }} | _]) ->
+contains_fin([#utp_packet_wrap {packet = #utp_packet { type = st_fin }} | _]) ->
     true;
 contains_fin([_ | R]) -> contains_fin(R).
 %% @doc Prune the retransmission queue for ACK'ed packets.
@@ -268,7 +258,7 @@ contains_fin([_ | R]) -> contains_fin(R).
 prune_acked(AckAhead, WindowStart,
             #buffer { retrans_queue = RQ } = Buffer) ->
   {AckedPs, NewRQ} =
-    lists:partition(fun(#packet_wrap{packet = #packet { seq_no = SeqNo } }) ->
+    lists:partition(fun(#utp_packet_wrap{packet = #utp_packet { seq_no = SeqNo } }) ->
                         Distance = ai_utp_util:bit16(SeqNo - WindowStart),
                         Distance =< AckAhead
                     end,RQ),
@@ -338,12 +328,12 @@ handle_estimate_exceed(#network { min_rtt = MinRtt,
   end.
 
 extract_rtt(Packets) ->
-  [TS || #packet_wrap { send_time = TS} = P <- Packets,
-         P#packet_wrap.transmissions == 1].
+  [TS || #utp_packet_wrap { send_time = TS} = P <- Packets,
+         P#utp_packet_wrap.transmissions == 1].
 
 extract_payload_size(Packets) ->
     lists:sum([byte_size(Pl) ||
-                #packet_wrap{ packet = #packet { payload = Pl } } <- Packets]).
+                #utp_packet_wrap{ packet = #utp_packet { payload = Pl } } <- Packets]).
 ack_packet_rtt(#network { round_trip = RTT,
                           min_rtt    = MinRTT,
                           rtt_ledbat = LedbatHistory } = NW,
@@ -435,7 +425,7 @@ update_network(Options,Network,ReplyMicro,TimeAcked,TSDiff,WindowSize,Acked)->
   Network4 = update_peer_window(Network3, WindowSize),
   update_window(Options,Network4, TimeAcked,Acked).
 
-recv_packet(#packet{seq_no = SeqNo,ack_no = AckNo,payload = Payload,
+recv_packet(#utp_packet{seq_no = SeqNo,ack_no = AckNo,payload = Payload,
                         win_sz = WindowSize,type = Type},
                 ReplyMicro,TimeAcked,TSDiff,
                #state{network = Network,buffer = Buffer,options = Opts} = State)->
@@ -492,7 +482,7 @@ send_packet(Socket,Remote,
       true -> ConnID
     end,
   ai_utp_util:send(Socket,Remote,
-       Packet#packet{conn_id = ConnID0,win_sz = WindowSize},TSDiff).
+       Packet#utp_packet{conn_id = ConnID0,win_sz = WindowSize},TSDiff).
 
 
 connected(#state{

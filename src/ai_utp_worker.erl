@@ -124,7 +124,7 @@ idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
       {next_state,syn_sent,Data0};
     _ -> {stop_and_reply,normal,[{reply,Caller,system_limit}]}
   end;
-idle({call,Caller},{accept,#packet{
+idle({call,Caller},{accept,#utp_packet{
                               conn_id = ConnID,
                               seq_no = SeqNo,
                               win_sz = WindowSize
@@ -143,12 +143,12 @@ idle({call,Caller},{accept,#packet{
       {stop_and_reply,normal,[{reply,Caller,Error}]}
   end;
 idle(info,Msg,Data) -> handle_info(Msg,Data).
-syn_sent(cast,{packet,#packet{type = st_reset},_},
+syn_sent(cast,{packet,#utp_packet{type = st_reset},_},
          #data{ connector = {Caller,_}} = Data)->
   Actions = [{reply,Caller,econnrefused}],
   {stop_and_reply,normal,Actions,
    Data#data{connector = undefined}};
-syn_sent(cast,{packet,#packet{
+syn_sent(cast,{packet,#utp_packet{
                          type = st_state,
                          win_sz = WindowSize,
                          seq_no = SeqNo},

@@ -39,15 +39,14 @@ connect(UTPSocket,Address,Port)->
   end.
 
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
-accept(UTPSocket)->
-  gen_server:call(UTPSocket,accept,infinity).
-incoming(Socket,#packet{type = Type} = Packet,Remote)->
+accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
+incoming(Socket,Remote,#utp_packet{type = Type} = Packet)->
   case Type of
     st_reset -> ok;
     st_syn ->
-      gen_server:cast(Socket,{syn,Packet,Remote});
+      gen_server:cast(Socket,{syn,Remote,Packet});
     _ ->
-      gen_server:cast(Socket,{reset,Packet,Remote})
+      gen_server:cast(Socket,{reset,Remote,Packet})
   end.
 %%--------------------------------------------------------------------
 %% @doc
@@ -133,12 +132,12 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({reset,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
+handle_cast({reset,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo}},
             #state{socket = Socket} = State)->
   reset(Socket, Remote, ConnID, SeqNo),
   {noreply,State};
 
-handle_cast({syn,#packet{conn_id = ConnID,seq_no = SeqNo},Remote},
+handle_cast({syn,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo}},
             #state{socket = Socket,acceptor = closed} = State)->
   reset(Socket,Remote,ConnID,SeqNo),
   {noreply,State};

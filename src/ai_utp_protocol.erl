@@ -20,7 +20,7 @@
 
 
 make_reset_packet(ConnID,AckNo)->
-  #packet{type = st_reset,
+  #utp_packet{type = st_reset,
           ack_no = AckNo,
           seq_no = ai_utp_util:bit16_random(),
           win_sz = 0,
@@ -28,22 +28,23 @@ make_reset_packet(ConnID,AckNo)->
           conn_id = ConnID
          }.
 make_syn_packet() ->
-  #packet { type = st_syn,
+  #utp_packet { type = st_syn,
             seq_no = 1,
             ack_no = 0,
             extension = ?SYN_EXTS
           }. % Rest are defaults
 
 make_ack_packet(SeqNo, AckNo) ->
-  #packet {type = st_state,
+  #utp_packet {type = st_state,
            seq_no = SeqNo,
            ack_no = AckNo,
            extension = ?SYN_EXTS
           }.
 
 
--spec decode(binary()) -> {ok, {packet(), timestamp(), timestamp(), timestamp()}}
-                              | {error, term()}.
+-spec decode(binary()) ->
+        {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
+        {error, term()}.
 decode(Packet) ->
   try
     P = decode_packet(Packet),
@@ -53,7 +54,7 @@ decode(Packet) ->
   end.
 
 -spec decode_packet(binary()) ->
-        {packet(),integer(),integer(),integer()}.
+        {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet) ->
   RecvTS = ai_utp_util:microsecond(),
 
@@ -69,7 +70,7 @@ decode_packet(Packet) ->
   Ty = decode_type(Type),
   ok = validate_packet_type(Ty, Payload),
 
-  {#packet{type = Ty,
+  {#utp_packet{type = Ty,
            conn_id = ConnectionId,
            win_sz = WindowSize,
            seq_no = SeqNo,
@@ -103,8 +104,8 @@ validate_packet_type(Ty, Payload) ->
   end.
 
 
--spec encode(packet(), integer()) -> binary().
-encode(#packet {type = Type,
+-spec encode(utp_packet(), integer()) -> binary().
+encode(#utp_packet {type = Type,
                 conn_id = ConnID,
                 win_sz = WSize,
                 seq_no = SeqNo,
