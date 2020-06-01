@@ -73,6 +73,8 @@
          %% once per packet. We can resend the packet with this sequence number
          %% or any later packet (with a higher sequence number).
          fast_resend_seq_nr = 1,
+         inbuf = <<>>,
+         reorder = [],
          inbuf = array:new([{size,16#FFFF},{fixed,true}]),
          outbuf = array:new([{size,16#FFFF},{fixed,true}]),
          reply_micro,
