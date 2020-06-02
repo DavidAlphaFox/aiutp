@@ -7,7 +7,7 @@
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
 -type conn_id() :: 0..16#FFFF.
--export_type([packet/0, conn_id/0]).
+-export_type([utp_packet/0, conn_id/0]).
 
 -define(EXT_SACK, 1).
 -define(EXT_BITS, 2).
