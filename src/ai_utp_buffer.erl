@@ -1,7 +1,7 @@
 -module(ai_utp_buffer).
 -include("ai_utp.hrl").
 
--export([in/3,ack_packet/3]).
+-export([in/3,ack_packet/3,sack/2]).
 
 %% 需要修改ack_nr
 %% ack_nr总是代表下一个需要进行ack的包
@@ -115,9 +115,40 @@ sack_packet(Bits,Pos,Warp,{Count,Acks,UnAcks})->
       {Count+1,[Warp|Acks],UnAcks};
      true ->
       if Count >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
-          {Count,Acks,
-           [Warp#utp_packet_wrap{need_resend = true}|UnAcks]};
+          {Count,Acks,[Warp|UnAcks]};
          true ->
           {Count,Acks,[Warp|UnAcks]}
       end
+  end.
+sack(_,#utp_net{reorder = []}) -> undefined;
+sack(Base,#utp_net{reorder = Reorder}) ->
+  sack(Base,Reorder,undefined,<<>>).
+
+
+sack(_,[],I,Bin)->
+  case I of
+    undefined -> Bin;
+    _-> <<Bin/binary,I/big-integer>>
+  end;
+sack(Base,[#utp_packet{seq_no = SeqNo}|T],I,Bin)->
+  Index = ai_utp_util:bit16(SeqNo - Base),
+  if Index >= ?REORDER_BUFFER_SIZE ->
+      sack(Base,[],I,Bin);
+     true ->
+      Size = erlang:byte_size(Bin),
+      IndexDiff = (Index bsr 3) - (Size - 1),
+      {Bin0,I0} =
+        if (IndexDiff > 1) andalso
+           (I == undefined)->
+            Offset = (IndexDiff - 1) * 8,
+            {<<Bin/bits,0:Offset>>,0};
+           IndexDiff > 1 ->
+            Offset = (IndexDiff - 2) * 8,
+            {<<Bin/bits,I/big-integer,0:Offset>>,0};
+           true ->
+            {Bin,I}
+        end,
+      Mask = 1 bsl (Index band 7),
+      I1 = Mask bor I0,
+      sack(Base,T,I1,Bin0)
   end.

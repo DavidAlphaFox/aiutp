@@ -40,8 +40,8 @@
 -record(utp_packet_wrap, {packet,
                           transmissions = 0,
                           payload = 0,
-                          send_time = 0,
-                          need_resend = false}).
+                          send_time = 0
+                         }).
 -record(utp_net,
         {%%sndbuf setting, in bytes
          opt_sndbuf = 0,
