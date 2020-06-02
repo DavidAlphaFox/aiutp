@@ -61,21 +61,29 @@ send(#utp_net{outbuf = OutBuf,max_peer_window = MaxPeerWindow,
   IsEmpty = queue:is_empty(OutBuf),
   if IsEmpty == true -> {Net,[]};
      true ->
-      case send(Timer,SeqNo,AckNo,MaxPeerWindow,queue:to_list(OutBuf)) of
+      case send(Timer,SeqNo,MaxPeerWindow,queue:to_list(OutBuf)) of
         error -> {Net#utp_net{state = {'ERROR',epipe}},[]};
         full -> {Net,[]};
         {Bytes,InFlight,Packets,OutBuf0} ->
+          WindowSize = window_size(Net),
+          Packets0 = lists:foldl(
+                       fun(Packet,Acc)->
+                           [Packet#utp_packet{
+                             win_sz = WindowSize,
+                             ack_no = AckNo
+                            }|Acc]
+                       end,[],Packets),
           {Net#utp_net{
              outbuf = queue:from_list(lists:reverse(OutBuf0)),
              cur_window = CurWindow + Bytes,
              cur_window_packets = CurWindowPackets + InFlight,
              seq_nr = SeqNR + InFlight
-            },Packets}
+            },Packets0}
       end
   end.
 
-send(_,_,_,0,_)-> full;
-send(Timer,SeqNo,AckNo,MaxPeerWindow,OutBuf)->
+send(_,_,0,_)-> full;
+send(Timer,SeqNo,MaxPeerWindow,OutBuf)->
   Now = ai_utp_util:microsecond(),
   lists:foldl(
     fun(WrapPacket,Acc) ->
@@ -93,20 +101,19 @@ send(Timer,SeqNo,AckNo,MaxPeerWindow,OutBuf)->
                true ->
                 %% 对方还有接收的窗口
                 if MaxPeerWindow - SendBytes >= Payload ->
-                    Packet0 = Packet#utp_packet{ack_no = AckNo},
                     Resend =
                       ai_utp_util:wrapping_compare_less(PacketSeqNo,
                                                         SeqNo, ?SEQ_NO_MASK),
                     if (Resend == true) orelse
                        (SeqNo == PacketSeqNo) ->
                         %% 重新传输的包不记入窗口
-                        {SendBytes,InFlight,[Packet0| Packets],
+                        {SendBytes,InFlight,[Packet| Packets],
                         [WrapPacket#utp_packet_wrap{
                            transmissions = Trans + 1,
                            send_time = Now
                           }|Buf]};
                        true ->
-                        {SendBytes + Payload,InFlight + 1,[Packet0| Packets],
+                        {SendBytes + Payload,InFlight + 1,[Packet| Packets],
                         [WrapPacket#utp_packet_wrap{
                            transmissions = Trans + 1,
                            send_time = Now
