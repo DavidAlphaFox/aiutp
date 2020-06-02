@@ -29,10 +29,20 @@ ack(Net,#utp_packet{ack_no = AckNo,
   {MinRTT,AckBytes} = ack_bytes(AckPackets,Now),
   ai_utp_cc:cc(Net1, TS, TSDiff, Now, MinRTT, AckBytes,WndSize).
 
+send_ack(Net#utp_net{ack_nr = AckNR,
+                    reorder = ReOrder})->
+
+send_ack(Net#utp_net{ack_nr = AckNR},
+         Net#utp_net{ack_nr = AckNR0} = Net1)->
+  if AckNR /= AckNR0 -> send_ack(Net1);
+     true -> []
+  end.
 process_incoming(#utp_net{state = State }= Net,
                  #utp_packet{type = Type} = Packet,
                  Timing) ->
-  process_incoming(Type,State,Net,Packet,Timing).
+  Net0 = process_incoming(Type,State,Net,Packet,Timing),
+  Transmit = send_ack(Net,Net0),
+
 
 process_incoming(st_data,'SYN_RECEIVED',
                  #utp_net{seq_nr = SeqNR,ack_nr = PeerSeqNo} = Net,

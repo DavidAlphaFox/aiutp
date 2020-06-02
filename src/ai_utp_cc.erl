@@ -88,7 +88,8 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,?MIN_WINDOW_SIZE,OptSndBuf),
   Net#utp_net{max_window = LedbatCwnd}.
 
-cc(Net,TS,TSDiff,Now,MinRTT,AckBytes,WndSize)->
+cc(#utp_net{cur_window = CurWindow} = Net,
+   TS,TSDiff,Now,MinRTT,AckBytes,WndSize)->
   TSDiff0 = ai_utp_util:bit32(TSDiff),
   ActualDelay =
     if TSDiff0 == ?TS_DIFF_MAX -> 0;
@@ -102,4 +103,10 @@ cc(Net,TS,TSDiff,Now,MinRTT,AckBytes,WndSize)->
         congestion_control(Net2,AckBytes,Now / 1000,MinRTT);
        true -> Net2
     end,
-  Net3#utp_net{max_peer_window = WndSize}.
+  CurWindow0 = CurWindow - AckBytes,
+  CurWindow1 =
+    if CurWindow0 >= 0 -> CurWindow0;
+       true -> 0
+    end,
+  Net3#utp_net{max_peer_window = WndSize,
+               cur_window = CurWindow1 }.
