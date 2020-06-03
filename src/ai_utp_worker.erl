@@ -4,214 +4,250 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created :  8 May 2020 by David Gao <david.alpha.fox@gmail.com>
+%%% Created :  3 Jun 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
 -module(ai_utp_worker).
--behaviour(gen_statem).
+-behaviour(gen_server).
+
 -include("ai_utp.hrl").
 
 %% API
 -export([start_link/2]).
 
-%% gen_statem callbacks
--export([callback_mode/0, init/1, terminate/3, code_change/4]).
--export([idle/3,syn_sent/3]).
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3, format_status/2]).
 
--export([incoming/3,connect/3,accept/3,connected/3]).
+-export([connect/4,accept/4,incoming/3]).
 
 -define(SERVER, ?MODULE).
-
 -define(SYN_TIMEOUT, 3000).
 -define(SYN_TIMEOUT_THRESHOLD, ?SYN_TIMEOUT*2).
 
--record(data, {
-               parent :: pid(),
-               socket :: port(),
-               monitor :: reference(),
-               remote,
-               conn_id,
-               stream,
-               retransmit_timer,
-               connector
-              }).
+-record(state, {
+                parent :: pid(),
+                socket :: port(),
+                parent_monitor :: reference(),
+                controller :: pid(),
+                controller_monitor :: reference(),
+                remote :: tuple(),
+                net,
+                rto_timer :: reference(),
+                connector,
+                conn_id
+               }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-connect(Pid,Address,Port)->
-  gen_statem:call(Pid, {connect,Address,Port}).
-accept(Pid,Remote,Packet)->
-  gen_statem:call(Pid,{accept,Packet,Remote}).
+connect(Pid,Caller,Address,Port)->
+  gen_server:call(Pid, {connect,Caller,{Address,Port}},infinity).
+accept(Pid,Caller,Remote,Packet)->
+  gen_server:call(Pid,{accept,Caller,Remote,Packet},infinity).
 incoming(Pid,Packet,Timing)->
-  gen_statem:cast(Pid,{packet,Packet,Timing}).
-  
+  gen_server:cast(Pid,{packet,Packet,Timing}).
+
 %%--------------------------------------------------------------------
 %% @doc
-%% Creates a gen_statem process which calls Module:init/1 to
-%% initialize. To ensure a synchronized start-up procedure, this
-%% function does not return until Module:init/1 has returned.
-%%
+%% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(),port()) ->
-        {ok, Pid :: pid()} |
-        ignore |
-        {error, Error :: term()}.
+-spec start_link(pid(),port()) -> {ok, Pid :: pid()} |
+        {error, Error :: {already_started, pid()}} |
+        {error, Error :: term()} |
+        ignore.
 start_link(Parent,Socket) ->
-  gen_statem:start_link(?MODULE, [Parent,Socket], []).
+  gen_server:start_link(?MODULE, [Parent,Socket], []).
 
 %%%===================================================================
-%%% gen_statem callbacks
+%%% gen_server callbacks
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Define the callback_mode() for this callback module.
+%% Initializes the server
 %% @end
 %%--------------------------------------------------------------------
--spec callback_mode() -> gen_statem:callback_mode_result().
-callback_mode() -> state_functions.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_statem is started using gen_statem:start/[3,4] or
-%% gen_statem:start_link/[3,4], this function is called by the new
-%% process to initialize.
-%% @end
-%%--------------------------------------------------------------------
--spec init(Args :: term()) ->
-        gen_statem:init_result(atom()).
+-spec init(Args :: term()) -> {ok, State :: term()} |
+        {ok, State :: term(), Timeout :: timeout()} |
+        {ok, State :: term(), hibernate} |
+        {stop, Reason :: term()} |
+        ignore.
 init([Parent,Socket]) ->
-  Monitor = erlang:monitor(process, Parent),
-  {ok, idle, #data{
-                parent = Parent,
-                socket = Socket,
-                monitor = Monitor
-               }}.
+  ParentMonitor = erlang:monitor(process,Parent),
+  {ok, #state{
+          parent = Parent,
+          socket = Socket,
+          parent_monitor = ParentMonitor,
+          net = #utp_net{}
+         }}.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% There should be one function like this for each state name.
-%% Whenever a gen_statem receives an event, the function
-%% with the name of the current state (StateName)
-%% is called to handle the event.
+%% Handling call messages
 %% @end
 %%--------------------------------------------------------------------
--spec idle('enter',
-                 OldState :: atom(),
-                 Data :: term()) ->
-        gen_statem:state_enter_result('state_name');
-                (gen_statem:event_type(),
-                 Msg :: term(),
-                 Data :: term()) ->
-        gen_statem:event_handler_result(atom()).
-idle({call,Caller}, {connect,Address,Port}, #data{socket = Socket } = Data) ->
-  case register_conn({Address,Port}) of
-    {ok,ConnID}->
-      Remote = {Address,Port},
-      Stream = ai_utp_stream:new(ConnID + 1,2),
-      Packet = ai_utp_protocol:make_syn_packet(),
-      {ok,_} = ai_utp_stream:send_packet(Socket, Remote,
-                                         Packet, ConnID, Stream),
-      Data0 = Data#data{remote = Remote,
-                        conn_id = ConnID,
-                        stream = Stream,
-                        retransmit_timer = set_retransmit_timer(?SYN_TIMEOUT, undefined),
-                        connector = {Caller,[]}},
-      {next_state,syn_sent,Data0};
-    _ -> {stop_and_reply,normal,[{reply,Caller,system_limit}]}
+-spec handle_call(Request :: term(), From :: {pid(), term()}, State :: term()) ->
+        {reply, Reply :: term(), NewState :: term()} |
+        {reply, Reply :: term(), NewState :: term(), Timeout :: timeout()} |
+        {reply, Reply :: term(), NewState :: term(), hibernate} |
+        {noreply, NewState :: term()} |
+        {noreply, NewState :: term(), Timeout :: timeout()} |
+        {noreply, NewState :: term(), hibernate} |
+        {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+        {stop, Reason :: term(), NewState :: term()}.
+handle_call({connect,Control,Remote},From,
+            #state{net = Net,socket = Socket} = State)->
+  case register_conn(Remote) of
+    {ok,ConnID} ->
+      {Net0,Packet} = ai_utp_net:connect(ConnID, Net),
+      ai_utp_util:send(Socket, Remote, Packet, 0),
+      {noreply,State#state{
+                 remote = Remote,
+                 controller = Control,
+                 controller_monitor = erlang:monitor(process,Control),
+                 connector = From,
+                 net = Net0,
+                 conn_id = ConnID,
+                 rto_timer = start_rto_timer(?SYN_TIMEOUT, undefined)
+                }};
+    _ -> {reply,{error,eagain},0}
   end;
-idle({call,Caller},{accept,#utp_packet{
-                              conn_id = ConnID,
-                              seq_no = SeqNo,
-                              win_sz = WindowSize
-                             },Remote},#data{socket = Socket} = Data)->
-  case ai_utp_conn:alloc(Remote, ai_utp_util:bit16(ConnID + 1)) of
+handle_call({accept,Control, Remote, Packet},_From,
+           #state{net = Net,socket = Socket} = State)->
+  {Net0,SynPacket,ConnID} = ai_utp_net:accept(Packet, Net),
+  case ai_utp_conn:alloc(Remote, ConnID) of
     ok ->
-      OurSeqNo = ai_utp_util:bit16_random(),
-      Stream = ai_utp_stream:new(ConnID,OurSeqNo + 1),
-      Stream0 = ai_utp_stream:connected(Stream,WindowSize,SeqNo + 1,
-                                        undefined,undefined),
-      Packet = ai_utp_protocol:make_ack_packet(OurSeqNo, SeqNo),
-      ai_utp_stream:send_packet(Socket, Remote, Packet, Stream0),
-      {next_state,connected,
-       Data#data{stream = Stream0,remote = Remote},[{reply,Caller,ok}]};
-    Error ->
-      {stop_and_reply,normal,[{reply,Caller,Error}]}
-  end;
-idle(info,Msg,Data) -> handle_info(Msg,Data).
-syn_sent(cast,{packet,#utp_packet{type = st_reset},_},
-         #data{ connector = {Caller,_}} = Data)->
-  Actions = [{reply,Caller,econnrefused}],
-  {stop_and_reply,normal,Actions,
-   Data#data{connector = undefined}};
-syn_sent(cast,{packet,#utp_packet{
-                         type = st_state,
-                         win_sz = WindowSize,
-                         seq_no = SeqNo},
-               {TS,TSDiff,RecvTime}},
-         #data{
-            stream = Stream,
-            retransmit_timer = RTimer,
-            connector = {Caller,Packets}
-           } = Data)->
-  ReplyMicro = ai_utp_util:bit32(TS - RecvTime),
-  AckNo = ai_utp_util:bit16(SeqNo + 1),
-  Stream0 = ai_utp_stream:connected(Stream,WindowSize,AckNo,
-                                    ReplyMicro,TSDiff),
-  Self = self(),
-  [incoming(Self, P, T) || {packet, P, T} <- lists:reverse(Packets)],
-  {next_state,connected,
-   Data#data{
-     stream = Stream0,
-     retransmit_timer = clear_retransmit_timer(RTimer),
-     connector = undefined},[{reply,Caller,ok}]};
-syn_sent(cast,{packet,_,_} = Packet,
-         #data{ connector = {Caller,Packets} } =Data )->
-  {keep_state,Data#data{connector = {Caller,[Packet|Packets]}}};
-syn_sent(info,{timeout, TRef,{retransmit_timeout,N}},
-         #data{socket = Socket,
-               remote = Remote,
-               conn_id = ConnID,
-               retransmit_timer = {set,TRef},
-               stream = Stream,
-               connector = {Caller,_}
-              } = Data)->
-  if
-    N > ?SYN_TIMEOUT_THRESHOLD ->
-      Actions = [{reply,Caller,etimeout}],
-      {stop_and_reply,normal,
-       Actions,Data#data{connector = undefined}};
-    true ->
-      Packet = ai_utp_protocol:make_syn_packet(),
-      {ok,_} = ai_utp_stream:send_packet(Socket, Remote,
-                                         Packet, ConnID, Stream),
-      {keep_state,Data#data{
-                    retransmit_timer = set_retransmit_timer(N*2, undefined)
-                   }}
-  end;
-syn_sent(info,Msg,Data) -> handle_info(Msg,Data).
-connected(_Type,_Msg,Data)-> {keep_state,Data}.
-
+      ai_utp_util:send(Socket,Remote,SynPacket,0),
+      {reply,ok,State#state{
+                  net = Net0,controller = Control,
+                  controller_monitor = erlang:monitor(process,Control),
+                  conn_id = ConnID
+                 }};
+    Error -> {reply,Error,State#state{net = Net0}}
+  end.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_statem when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_statem terminates with
-%% Reason. The return value is ignored.
+%% Handling cast messages
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(Reason :: term(), State :: term(), Data :: term()) ->
-        any().
-terminate(_Reason, _State, #data{monitor = undefined}) -> void;
-terminate(_Reason, _State, #data{monitor = MRef}) ->
-  erlang:demonitor(MRef,[flush]),
-  void.
+-spec handle_cast(Request :: term(), State :: term()) ->
+        {noreply, NewState :: term()} |
+        {noreply, NewState :: term(), Timeout :: timeout()} |
+        {noreply, NewState :: term(), hibernate} |
+        {stop, Reason :: term(), NewState :: term()}.
+handle_cast({packet,Packet,Timing},#state{
+                                      net = Net,
+                                      socket = Socket,
+                                      remote = Remote,
+                                      connector = Connector
+                                      } = State)->
+  {Net0,Packets,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
+  case ai_utp_net:state(Net0) of
+    {'ERROR',Reason} ->
+      if Connector == undefined ->
+          handle_info(timeout, State#state{net = Net0});
+         true ->
+          gen_server:reply(Connector, {error,Reason}),
+          handle_info(timeout,State#state{connector = undefined,
+                                         controller = undefined})
+      end;
+    NetState ->
+      lists:foreach(
+        fun(P)-> ai_utp_util:send(Socket, Remote, P, TSDiff) end,
+        Packets),
+      if NetState == 'CLOSED' ->
+          handle_info(timeout, State#state{net = Net0});
+         true ->
+          {noreply,State#state{net = Net0}}
+      end
+  end.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling all non call/cast messages
+%% @end
+%%--------------------------------------------------------------------
+-spec handle_info(Info :: timeout() | term(), State :: term()) ->
+        {noreply, NewState :: term()} |
+        {noreply, NewState :: term(), Timeout :: timeout()} |
+        {noreply, NewState :: term(), hibernate} |
+        {stop, Reason :: normal | term(), NewState :: term()}.
+handle_info(timeout,#state{parent_monitor = ParentMonitor,
+                           rto_timer = Timer,
+                           conn_id = ConnID,
+                           remote = Remote,
+                           controller_monitor = CMonitor} =  State)->
+  if ParentMonitor /= undefined ->
+      erlang:demonitor(ParentMonitor,[flush]);
+     true -> ok
+  end,
+  if CMonitor /= undefined ->
+      erlang:demonitor(ParentMonitor,[flush]);
+     true -> ok
+  end,
+  cancle_rto_timer(Timer),
+  ai_utp_conn:free(Remote, ConnID),
+  {stop,normal,State#state{parent_monitor = undefined,
+                           controller_monitor = undefined}};
+handle_info({timeout,TRef,{rto,N}},
+            #state{net = Net,rto_timer = {set,TRef}} = State)->
+  NetState = ai_utp_net:state(Net),
+  rto_timer(NetState,N,State);
+
+handle_info({'DOWN', MRef, process, Parent, _Reason},
+            #state{parent = Parent,
+                   parent_monitor = MRef,
+                   controller_monitor = CMonitor,
+                   connector = Connector
+                  } = State)->
+  if CMonitor == undefined -> State;
+     true -> erlang:demonitor(CMonitor,[flush])
+  end,
+  State0 =
+    if Connector == undefined -> State;
+       true ->
+        gen_server:reply(Connector, {error,eagain}),
+        State#state{connector = undefined,controller = undefined}
+    end,
+  {noreply,State0#state{parent_monitor = undefined,
+                        controller_monitor = undefined},0};
+handle_info({'DOWN', MRef, process, Control, _Reason},
+            #state{controller = Control,
+                   controller_monitor = MRef
+                  } = State)->
+  {noreply,State#state{controller = undefined,
+                       controller_monitor = undefined},0};
+handle_info(_Info, State) ->
+  {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_server terminates
+%% with Reason. The return value is ignored.
+%% @end
+%%--------------------------------------------------------------------
+-spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
+                State :: term()) -> any().
+terminate(_Reason, #state{controller = undefined})-> ok;
+terminate(_Reason, #state{controller = Control,
+                          parent = Parent,net = Net}) ->
+  Self = self(),
+  UTPSocket = {utp,Parent,Self},
+  case ai_utp_net:state(Net) of
+    {'Error',Reason} -> Control ! {utp_error,UTPSocket,Reason};
+    'CLOSED' -> Control ! {utp_close,UTPSocket};
+    _ -> Control ! {utp_error,UTPSocket,econnaborted}
+  end,
+  ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -219,25 +255,29 @@ terminate(_Reason, _State, #data{monitor = MRef}) ->
 %% Convert process state when code is changed
 %% @end
 %%--------------------------------------------------------------------
--spec code_change(
-        OldVsn :: term() | {down,term()},
-        State :: term(), Data :: term(), Extra :: term()) ->
-        {ok, NewState :: term(), NewData :: term()} |
-        (Reason :: term()).
-code_change(_OldVsn, State, Data, _Extra) ->
-  {ok, State, Data}.
+-spec code_change(OldVsn :: term() | {down, term()},
+                  State :: term(),
+                  Extra :: term()) -> {ok, NewState :: term()} |
+        {error, Reason :: term()}.
+code_change(_OldVsn, State, _Extra) ->
+  {ok, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called for changing the form and appearance
+%% of gen_server status when it is returned from sys:get_status/1,2
+%% or when it appears in termination error logs.
+%% @end
+%%--------------------------------------------------------------------
+-spec format_status(Opt :: normal | terminate,
+                    Status :: list()) -> Status :: term().
+format_status(_Opt, Status) ->
+  Status.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-handle_info({'DOWN', MRef, process, Parent, _Reason},
-            #data{parent = Parent,monitor = MRef})->
-  {stop,shutdown,#data{}};
-handle_info(Info,Data) ->
-  error_logger:info_report({error,unknown,Info}),
-  {keep_state,Data}.
-
-
 register_conn(Remote)-> register_conn(Remote,3).
 register_conn(_,0)-> {error,exist};
 register_conn(Remote,N)->
@@ -248,16 +288,42 @@ register_conn(Remote,N)->
   end.
 
 
-set_retransmit_timer(N, Timer) ->
-  set_retransmit_timer(N, N, Timer).
-set_retransmit_timer(N, K, undefined) ->
-  Ref = erlang:start_timer(N, self(),{retransmit_timeout,K}),
+start_rto_timer(N, Timer) ->
+  set_rto_timer(N, N, Timer).
+set_rto_timer(N, K, undefined) ->
+  Ref = erlang:start_timer(N, self(),{rto,K}),
   {set, Ref};
-set_retransmit_timer(N, K, {set, Ref}) ->
+set_rto_timer(N, K, {set, Ref}) ->
   erlang:cancel_timer(Ref),
-  NewRef = erlang:start_timer(N, self(),{retransmit_timeout,K}),
+  NewRef = erlang:start_timer(N, self(),{rto,K}),
   {set, NewRef}.
-clear_retransmit_timer(undefined) ->undefined;
-clear_retransmit_timer({set, Ref}) ->
+cancle_rto_timer(undefined) -> undefined;
+cancle_rto_timer({set,Ref}) ->
   erlang:cancel_timer(Ref),
   undefined.
+
+rto_timer('SYN_SENT',N,
+          #state{ socket = Socket,
+                  remote = Remote,
+                  conn_id = ConnID,
+                  net = Net,
+                  connector = Connector,
+                  controller_monitor = CMonitor
+            } = State)->
+  if N > ?SYN_TIMEOUT_THRESHOLD ->
+      erlang:demonitor(CMonitor,[flush]),
+      gen_server:reply(Connector, {error,etimeout}),
+      {noreply,State#state{
+                 controller_monitor = undefined,
+                 controller = undefined,
+                 connector = undefined,
+                 rto_timer = undefined
+                },0};
+     true ->
+      {Net0,Packet} = ai_utp_net:connect(ConnID, Net),
+      ok = ai_utp_util:send(Socket, Remote, Packet, 0),
+      {noreply,State#state{
+                 net = Net0,
+                 rto_timer = start_rto_timer(N *2, undefined)
+                }}
+  end.

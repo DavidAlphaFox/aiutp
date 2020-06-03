@@ -33,8 +33,9 @@ connect(UTPSocket,Address,Port)->
   {ok,Socket} = gen_server:call(UTPSocket,socket),
   {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket),
   Address0 = ai_utp_util:getaddr(Address),
-  case ai_utp_worker:connect(Worker, Address0, Port) of
-    ok -> {ok,{ai_utp,UTPSocket,Worker}};
+  Caller = self(),
+  case ai_utp_worker:connect(Worker,Caller,Address0, Port) of
+    ok -> {ok,{utp,UTPSocket,Worker}};
     Error -> Error
   end.
 

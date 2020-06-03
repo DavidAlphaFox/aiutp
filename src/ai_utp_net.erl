@@ -2,6 +2,8 @@
 -include("ai_utp.hrl").
 
 -export([process_incoming/3]).
+-export([connect/2,accept/2]).
+-export([state/1]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -166,4 +168,37 @@ process_incoming(st_state,'SYN_SENT',
                          ack_nr = SeqNo},
       ack(Net1,Packet,Timing);
      true -> Net
-  end.
+  end;
+process_incoming(st_reset,_,Net,_,_) ->
+  Net#utp_net{state = {'ERROR',econnrefused}}.
+
+connect(ConnID,#utp_net{max_window = MaxWindow} = Net)->
+  Packet = ai_utp_protocol:make_syn_packet(),
+  {Net#utp_net{
+     conn_id = ConnID,
+     peer_conn_id = ai_utp_util:bit16(ConnID + 1),
+     seq_nr = 2,
+     state = 'SYN_SENT'
+    },Packet#utp_packet{conn_id = ConnID,
+                        win_sz = MaxWindow}}.
+accept(#utp_packet{
+          conn_id = PeerConnID,
+          seq_no = AckNo,
+          win_sz = PeerWinSize
+         },#utp_net{
+              max_window = MaxWindow
+             } = Net)->
+  SeqNo = ai_utp_util:bit16_random(),
+  Packet = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
+  ConnID = ai_utp_util:bit16(PeerConnID + 1),
+  {Net#utp_net{
+     max_peer_window = PeerWinSize,
+     conn_id = ConnID,
+     peer_conn_id = PeerConnID,
+     ack_nr = ai_utp_util:bit16(AckNo + 1),
+     seq_nr = ai_utp_util:bit16(SeqNo + 1),
+     state  ='SYN_RECEIVED'
+    },
+   Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
+   ConnID}.
+state(#utp_net{state = State})-> State.

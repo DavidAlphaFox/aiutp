@@ -44,7 +44,7 @@ send_aux(0,Socket,Remote,Payload)->
   gen_udp:send(Socket,Remote,Payload);
 send_aux(N,Socket,Remote,Payload) ->
   case gen_udp:send(Socket,Remote,Payload) of
-    ok -> {ok,ai_utp_util:microsecond()};
+    ok -> ok;
     {error,enobufs}->
       timer:sleep(150), % Wait a bit for the queue to clear
       send_aux(N-1, Socket, Remote, Payload);

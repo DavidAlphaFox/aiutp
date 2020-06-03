@@ -44,12 +44,10 @@
                          }).
 -record(utp_net,
         {%%sndbuf setting, in bytes
-         opt_sndbuf = 0,
+         opt_sndbuf = ?OPT_SEND_BUF,
          %%rcvbuf setting, in bytes
-         opt_rcvbuf = 0,
-         state,
-         retransmit_count = 0,
-         reorder_count = 0,
+         opt_rcvbuf = ?OPT_RECV_BUF,
+         state = 'IDLE',
          %% the number of packets in the send queue. Packets that haven't
          %% yet been sent count as well as packets marked as needing resend
          %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
@@ -91,5 +89,6 @@
          got_fin = false,
          eof_seq_no = -1,
          fast_timeout = false,
-         duplicate_ack = 0
+         conn_id,
+         peer_conn_id
         }).

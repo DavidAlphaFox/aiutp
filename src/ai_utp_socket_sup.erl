@@ -25,7 +25,7 @@
 open(Port)-> open(Port,[]).
 open(Port,Options)->
   {ok,UTPSocket} = supervisor:start_child(?SERVER, [Port,Options]),
-  {ok,{ai_utp,UTPSocket}}.
+  {ok,{utp,UTPSocket}}.
 
 %%--------------------------------------------------------------------
 %% @doc
