@@ -103,6 +103,7 @@ handle_call({connect,Control,Remote},From,
   case register_conn(Remote) of
     {ok,ConnID} ->
       {Net0,Packet} = ai_utp_net:connect(ConnID, Net),
+      io:format("~p~n",[Packet]),
       ai_utp_util:send(Socket, Remote, Packet, 0),
       {noreply,State#state{
                  remote = Remote,
@@ -140,22 +141,15 @@ handle_call({accept,Control, Remote, Packet},_From,
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({packet,Packet,Timing},#state{
-                                      net = Net,
-                                      socket = Socket,
-                                      remote = Remote,
-                                      connector = Connector
-                                      } = State)->
+handle_cast({packet,Packet,Timing},
+            #state{net = Net,socket = Socket,
+                   remote = Remote, connector = undefined,
+                   rto_timer = Timer} = State)->
+  cancle_rto_timer(Timer),
   {Net0,Packets,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   case ai_utp_net:state(Net0) of
-    {'ERROR',Reason} ->
-      if Connector == undefined ->
-          handle_info(timeout, State#state{net = Net0});
-         true ->
-          gen_server:reply(Connector, {error,Reason}),
-          handle_info(timeout,State#state{connector = undefined,
-                                         controller = undefined})
-      end;
+    {'ERROR',_} ->
+      handle_info(timeout, State#state{net = Net0});
     NetState ->
       lists:foreach(
         fun(P)-> ai_utp_util:send(Socket, Remote, P, TSDiff) end,
@@ -165,6 +159,32 @@ handle_cast({packet,Packet,Timing},#state{
          true ->
           {noreply,State#state{net = Net0}}
       end
+  end;
+
+handle_cast({packet,Packet,Timing},
+            #state{net = Net,socket = Socket,
+                   remote = Remote,connector = Connector,
+                   rto_timer = Timer} = State)->
+  cancle_rto_timer(Timer),
+  {Net0,Packets,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
+  case ai_utp_net:state(Net0) of
+    {'ERROR',Reason} ->
+      gen_server:reply(Connector, {error,Reason}),
+      handle_info(timeout,State#state{connector = undefined,
+                                      controller = undefined,
+                                      rto_timer = undefined});
+    'ESTABLISHED' ->
+      lists:foreach(
+        fun(P)-> ai_utp_util:send(Socket, Remote, P, TSDiff) end,
+        Packets),
+      gen_server:reply(Connector, ok),
+      {noreply,State#state{net = Net0,connector = undefined,
+                           rto_timer = undefined}};
+    _ ->
+      gen_server:reply(Connector, {error,econnaborted}),
+      handle_info(timeout,State#state{connector = undefined,
+                                      controller = undefined,
+                                      rto_timer = undefined})
   end.
 
 %%--------------------------------------------------------------------

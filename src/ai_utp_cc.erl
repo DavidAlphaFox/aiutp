@@ -48,11 +48,14 @@ update_our_ledbat(#utp_net{ our_ledbat = Ledbat } = Net, Sample) ->
 %% if the delay estimate exceeds the RTT, adjust the base_delay to
 %% compensate
 update_estimate_exceed(#utp_net{our_ledbat = Ours} = NW,MinRTT) ->
-  OurDelay = ai_utp_ledbat:get_value(Ours),
-  Diff = OurDelay - MinRTT,
-  if
-    Diff > 0 -> NW#utp_net{our_ledbat = ai_utp_ledbat:shift(Ours, Diff) };
-    true-> NW
+  case ai_utp_ledbat:get_value(Ours) of
+    undefined -> NW;
+    OurDelay ->
+      Diff = OurDelay - MinRTT,
+      if
+        Diff > 0 -> NW#utp_net{our_ledbat = ai_utp_ledbat:shift(Ours, Diff) };
+        true-> NW
+      end
   end.
 
 congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,

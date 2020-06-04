@@ -36,7 +36,7 @@ ack(Net,#utp_packet{ack_no = AckNo,
   {MinRTT,AckBytes} = ack_bytes(AckPackets,Now),
   ai_utp_cc:cc(Net1, TS, TSDiff, Now, MinRTT, AckBytes,WndSize).
 
-send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR} = Net)->
+send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,peer_conn_id = PeerConnID} = Net)->
   Bits = ai_utp_buffer:sack(AckNR + 1,Net),
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
@@ -45,13 +45,14 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR} = Net)->
       undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
       _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
     end,
-  Packet#utp_packet{win_sz = window_size(Net)}.
+  Packet#utp_packet{win_sz = window_size(Net),
+                    conn_id = PeerConnID}.
 
 send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
          #utp_net{ack_nr = AckNR0,reorder = Reorder0} = Net1)->
   if (AckNR /= AckNR0) orelse
      (Reorder /= Reorder0) -> send_ack(Net1);
-     true -> undefined
+     true -> none
   end.
 
 send(#utp_net{outbuf = OutBuf,max_peer_window = MaxPeerWindow,
@@ -134,9 +135,16 @@ process_incoming(#utp_net{state = State }= Net,
                  #utp_packet{type = Type} = Packet,
                  Timing) ->
   Net0 = process_incoming(Type,State,Net,Packet,Timing),
-  AckPacket = send_ack(Net,Net0),
+  AckPacket =
+    if Type == st_data -> send_ack(Net,Net0);
+       true -> none
+    end,
   {Net1,Packets} = send(Net0,false),
-  {Net1,[AckPacket|Packets],Net1#utp_net.reply_micro}.
+  Packets0 =
+    if AckPacket == none -> Packets;
+       true -> [AckPacket|Packets]
+    end,
+  {Net1,Packets0,Net1#utp_net.reply_micro}.
 
 
 process_incoming(st_data,'SYN_RECEIVED',

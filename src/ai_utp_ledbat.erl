@@ -116,6 +116,7 @@ clock_tick(#ai_utp_ledbat{
 %% @end
 base_delay(#ai_utp_ledbat{ delay_base = DB}) ->DB.
 
+get_value(none)-> undefined;
 %% @doc Get out the current estimate.
 %% @end
 get_value(#ai_utp_ledbat { cur_delay_history = DelayQ }) ->
