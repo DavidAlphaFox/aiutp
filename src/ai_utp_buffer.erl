@@ -21,10 +21,17 @@ in(SeqNo,Payload,
   Net0 = recv(State,Payload,Net),
   recv_reorder(Net0#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)});
 in(SeqNo,Payload,
-   #utp_net { reorder = OD } = Net) ->
+   #utp_net { reorder = OD,ack_nr = AckNR } = Net) ->
   case orddict:is_key(SeqNo, OD) of
     true -> duplicate;
-    false -> {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
+    false ->
+      Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
+      Distance = ai_utp_util:bit16(AckNR - 1 - SeqNo),
+      if (Less == true) andalso (Distance =< ?REORDER_BUFFER_SIZE) ->
+          duplicate;
+         true ->
+          {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
+      end
   end.
 
 recv(?ESTABLISHED,<<>>,Net) -> Net;

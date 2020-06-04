@@ -19,7 +19,7 @@
          terminate/2, code_change/3, format_status/2]).
 
 -export([connect/4,accept/5,incoming/3,
-         send/2,recv/2]).
+         send/2,recv/2,active/2]).
 
 -define(SERVER, ?MODULE).
 -define(SYN_TIMEOUT, 3000).
@@ -36,7 +36,8 @@
                 rto_timer :: reference(),
                 connector,
                 conn_id,
-                process
+                process,
+                active = false
                }).
 
 %%%===================================================================
@@ -50,7 +51,8 @@ send(Pid,Data)->
   gen_server:call(Pid,{send,Data},infinity).
 recv(Pid,Len)->
   gen_server:call(Pid,{recv,Len},infinity).
-
+active(Pid,V)->
+  gen_server:call(Pid,{active,V}).
 incoming(Pid,Packet,Timing)->
   gen_server:cast(Pid,{packet,Packet,Timing}).
 
@@ -142,11 +144,24 @@ handle_call({accept,Control, Remote, Packet,Timing},From,
   end;
 handle_call({send,Data},From,
             #state{socket = Socket,remote = Remote,
+                   rto_timer = RTOTimer,
                    process = Proc,net = Net} = State)->
   Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
   {{Net0,Packets,TS,TSDiff},Proc1} = ai_utp_net:do_send(Net, Proc0),
   send(Socket,Remote,Packets,TS,TSDiff),
-  {noreply,State#state{net = Net0,process = Proc1}}.
+  NewRTOTimer =
+    if erlang:length(Packets) > 0 ->
+        RTO = ai_utp_net:rto(Net0),
+        start_rto_timer(RTO, RTOTimer);
+       true -> RTOTimer
+    end,
+  {noreply,State#state{net = Net0,process = Proc1,
+                       rto_timer = NewRTOTimer}};
+handle_call({active,true},_From,State) ->
+
+  NewState = active_read(State#state{active = true}),
+  {reply,ok,NewState}.
+
 
 
 
@@ -162,38 +177,32 @@ handle_call({send,Data},From,
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
+
+
 %% 已经链接了
 handle_cast({packet,Packet,Timing},
             #state{net = Net,socket = Socket,
                    remote = Remote, connector = undefined,
                    rto_timer = Timer} = State)->
   cancle_rto_timer(Timer),
-  io:format("~p~n",[Packet]),
   {Net0,Packets,TS,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   case ai_utp_net:state(Net0) of
     {'ERROR',_} -> handle_info(timeout, State#state{net = Net0});
     NetState ->
-      Packets0 =
-        case Packets of
-          {P,_} -> P;
-          R -> R
-        end,
-      send(Socket,Remote,Packets0,TS,TSDiff),
-      io:format("Send: ~p~n",[Packets]),
+      send(Socket,Remote,Packets,TS,TSDiff),
       if NetState == ?CLOSED ->
           handle_info(timeout, State#state{net = Net0,rto_timer = undefined});
          true ->
-          RTO = ai_utp_net:rto(Net0),
           RTOTimer =
-            case Packets of
-              {P0,ack} when erlang:length(P0) > 1 ->
+            if erlang:length(Packets) > 0 ->
+                %% 发送队列为空的时候，
+                %% RTO是undefined
+                RTO = ai_utp_net:rto(Net0),
                 start_rto_timer(RTO, undefined);
-              {_,ack} -> undefined;
-              P0 when erlang:length(P0) > 0 ->
-                start_rto_timer(RTO, undefined);
-              _ -> undefined
+               true -> undefined
             end,
-          {noreply,State#state{net = Net0,rto_timer = RTOTimer}}
+          {noreply,
+           active_read(State#state{net = Net0,rto_timer = RTOTimer})}
       end
   end;
 %% 正在进行链接
@@ -289,7 +298,9 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(_Reason, #state{controller = undefined})-> ok;
+terminate(Reason, #state{controller = undefined})->
+  io:format("~p~n",[Reason]),
+  ok;
 terminate(_Reason, #state{controller = Control,
                           parent = Parent,net = Net}) ->
   Self = self(),
@@ -341,20 +352,26 @@ register_conn(Remote,N)->
 
 
 start_rto_timer(N, Timer) ->
-  set_rto_timer(N, N, Timer).
-set_rto_timer(N, K, undefined) ->
-  Ref = erlang:start_timer(N, self(),{rto,K}),
-  {set, Ref};
-set_rto_timer(N, K, {set, Ref}) ->
+  start_rto_timer(N, N, Timer).
+start_rto_timer(N, K, undefined) ->
+  if N == undefined -> undefined;
+     true ->
+      Ref = erlang:start_timer(N, self(),{rto,K}),
+      {set, Ref}
+  end;
+start_rto_timer(N, K, {set, Ref}) ->
   erlang:cancel_timer(Ref),
-  NewRef = erlang:start_timer(N, self(),{rto,K}),
-  {set, NewRef}.
+  if N == undefined -> undefined;
+     true ->
+      NewRef = erlang:start_timer(N, self(),{rto,K}),
+      {set, NewRef}
+  end.
 cancle_rto_timer(undefined) -> undefined;
 cancle_rto_timer({set,Ref}) ->
   erlang:cancel_timer(Ref),
   undefined.
 
-rto_timer('SYN_SENT',N,
+rto_timer(?SYN_SEND,N,
           #state{ socket = Socket,
                   remote = Remote,
                   conn_id = ConnID,
@@ -378,11 +395,41 @@ rto_timer('SYN_SENT',N,
                  net = Net0,
                  rto_timer = start_rto_timer(N *2, undefined)
                 }}
+  end;
+rto_timer(?ESTABLISHED,_,#state{socket = Socket,
+                              remote = Remote,
+                              net = Net} = State) ->
+  
+  {Net0,Packets,TS,TSDiff} = ai_utp_net:on_rto(Net),
+  case ai_utp_net:state(Net0) of
+    {?ERROR,_} -> handle_info(timeout, State#state{net = Net0} );
+    _ ->
+      send(Socket,Remote,Packets,TS,TSDiff),
+      RTOTimer =
+        if erlang:length(Packets) > 0 ->
+            %% 发送队列为空的时候，
+            %% RTO是undefined
+            RTO = ai_utp_net:rto(Net0),
+            start_rto_timer(RTO, undefined);
+           true -> undefined
+        end,
+      {noreply,State#state{rto_timer = RTOTimer,net = Net0}}
   end.
-
 
 send(Socket,Remote,Packets,TS,TSDiff)->
   lists:foreach(
     fun(Packet)-> ai_utp_util:send(Socket, Remote,
                                    Packet, TS,TSDiff) end,
     Packets).
+active_read(#state{parent = Parent,
+                   net = Net,
+                   controller = Control,
+                   active = true} = State)->
+  case ai_utp_net:do_read(Net) of
+    {Net0,Buffer} ->
+      Self = self(),
+      Control ! {utp_data,{utp,Parent,Self},Buffer},
+      State#state{net = Net0,active = false};
+     _ -> State
+  end;
+active_read(State) -> State.

@@ -3,7 +3,8 @@
 
 -export([process_incoming/3]).
 -export([connect/2,accept/3]).
--export([state/1,rto/1,do_send/2]).
+-export([state/1,rto/1,do_send/2,do_read/1]).
+-export([on_rto/1]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -153,6 +154,7 @@ send(#utp_net{outbuf = OutBuf} = Net,Now,Timer)->
       end
   end.
 
+
 process_incoming(#utp_net{state = State }= Net,
                  #utp_packet{type = Type} = Packet,
                  Timing) ->
@@ -169,7 +171,7 @@ process_incoming(#utp_net{state = State }= Net,
   {Net1,Packets0} = send(Net0,Now,false),
   Packets1 =
     if AckPacket == none -> Packets ++ Packets0;
-       true -> {Packets ++ [AckPacket|Packets0],ack}
+       true -> Packets ++ [AckPacket|Packets0]
     end,
   {Net1,Packets1,Now,Net1#utp_net.reply_micro}.
 
@@ -183,7 +185,8 @@ process_incoming(st_syn, ?SYN_RECEIVE,
   {Net#utp_net{
      max_peer_window = PeerWinSize,
      ack_nr = ai_utp_util:bit16(AckNo + 1)},
-   [Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID}]};
+   [Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID}],
+  #{}};
 process_incoming(st_data,?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR,ack_nr = PeerSeqNo} = Net,
                  #utp_packet{ack_no = AckNo,seq_no = PeerSeqNo,
@@ -200,7 +203,10 @@ process_incoming(st_data,?ESTABLISHED,Net,
                  #utp_packet{seq_no = SeqNo,payload = Payload
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
-    duplicate -> Net;
+    duplicate ->
+      %% 强制发送ACK
+      Packet = send_ack(Net),
+      {Net,[Packet]};
     {_,Net1} -> ack(Net1,Packet,Timing)
   end;
 process_incoming(st_state,?ESTABLISHED,Net,
@@ -249,8 +255,11 @@ accept(#utp_net{max_window = MaxWindow} = Net,
   {Net1,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
    ConnID,Net1#utp_net.reply_micro}.
 state(#utp_net{state = State})-> State.
-rto(#utp_net{rtt = RTT})->
-  ai_utp_rtt:rto(RTT).
+rto(#utp_net{rtt = RTT,outbuf = OutBuf})->
+  IsEmpty = queue:is_empty(OutBuf),
+  if IsEmpty == true -> undefined;
+     true -> ai_utp_rtt:rto(RTT)
+  end.
 
 
 fill_from_proc(Net,Bytes,Proc)->
@@ -319,3 +328,15 @@ do_send(Net,Proc)->
   {Net0,Proc0,TxQ} = fill_from_proc(Net, MaxSendBytes, Proc),
   Result = send_tx_queue(Net0, TxQ),
   {Result,Proc0}.
+
+do_read(#utp_net{inbuf = InBuf} = Net)->
+  Size = erlang:byte_size(InBuf),
+  if Size > 0 ->
+      {Net#utp_net{inbuf = <<>>},InBuf};
+     true -> Net
+  end.
+
+on_rto(Net)->
+  Now = ai_utp_util:microsecond(),
+  {Net0,Packets0} = send(Net,Now,true),
+  {Net0,Packets0,Now,Net0#utp_net.reply_micro}.
