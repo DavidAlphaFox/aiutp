@@ -1,9 +1,6 @@
 -module(ai_utp_rtt).
 
--export([
-         rto/1,
-         ack/4
-        ]).
+-export([rto/1,ack/3]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
 -define(DEFAULT_RTT_TIMEOUT, 500).
@@ -50,19 +47,13 @@ rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
 
 
 %% ACKnowledge an incoming packet
-ack(History, RTT, TimeSent, TimeAcked) ->
+ack(RTT, TimeSent, TimeAcked) ->
   true = TimeAcked >= TimeSent,
   Estimate = ai_utp_util:bit32(TimeAcked - TimeSent) div 1000,
 
   NewRTT = update(Estimate, RTT),
-  NewHistory =
-    case RTT of
-      none -> History;
-      #ai_utp_rtt{} ->
-        ai_utp_ledbat:add_sample(History, Estimate)
-    end,
   NewRTO = rto(NewRTT),
-  {ok, NewRTO, NewRTT, NewHistory}.
+  {ok, NewRTO, NewRTT}.
 
 %% Every time a socket sends or receives a packet, it updates its
 %% timeout counter. If no packet has arrived within timeout number of

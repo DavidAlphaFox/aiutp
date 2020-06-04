@@ -8,18 +8,23 @@
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
-    fun(WrapPacket,{RTT,Bytes})->
-        if WrapPacket#utp_packet_wrap.transmissions > 0 ->
+    fun(WrapPacket,{RTT,Times,Bytes})->
+        Trans = WrapPacket#utp_packet_wrap.transmissions,
+        SendTime = WrapPacket#utp_packet_wrap.send_time,
+        Times0 =
+          if Trans == 1 -> [SendTime|Times];
+             true -> Times
+          end,
+        if Trans > 0 ->
             Bytes0 = Bytes + WrapPacket#utp_packet_wrap.payload,
-            SendTime = WrapPacket#utp_packet_wrap.send_time,
             RTT0 =
               if SendTime < Now -> min(RTT, Now - SendTime );
                  true -> min(RTT,50000)
               end,
-            {RTT0,Bytes0};
-           true -> {RTT,Bytes}
+            {RTT0,Times0,Bytes0};
+           true -> {RTT,Times0,Bytes}
         end
-    end, {?RTT_MAX,0}, AckPackets).
+    end, {?RTT_MAX,[],0}, AckPackets).
 
 window_size(#utp_net{maxed_out_window = true}) -> 0;
 window_size(#utp_net{cur_window = CurWindow,
@@ -46,11 +51,12 @@ max_send_bytes(#utp_net{
 %% 最后阶段计算并清理所有被Ack过的包
 ack(Net,#utp_packet{ack_no = AckNo,
                     win_sz = WndSize,extension = Ext},
-    {TS,TSDiff,Now})->
+    {_,_,Now} = Timing)->
   SAcks = proplists:get_value(sack, Ext,undefined),
   {AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
-  {MinRTT,AckBytes} = ack_bytes(AckPackets,Now),
-  ai_utp_cc:cc(Net1, TS, TSDiff, Now, MinRTT, AckBytes,WndSize).
+  {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
+  ai_utp_cc:cc(Net1,Timing, MinRTT,
+               AckBytes,lists:reverse(Times),WndSize).
 
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
                   peer_conn_id = PeerConnID} = Net)->

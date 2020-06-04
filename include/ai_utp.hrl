@@ -77,13 +77,11 @@
          %% do a fast resend with. This makes sure we only do a fast-resend
          %% once per packet. We can resend the packet with this sequence number
          %% or any later packet (with a higher sequence number).
-         fast_resend_seq_nr = 1,
          inbuf = <<>>,
          reorder = [],
          outbuf = queue:new(),
          reply_micro,
          rtt = none,
-         rtt_ledbat = none,
          our_ledbat = none,
          peer_ledbat = none,
          %% Round trip time measurements and LEDBAT
@@ -96,7 +94,6 @@
          fin_acked = false,
          got_fin = false,
          eof_seq_no = -1,
-         fast_timeout = false,
          conn_id,
          peer_conn_id
         }).
