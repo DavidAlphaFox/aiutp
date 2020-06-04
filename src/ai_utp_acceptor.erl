@@ -117,8 +117,8 @@ handle_cast({accept,Acceptor},
     SynLen > 0 -> accept_incoming(Acceptor,State);
     true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
   end;
-handle_cast({syn,Remote,Packet},State)->
-  pair_incoming(Remote,Packet,State);
+handle_cast({syn,Remote,Packet,Timing},State)->
+  pair_incoming(Remote,Packet,Timing,State);
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -189,8 +189,8 @@ accept_incoming({Caller,_} = Acceptor,
                       parent = Parent,socket = Socket } = State)->
   {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket),
   {{value,Req},Syns0} = queue:out(Syns),
-  {Packet,Remote} = Req,
-  case ai_utp_worker:accept(Worker, Caller,Remote, Packet) of
+  {Remote,Packet,Timing} = Req,
+  case ai_utp_worker:accept(Worker, Caller,Remote, Packet,Timing) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
@@ -205,7 +205,7 @@ accept_incoming({Caller,_} = Acceptor,
                  acceptors = queue:in(Acceptor,Acceptors),
                  syns = queue:in(Req,Syns0)},1000}
   end.
-pair_incoming(Remote,Packet,
+pair_incoming(Remote,Packet,_,
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
@@ -214,7 +214,7 @@ pair_incoming(Remote,Packet,
   ai_utp_util:send(Socket, Remote, ResetPacket, 0),
   {noreply,State};
 
-pair_incoming(Remote,Packet,
+pair_incoming(Remote,Packet,Timing,
               #state{acceptors = Acceptors,
                      syns = Syns} = State) ->
   Syns0 =
@@ -227,7 +227,7 @@ pair_incoming(Remote,Packet,
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Packet,Remote},Syns0),
+  Syns1 = queue:in({Remote,Packet,Timing},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
     Empty == true ->

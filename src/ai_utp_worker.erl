@@ -18,7 +18,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
 
--export([connect/4,accept/4,incoming/3]).
+-export([connect/4,accept/5,incoming/3,
+         send/2,recv/2]).
 
 -define(SERVER, ?MODULE).
 -define(SYN_TIMEOUT, 3000).
@@ -34,7 +35,8 @@
                 net,
                 rto_timer :: reference(),
                 connector,
-                conn_id
+                conn_id,
+                process
                }).
 
 %%%===================================================================
@@ -42,8 +44,13 @@
 %%%===================================================================
 connect(Pid,Caller,Address,Port)->
   gen_server:call(Pid, {connect,Caller,{Address,Port}},infinity).
-accept(Pid,Caller,Remote,Packet)->
-  gen_server:call(Pid,{accept,Caller,Remote,Packet},infinity).
+accept(Pid,Caller,Remote,Packet,Timing)->
+  gen_server:call(Pid,{accept,Caller,Remote,Packet,Timing},infinity).
+send(Pid,Data)->
+  gen_server:call(Pid,{send,Data},infinity).
+recv(Pid,Len)->
+  gen_server:call(Pid,{recv,Len},infinity).
+
 incoming(Pid,Packet,Timing)->
   gen_server:cast(Pid,{packet,Packet,Timing}).
 
@@ -80,7 +87,8 @@ init([Parent,Socket]) ->
           parent = Parent,
           socket = Socket,
           parent_monitor = ParentMonitor,
-          net = #utp_net{}
+          net = #utp_net{},
+          process = ai_utp_process:new()
          }}.
 
 %%--------------------------------------------------------------------
@@ -102,8 +110,7 @@ handle_call({connect,Control,Remote},From,
             #state{net = Net,socket = Socket} = State)->
   case register_conn(Remote) of
     {ok,ConnID} ->
-      {Net0,Packet} = ai_utp_net:connect(ConnID, Net),
-      io:format("~p~n",[Packet]),
+      {Net0,Packet} = ai_utp_net:connect(Net,ConnID),
       ai_utp_util:send(Socket, Remote, Packet, 0),
       {noreply,State#state{
                  remote = Remote,
@@ -116,19 +123,33 @@ handle_call({connect,Control,Remote},From,
                 }};
     _ -> {reply,{error,eagain},0}
   end;
-handle_call({accept,Control, Remote, Packet},_From,
+handle_call({accept,Control, Remote, Packet,Timing},From,
            #state{net = Net,socket = Socket} = State)->
-  {Net0,SynPacket,ConnID} = ai_utp_net:accept(Packet, Net),
+  {Net0,SynPacket,ConnID,TSDiff} = ai_utp_net:accept(Net,Packet,Timing),
   case ai_utp_conn:alloc(Remote, ConnID) of
     ok ->
-      ai_utp_util:send(Socket,Remote,SynPacket,0),
+      ai_utp_util:send(Socket,Remote,SynPacket,TSDiff),
       {reply,ok,State#state{
+                  remote = Remote,
                   net = Net0,controller = Control,
                   controller_monitor = erlang:monitor(process,Control),
                   conn_id = ConnID
                  }};
-    Error -> {reply,Error,State#state{net = Net0}}
-  end.
+    Error ->
+      gen_server:reply(From, Error),
+      handle_info(timeout, State#state{net = Net0,
+                                       controller = undefined})
+  end;
+handle_call({send,Data},From,
+            #state{socket = Socket,remote = Remote,
+                   process = Proc,net = Net} = State)->
+  Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
+  {{Net0,Packets,TS,TSDiff},Proc1} = ai_utp_net:do_send(Net, Proc0),
+  send(Socket,Remote,Packets,TS,TSDiff),
+  {noreply,State#state{net = Net0,process = Proc1}}.
+
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -141,42 +162,53 @@ handle_call({accept,Control, Remote, Packet},_From,
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
+%% 已经链接了
 handle_cast({packet,Packet,Timing},
             #state{net = Net,socket = Socket,
                    remote = Remote, connector = undefined,
                    rto_timer = Timer} = State)->
   cancle_rto_timer(Timer),
-  {Net0,Packets,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
+  io:format("~p~n",[Packet]),
+  {Net0,Packets,TS,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   case ai_utp_net:state(Net0) of
-    {'ERROR',_} ->
-      handle_info(timeout, State#state{net = Net0});
+    {'ERROR',_} -> handle_info(timeout, State#state{net = Net0});
     NetState ->
-      lists:foreach(
-        fun(P)-> ai_utp_util:send(Socket, Remote, P, TSDiff) end,
-        Packets),
-      if NetState == 'CLOSED' ->
-          handle_info(timeout, State#state{net = Net0});
+      Packets0 =
+        case Packets of
+          {P,_} -> P;
+          R -> R
+        end,
+      send(Socket,Remote,Packets0,TS,TSDiff),
+      io:format("Send: ~p~n",[Packets]),
+      if NetState == ?CLOSED ->
+          handle_info(timeout, State#state{net = Net0,rto_timer = undefined});
          true ->
-          {noreply,State#state{net = Net0}}
+          RTO = ai_utp_net:rto(Net0),
+          RTOTimer =
+            case Packets of
+              {P0,ack} when erlang:length(P0) > 1 ->
+                start_rto_timer(RTO, undefined);
+              {_,ack} -> undefined;
+              P0 when erlang:length(P0) > 0 ->
+                start_rto_timer(RTO, undefined);
+              _ -> undefined
+            end,
+          {noreply,State#state{net = Net0,rto_timer = RTOTimer}}
       end
   end;
-
+%% 正在进行链接
 handle_cast({packet,Packet,Timing},
-            #state{net = Net,socket = Socket,
-                   remote = Remote,connector = Connector,
+            #state{net = Net,connector = Connector,
                    rto_timer = Timer} = State)->
   cancle_rto_timer(Timer),
-  {Net0,Packets,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
+  {Net0,_,_,_} = ai_utp_net:process_incoming(Net,Packet, Timing),
   case ai_utp_net:state(Net0) of
     {'ERROR',Reason} ->
       gen_server:reply(Connector, {error,Reason}),
       handle_info(timeout,State#state{connector = undefined,
                                       controller = undefined,
                                       rto_timer = undefined});
-    'ESTABLISHED' ->
-      lists:foreach(
-        fun(P)-> ai_utp_util:send(Socket, Remote, P, TSDiff) end,
-        Packets),
+    ?ESTABLISHED ->
       gen_server:reply(Connector, ok),
       {noreply,State#state{net = Net0,connector = undefined,
                            rto_timer = undefined}};
@@ -347,3 +379,10 @@ rto_timer('SYN_SENT',N,
                  rto_timer = start_rto_timer(N *2, undefined)
                 }}
   end.
+
+
+send(Socket,Remote,Packets,TS,TSDiff)->
+  lists:foreach(
+    fun(Packet)-> ai_utp_util:send(Socket, Remote,
+                                   Packet, TS,TSDiff) end,
+    Packets).

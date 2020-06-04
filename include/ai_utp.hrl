@@ -3,6 +3,13 @@
 -type utp_extension() :: {sack, binary()} | {ext_bits, binary()}.
 -type timestamp() :: integer().
 
+-define(SYN_SEND,'SYN_SEND').
+-define(SYN_RECEIVE,'SYN_RECEIVE').
+-define(ESTABLISHED,'ESTABLISHED').
+-define(CLOSED,'CLOSED').
+-define(CLOSING,'CLOSING').
+-define(CLOSE_WAIT,'CLOSE_WAIT').
+-define(ERROR,'ERROR').
 
 -define(RTT_MAX,9223372036854775807).
 -define(TS_DIFF_MAX,2147483647).
@@ -47,7 +54,7 @@
          opt_sndbuf = ?OPT_SEND_BUF,
          %%rcvbuf setting, in bytes
          opt_rcvbuf = ?OPT_RECV_BUF,
-         state = 'IDLE',
+         state = undefined,
          %% the number of packets in the send queue. Packets that haven't
          %% yet been sent count as well as packets marked as needing resend
          %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
@@ -58,14 +65,14 @@
          %% don't count either
          cur_window = 0,
          %% maximum window size, in bytes
-         max_window = 0,
+         max_window = ?OPT_SEND_BUF,
          %% max receive window for other end, in bytes
-         max_peer_window = 0,
+         max_peer_window = ?OPT_RECV_BUF,
          %% All sequence numbers up to including this have been properly received
          %% by us
-         ack_nr = 1,
+         ack_nr = undefined,
          %% This is the sequence number for the next packet to be sent.
-         seq_nr = 1,
+         seq_nr = undefined,
          %% This is the sequence number of the next packet we're allowed to
          %% do a fast resend with. This makes sure we only do a fast-resend
          %% once per packet. We can resend the packet with this sequence number
@@ -84,6 +91,7 @@
          %% --------------------
          %% ms, When was the window last totally full (in send direction)
          last_maxed_out_window :: integer(),
+         maxed_out_window = false,
          fin_sent = false,
          fin_acked = false,
          got_fin = false,

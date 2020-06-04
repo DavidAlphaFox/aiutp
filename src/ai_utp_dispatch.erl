@@ -163,7 +163,7 @@ dispatch_packet(Remote,#utp_packet{conn_id = ConnID} = Packet,
                 Timing,Parent)->
   case ai_utp_conn:lookup(Remote, ConnID) of
     {error,not_exist} ->
-      ai_utp_socket:incoming(Parent,Remote,Packet);
+      ai_utp_socket:incoming(Parent,Remote,Packet,Timing);
     {ok,Worker} ->
       ai_utp_worker:incoming(Worker,Packet,Timing)
   end.

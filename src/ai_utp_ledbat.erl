@@ -67,6 +67,7 @@ new(Sample) ->
 %% too large. To make it smaller we shift the base delay up, which
 %% affects the queueing delay down.
 %% @end
+shift(none,_) -> none;
 shift(#ai_utp_ledbat { base_history = BQ } = LEDBAT, Offset) ->
   New_Queue =
     queue_map(fun(E) -> ai_utp_util:bit32(E + Offset) end,BQ),

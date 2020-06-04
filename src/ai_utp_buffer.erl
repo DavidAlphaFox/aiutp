@@ -27,11 +27,12 @@ in(SeqNo,Payload,
     false -> {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
   end.
 
-recv('FIN_SENT',_,Net)-> Net;
-recv('ESTABLISHED',<<>>,Net) -> Net;
-recv('ESTABLISHED',Payload,
+recv(?ESTABLISHED,<<>>,Net) -> Net;
+recv(?ESTABLISHED,Payload,
      #utp_net{inbuf = InBuf} = Net) ->
-  Net#utp_net{inbuf = <<InBuf/binary,Payload/binary>>}.
+  Net#utp_net{inbuf = <<InBuf/binary,Payload/binary>>};
+recv(_,_,Net) -> Net.
+
 
 
 recv_reorder(#utp_net{ reorder = [] } = Net) ->{ok,Net};

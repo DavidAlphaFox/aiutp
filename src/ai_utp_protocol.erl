@@ -1,9 +1,10 @@
 -module(ai_utp_protocol).
 -include("ai_utp.hrl").
 
--export([decode/1,encode/2]).
+-export([decode/1,encode/2,encode/3]).
 -export([make_syn_packet/0,make_ack_packet/2,
-         make_ack_packet/3,make_reset_packet/2]).
+         make_ack_packet/3,make_reset_packet/2,
+         make_data_packet/2]).
 
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
@@ -26,27 +27,27 @@ make_reset_packet(ConnID,AckNo)->
           seq_no = ai_utp_util:bit16_random(),
           win_sz = 0,
           extension = [],
-          conn_id = ConnID
-         }.
+          conn_id = ConnID}.
 make_syn_packet() ->
   #utp_packet { type = st_syn,
             seq_no = 1,
             ack_no = 0,
-            extension = ?SYN_EXTS
-          }. % Rest are defaults
+            extension = ?SYN_EXTS}.
 make_ack_packet(SeqNo,AckNo,Ext)->
   #utp_packet {type = st_state,
            seq_no = SeqNo,
            ack_no = AckNo,
-           extension = Ext
-          }.
+           extension = Ext}.
 make_ack_packet(SeqNo, AckNo) ->
   #utp_packet {type = st_state,
            seq_no = SeqNo,
            ack_no = AckNo,
-           extension = []
-          }.
-
+           extension = []}.
+make_data_packet(SeqNo,AckNo)->
+  #utp_packet{type = st_data,
+             seq_no = SeqNo,
+             ack_no = AckNo,
+             extension = []}.
 
 -spec decode(binary()) ->
         {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
@@ -110,17 +111,20 @@ validate_packet_type(Ty, Payload) ->
   end.
 
 
--spec encode(utp_packet(), integer()) -> binary().
+encode(Packet,TSDiff)->
+  TS = ai_utp_util:microsecond(),
+  encode(Packet,TS,TSDiff).
+-spec encode(utp_packet(), integer(),integer()) -> binary().
 encode(#utp_packet {type = Type,
                 conn_id = ConnID,
                 win_sz = WSize,
                 seq_no = SeqNo,
                 ack_no = AckNo,
                 extension = ExtList,
-                payload = Payload}, TSDiff) ->
+                payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  TS = ai_utp_util:microsecond(),
+
   <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
     TS:32/integer,TSDiff:32/integer,
     WSize:32/integer,

@@ -16,7 +16,7 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/3,connect/3,listen/2,accept/1]).
+-export([incoming/4,connect/3,listen/2,accept/1]).
 
 -define(SERVER, ?MODULE).
 
@@ -41,11 +41,11 @@ connect(UTPSocket,Address,Port)->
 
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
-incoming(Socket,Remote,#utp_packet{type = Type} = Packet)->
+incoming(Socket,Remote,#utp_packet{type = Type} = Packet,Timing)->
   case Type of
     st_reset -> ok;
     st_syn ->
-      gen_server:cast(Socket,{syn,Remote,Packet});
+      gen_server:cast(Socket,{syn,Remote,Packet,Timing});
     _ ->
       gen_server:cast(Socket,{reset,Remote,Packet})
   end.
@@ -142,7 +142,7 @@ handle_cast({syn,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo}},
             #state{socket = Socket,acceptor = closed} = State)->
   reset(Socket,Remote,ConnID,SeqNo),
   {noreply,State};
-handle_cast({syn,_,_} = Req,#state{acceptor = Acceptor} = State)->
+handle_cast({syn,_,_,_} = Req,#state{acceptor = Acceptor} = State)->
   ai_utp_acceptor:incoming(Acceptor,Req),
   {noreply,State};
 handle_cast(_Request, State) ->
