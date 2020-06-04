@@ -4,7 +4,7 @@
 -export([process_incoming/3]).
 -export([connect/2,accept/3]).
 -export([state/1,rto/1,do_send/2,do_read/1]).
--export([on_rto/1]).
+-export([on_tick/1]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -342,7 +342,7 @@ do_read(#utp_net{inbuf = InBuf} = Net)->
      true -> Net
   end.
 
-on_rto(Net)->
+on_tick(Net)->
   Now = ai_utp_util:microsecond(),
   {Net0,Packets0} = send(Net,Now,true),
   {Net0,Packets0,Now,Net0#utp_net.reply_micro}.
