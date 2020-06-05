@@ -171,8 +171,8 @@ process_incoming(st_data,?ESTABLISHED,Net,
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
     duplicate ->
       %% 强制发送ACK
-      Packet = send_ack(Net),
-      {Net,[Packet]};
+      AckPacket = send_ack(Net),
+      {Net,[AckPacket]};
     {_,Net1} -> ack(Net1,Packet,Timing)
   end;
 process_incoming(st_state,?ESTABLISHED,Net,
