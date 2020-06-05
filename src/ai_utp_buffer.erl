@@ -61,16 +61,13 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
   IsEmpty = queue:is_empty(OutBuf),
   if IsEmpty == true -> {[],Net};
      true ->
-      {Packets,OutBuf0} =
-        ack_packet(AckNo,SeqNR,CurWindowPackets,
-                   queue:to_list(OutBuf)),
-      {Packets0,OutBuf1} =
-        sack_packet(AckNo, SAcks, OutBuf0),
+      {Packets,OutBuf0} = ack_packet(AckNo,SeqNR,CurWindowPackets,
+                                     queue:to_list(OutBuf)),
+      {Packets0,OutBuf1} = sack_packet(AckNo, SAcks, OutBuf0),
       AckDistance = ack_distance(CurWindowPackets, SeqNR, AckNo),
-      {Packets ++ Packets0,Net#utp_net{
-                 outbuf = queue:from_list(OutBuf1),
-                 cur_window_packets = CurWindowPackets - AckDistance
-                }}
+      {Packets ++ Packets0,
+       Net#utp_net{outbuf = queue:from_list(OutBuf1),
+                   cur_window_packets = CurWindowPackets - AckDistance}}
   end.
 
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
@@ -95,13 +92,11 @@ sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   {_,Acks,UnAcks} =
     lists:foldl(fun(#utp_packet_wrap{
-                       packet = #utp_packet{seq_no = SeqNo}
-                    } = Warp,{Count,Acks0,UnAcks0} = Acc)->
-                  Pos = ai_utp_util:bit16(SeqNo - AckNo - 2),
-                  if Pos < Max ->
-                      sack_packet(Bits,Pos,Warp,Acc);
-                     true ->
-                      {Count,Acks0,[Warp|UnAcks0]}
+                       packet = #utp_packet{seq_no = SeqNo}} = Warp,
+                    {Count,Acks0,UnAcks0} = Acc)->
+                    Pos = ai_utp_util:bit16(SeqNo - AckNo - 2),
+                    if Pos < Max ->sack_packet(Bits,Pos,Warp,Acc);
+                       true ->{Count,Acks0,[Warp|UnAcks0]}
                   end
               end, {0,[],[]}, lists:reverse(OutBuf)),
   {Acks,UnAcks}.
@@ -119,13 +114,11 @@ ack_bit(Bits,Pos)->
 
 sack_packet(Bits,Pos,Warp,{Count,Acks,UnAcks})->
   Bit = ack_bit(Bits,Pos),
-  if Bit == 1 ->
-      {Count+1,[Warp|Acks],UnAcks};
+  if Bit == 1 -> {Count+1,[Warp|Acks],UnAcks};
      true ->
       if Count >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
-          {Count,Acks,[Warp|UnAcks]};
-         true ->
-          {Count,Acks,[Warp|UnAcks]}
+          {Count,Acks,[Warp#utp_packet_wrap{need_resend = true}|UnAcks]};
+         true -> {Count,Acks,[Warp|UnAcks]}
       end
   end.
 sack(_,#utp_net{reorder = []}) -> undefined;
@@ -134,27 +127,24 @@ sack(Base,#utp_net{reorder = Reorder}) ->
 
 
 sack(_,[],I,Bin)->
-  case I of
-    undefined -> Bin;
-    _-> <<Bin/binary,I/big-integer>>
+  if I == undefined -> Bin;
+     true -> <<Bin/binary,I/big-integer>>
   end;
+
 sack(Base,[#utp_packet{seq_no = SeqNo}|T],I,Bin)->
   Index = ai_utp_util:bit16(SeqNo - Base),
-  if Index >= ?REORDER_BUFFER_SIZE ->
-      sack(Base,[],I,Bin);
+  if Index >= ?REORDER_BUFFER_MAX_SIZE -> sack(Base,[],I,Bin);
      true ->
       Size = erlang:byte_size(Bin),
       IndexDiff = (Index bsr 3) - (Size - 1),
       {Bin0,I0} =
-        if (IndexDiff > 1) andalso
-           (I == undefined)->
+        if (IndexDiff > 1) andalso (I == undefined)->
             Offset = (IndexDiff - 1) * 8,
             {<<Bin/bits,0:Offset>>,0};
            IndexDiff > 1 ->
             Offset = (IndexDiff - 2) * 8,
             {<<Bin/bits,I/big-integer,0:Offset>>,0};
-           true ->
-            {Bin,I}
+           true -> {Bin,I}
         end,
       Mask = 1 bsl (Index band 7),
       I1 = Mask bor I0,

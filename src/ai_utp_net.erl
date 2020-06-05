@@ -3,8 +3,8 @@
 
 -export([process_incoming/3]).
 -export([connect/2,accept/3]).
--export([state/1,rto/1,do_send/2,do_read/1]).
--export([on_tick/1]).
+-export([state/1,do_send/2,do_read/1]).
+-export([on_tick/2]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -81,83 +81,31 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
 
 
 
-send(_,_,_,_,_,_,[],Acc)-> Acc;
-%% 超时5次，基本上就可以认定是断开链接了
-send(true,_,_,_,_,_,
-     [#utp_packet_wrap{transmissions = Trans} | _],_) when Trans > 5->
-  error;
-send(Timer,Now,SeqNo,AckNo,MaxBytes,
-     SenderWindow,[WrapPacket|T] = Out,Acc)->
-  {SendBytes,InFlight,Packets,Buf} = Acc,
-  #utp_packet_wrap{
-     packet = Packet,
-     transmissions = Trans,
-     payload = Payload
-    } = WrapPacket,
-  #utp_packet{seq_no = PacketSeqNo} = Packet,
-  if MaxBytes - SendBytes >= Payload ->
-      Resend =
-        ai_utp_util:wrapping_compare_less(PacketSeqNo,
-                                          SeqNo, ?SEQ_NO_MASK),
-      Acc0 =
-        if (Resend == true) orelse
-         (SeqNo == PacketSeqNo) ->
-          %% 重新传输的包不记入窗口
-          WinSize = SenderWindow - SendBytes,
-          {SendBytes,InFlight,
-           [Packet#utp_packet{ack_no = AckNo,
-                              win_sz = WinSize}|Packets],
-           queue:in(WrapPacket#utp_packet_wrap{
-                      transmissions = Trans + 1,
-                      send_time = Now},Buf)};
-         true ->
-          WinSize = SenderWindow - SendBytes - Payload,
-          {SendBytes + Payload,InFlight + 1,
-           [Packet#utp_packet{ack_no = AckNo,
-                              win_sz = WinSize}|Packets],
-           queue:in(WrapPacket#utp_packet_wrap{
-                      transmissions = Trans + 1,
-                      send_time = Now},Buf)}
-      end,
-      send(Timer,Now,SeqNo,AckNo,MaxBytes,
-           SenderWindow,T,Acc0);
-     true ->
-      {SendBytes,InFlight,Packets,
-       lists:foldl(fun queue:in/2,Buf, Out)}
-  end.
-
-      
-send(Net,0,_,_)->
-  {Net#utp_net{ maxed_out_window = true,
-                last_maxed_out_window = ai_utp_util:millisecond()},[]};
-send(#utp_net{seq_nr = SeqNR, ack_nr = AckNR, outbuf = OutBuf,
-              cur_window = CurWindow,
-              cur_window_packets = CurWindowPackets} = Net,
-     MaxBytes,Now,Timer) ->
-  SeqNo = ai_utp_util:bit16(SeqNR - 1),
+do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
-  SenderWindow = window_size(Net),
-  case send(Timer,Now,SeqNo,AckNo,MaxBytes,SenderWindow,
-            queue:to_list(OutBuf),{0,0,[],queue:new()}) of
-    error -> error;
-    {Bytes,InFlight,Packets,OutBuf0}->
-      {Net#utp_net{
-        outbuf = OutBuf0,
-        cur_window = CurWindow + Bytes,
-        cur_window_packets = CurWindowPackets + InFlight,
-        seq_nr = SeqNR + InFlight
-       },lists:reverse(Packets)}
-  end.
+  WinSize = window_size(Net),
+  {Packets,OutBuf0} =
+    lists:foldl(fun(#utp_packet_wrap{
+                       packet = Packet,
+                       transmissions = Trans,
+                       need_resend = Resend
+                      } = WrapPacket,{Packets,Out})->
+                    if Resend == true  ->
+                        {[Packet#utp_packet{ack_no = AckNo,
+                                           win_sz = WinSize}|Packets],
+                        queue:in(WrapPacket#utp_packet_wrap{
+                                   need_resend = false,
+                                   transmissions = Trans + 1,
+                                   send_time = Now},Out)};
+                       true-> {Packets,queue:in(WrapPacket, Out)}
+                    end
+                end,{[],queue:new()},queue:to_list(OutBuf)),
+  {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
-send(#utp_net{outbuf = OutBuf} = Net,Now,Timer)->
+resend(#utp_net{outbuf = OutBuf} = Net,Now)->
   IsEmpty = queue:is_empty(OutBuf),
   if IsEmpty == true -> {Net,[]};
-     true ->
-      SendBytes = max_send_bytes(Net),
-      case send(Net,SendBytes,Now,Timer) of
-        error -> {Net#utp_net{state = {?ERROR,epipe}},[]};
-        R -> R
-      end
+     true -> do_resend(Net,Now)
   end.
 
 
@@ -174,7 +122,7 @@ process_incoming(#utp_net{state = State }= Net,
        true -> none
     end,
   Now = ai_utp_util:microsecond(),
-  {Net1,Packets0} = send(Net0,Now,false),
+  {Net1,Packets0} = resend(Net0,Now),
   Packets1 =
     if AckPacket == none -> Packets ++ Packets0;
        true -> Packets ++ [AckPacket|Packets0]
@@ -261,11 +209,8 @@ accept(#utp_net{max_window = MaxWindow} = Net,
   {Net1,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
    ConnID,Net1#utp_net.reply_micro}.
 state(#utp_net{state = State})-> State.
-rto(#utp_net{rtt = RTT,outbuf = OutBuf})->
-  IsEmpty = queue:is_empty(OutBuf),
-  if IsEmpty == true -> undefined;
-     true -> ai_utp_rtt:rto(RTT)
-  end.
+rto(#utp_net{rtt = RTT})->
+  ai_utp_rtt:rto(RTT).
 
 
 fill_from_proc(Net,Bytes,Proc)->
@@ -303,8 +248,7 @@ send_tx_queue(#utp_net{ack_nr = AckNR,
   L = queue:to_list(TxQ),
   Now = ai_utp_util:microsecond(),
   AckNo = ai_utp_util:bit16(AckNR - 1),
-  {SeqNR0,Packets,CurWindow0,
-   CurWindowPackets0,OutBuf0} =
+  {SeqNR0,Packets,CurWindow0,CurWindowPackets0,OutBuf0} =
     lists:foldl(fun(Bin,{SeqNo,Acc,CurWindowAcc,
                          CurWindowPacketsAcc,WarpAcc})->
                     Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
@@ -316,8 +260,7 @@ send_tx_queue(#utp_net{ack_nr = AckNR,
                                     packet = Packet0,
                                     transmissions = 1,
                                     payload = Size,
-                                    send_time = Now
-                                   },
+                                    send_time = Now},
                     {ai_utp_util:bit16(SeqNo+1),[Packet0|Acc],
                      CurWindowAcc + Size,CurWindowPacketsAcc +1,
                      queue:in(WrapPacket, WarpAcc)}
@@ -342,7 +285,32 @@ do_read(#utp_net{inbuf = InBuf} = Net)->
      true -> Net
   end.
 
-on_tick(Net)->
+
+expire_resend(#utp_net{ack_nr = AckNR,
+                   outbuf = OutBuf} = Net,Now,RTO)->
+  AckNo = ai_utp_util:bit16(AckNR - 1),
+  WinSize = window_size(Net),
+  {Packets,OutBuf0} =
+    lists:foldl(fun(#utp_packet_wrap{
+                       packet = Packet,
+                       transmissions = Trans,
+                       send_time = SendTime
+                      } = WrapPacket,{Packets,Out})->
+                    Diff = (Now - SendTime) / 1000,
+                    if (Diff > RTO) andalso (Trans > 0) ->
+                        {[Packet#utp_packet{ack_no = AckNo,
+                                           win_sz = WinSize}|Packets],
+                        queue:in(WrapPacket#utp_packet_wrap{
+                                   transmissions = Trans + 1,
+                                   send_time = Now},Out)};
+                       true-> {Packets,queue:in(WrapPacket, Out)}
+                    end
+                end,{[],queue:new()},queue:to_list(OutBuf)),
+  {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
+
+on_tick(Net,Proc)->
   Now = ai_utp_util:microsecond(),
-  {Net0,Packets0} = send(Net,Now,true),
-  {Net0,Packets0,Now,Net0#utp_net.reply_micro}.
+  RTO = rto(Net),
+  {Net0,Packets0} = expire_resend(Net,Now,RTO),
+  {{Net1,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
+  {{Net1,Packets0 ++ Packets1,Now,ReplyMicro},Proc0}.
