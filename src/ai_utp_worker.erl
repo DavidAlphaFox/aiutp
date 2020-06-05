@@ -289,7 +289,7 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(Reason, #state{controller = undefined})-> ok;
+terminate(_Reason, #state{controller = undefined})-> ok;
 terminate(_Reason, #state{controller = Control,
                           parent = Parent,net = Net}) ->
   Self = self(),
