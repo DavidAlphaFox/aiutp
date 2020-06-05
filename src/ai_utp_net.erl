@@ -191,8 +191,10 @@ process_incoming(st_reset,_,Net,_,_) ->
 
 connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
   Packet = ai_utp_protocol:make_syn_packet(),
+  Now =  ai_utp_util:microsecond(),
   {Net#utp_net{
-     last_send = ai_utp_util:microsecond(),
+     last_send = Now,
+     last_recv = Now,
      conn_id = ConnID,
      peer_conn_id = ai_utp_util:bit16(ConnID + 1),
      seq_nr = 2,
