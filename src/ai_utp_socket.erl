@@ -84,10 +84,13 @@ init([Port,Options]) ->
       false -> [binary|Options];
       true -> Options
     end,
-  {ok,Socket} = gen_udp:open(Port,Options0),
-  {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
-  ok = inet:setopts(Socket, [{active,once}]),
-  {ok, #state{socket = Socket,dispatch = Dispatch}}.
+  case gen_udp:open(Port,Options0) of
+    {ok,Socket} ->
+      {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
+      ok = inet:setopts(Socket, [{active,once}]),
+      {ok, #state{socket = Socket,dispatch = Dispatch}};
+    {error,Reason} -> {stop,Reason}
+  end.
 
 %%--------------------------------------------------------------------
 %% @private

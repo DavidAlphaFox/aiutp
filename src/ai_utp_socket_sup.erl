@@ -24,8 +24,10 @@
 %%%===================================================================
 open(Port)-> open(Port,[]).
 open(Port,Options)->
-  {ok,UTPSocket} = supervisor:start_child(?SERVER, [Port,Options]),
-  {ok,{utp,UTPSocket}}.
+  case supervisor:start_child(?SERVER, [Port,Options]) of
+    {ok,UTPSocket} -> {ok,{utp,UTPSocket}};
+    Error -> Error
+  end.
 
 %%--------------------------------------------------------------------
 %% @doc
