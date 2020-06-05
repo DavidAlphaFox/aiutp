@@ -23,7 +23,7 @@
 
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
--define(MAX_SEND_IDLE_TIME,10000000).
+-define(MAX_SEND_IDLE_TIME,5000000).
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
 %% 每个来回最大可以增加3000 bytes的窗口
