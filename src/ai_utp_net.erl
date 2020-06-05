@@ -4,7 +4,7 @@
 -export([process_incoming/3]).
 -export([connect/2,accept/3]).
 -export([state/1,do_send/2,do_read/1]).
--export([on_tick/2]).
+-export([on_tick/3]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -26,7 +26,6 @@ ack_bytes(AckPackets,Now)->
         end
     end, {?RTT_MAX,[],0}, AckPackets).
 
-window_size(#utp_net{maxed_out_window = true}) -> 0;
 window_size(#utp_net{cur_window = CurWindow,
                      max_window = MaxWindow})->
   if MaxWindow > CurWindow ->
@@ -39,7 +38,7 @@ max_send_bytes(#utp_net{
                   cur_window = CurWindow,
                   cur_window_packets = CurWindowPackets})->
   if
-    CurWindowPackets > ?REORDER_BUFFER_SIZE -> 0;
+    CurWindowPackets > ?REORDER_BUFFER_MAX_SIZE -> 0;
     true ->
       SendBytes = MaxWindow - CurWindow,
       if SendBytes >= ?PACKET_SIZE ->
@@ -127,9 +126,20 @@ process_incoming(#utp_net{state = State }= Net,
     if AckPacket == none -> Packets ++ Packets0;
        true -> Packets ++ [AckPacket|Packets0]
     end,
-  {Net1,Packets1,Now,Net1#utp_net.reply_micro}.
+  Net2 =
+    if erlang:length(Packets1) > 0 ->
+        Net1#utp_net{last_send = Now,last_recv = Now};
+       true -> Net1#utp_net{last_recv = Now}
+    end,
+  {Net2,Packets1,Now,Net1#utp_net.reply_micro}.
 
-
+process_incoming(st_state, ?SYN_RECEIVE,
+                 #utp_net{seq_nr = SeqNR} = Net,
+                 #utp_packet{ack_no = AckNo} = Packet,Timing) ->
+  Diff = ai_utp_util:bit16(SeqNR - AckNo),
+  if Diff == 1 -> ack(Net#utp_net{state = ?ESTABLISHED},Packet,Timing);
+     true -> Net
+  end;
 process_incoming(st_syn, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR,max_window = MaxWindow,
                          peer_conn_id = PeerConnID} = Net,
@@ -139,8 +149,7 @@ process_incoming(st_syn, ?SYN_RECEIVE,
   {Net#utp_net{
      max_peer_window = PeerWinSize,
      ack_nr = ai_utp_util:bit16(AckNo + 1)},
-   [Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID}],
-  #{}};
+   [Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID}]};
 process_incoming(st_data,?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR,ack_nr = PeerSeqNo} = Net,
                  #utp_packet{ack_no = AckNo,seq_no = PeerSeqNo,
@@ -183,45 +192,44 @@ process_incoming(st_reset,_,Net,_,_) ->
 connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
   Packet = ai_utp_protocol:make_syn_packet(),
   {Net#utp_net{
+     last_send = ai_utp_util:microsecond(),
      conn_id = ConnID,
      peer_conn_id = ai_utp_util:bit16(ConnID + 1),
      seq_nr = 2,
      state = ?SYN_SEND},
    Packet#utp_packet{conn_id = ConnID,
-                        win_sz = MaxWindow}}.
+                     win_sz = MaxWindow}}.
 accept(#utp_net{max_window = MaxWindow} = Net,
        #utp_packet{
           conn_id = PeerConnID,
           seq_no = AckNo,
-          win_sz = PeerWinSize} = Packet, Timing)->
+          win_sz = PeerWinSize} = Packet,
+       {_,_,Now} = Timing)->
 
   SeqNo = ai_utp_util:bit16_random(),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
   ConnID = ai_utp_util:bit16(PeerConnID + 1),
   Net0 = Net#utp_net{
-     max_peer_window = PeerWinSize,
-     conn_id = ConnID,
-     peer_conn_id = PeerConnID,
-     ack_nr = ai_utp_util:bit16(AckNo + 1),
-     seq_nr = ai_utp_util:bit16(SeqNo + 1) ,
-     state  = ?SYN_RECEIVE},
+           last_send = Now,
+           last_recv = Now,
+           max_peer_window = PeerWinSize,
+           conn_id = ConnID,
+           peer_conn_id = PeerConnID,
+           ack_nr = ai_utp_util:bit16(AckNo + 1),
+           seq_nr = ai_utp_util:bit16(SeqNo + 1) ,
+           state  = ?SYN_RECEIVE},
   Net1 = ack(Net0, Packet, Timing),
   {Net1,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
    ConnID,Net1#utp_net.reply_micro}.
-state(#utp_net{state = State})-> State.
-rto(#utp_net{rtt = RTT})->
-  ai_utp_rtt:rto(RTT).
 
+state(#utp_net{state = State})-> State.
+rto(#utp_net{rtt = RTT})-> ai_utp_rtt:rto(RTT).
 
 fill_from_proc(Net,Bytes,Proc)->
   TxQ = queue:new(),
   fill_from_proc(Net,Bytes,Proc,TxQ).
 
-fill_from_proc(Net, 0, Proc,TxQ)->
-  {Net#utp_net{
-     last_maxed_out_window = ai_utp_util:millisecond(),
-     maxed_out_window = true
-    },Proc,TxQ};
+fill_from_proc(Net, 0, Proc,TxQ)-> {Net,Proc,TxQ};
 fill_from_proc(Net,Bytes,Proc,TxQ) ->
   ToFill =
     if Bytes =< ?PACKET_SIZE -> Bytes;
@@ -236,17 +244,14 @@ fill_from_proc(Net,Bytes,Proc,TxQ) ->
     zero -> {Net,Proc,TxQ}
   end.
 
-send_tx_queue(#utp_net{ack_nr = AckNR,
+transmit(#utp_net{ack_nr = AckNR,
                        seq_nr = SeqNR,
                        max_window = MaxWindow,
                        cur_window = CurWindow,
                        cur_window_packets = CurWindowPackets,
                        outbuf = OutBuf,
-                       peer_conn_id = PeerConnID,
-                       reply_micro = ReplyMicro
-                      }= Net,TxQ)->
-  L = queue:to_list(TxQ),
-  Now = ai_utp_util:microsecond(),
+                       peer_conn_id = PeerConnID
+                      }= Net,TxQ,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   {SeqNR0,Packets,CurWindow0,CurWindowPackets0,OutBuf0} =
     lists:foldl(fun(Bin,{SeqNo,Acc,CurWindowAcc,
@@ -264,19 +269,25 @@ send_tx_queue(#utp_net{ack_nr = AckNR,
                     {ai_utp_util:bit16(SeqNo+1),[Packet0|Acc],
                      CurWindowAcc + Size,CurWindowPacketsAcc +1,
                      queue:in(WrapPacket, WarpAcc)}
-                end,{SeqNR,[],CurWindow,CurWindowPackets,OutBuf},L),
+                end,{SeqNR,[],CurWindow,CurWindowPackets,OutBuf},TxQ),
   {Net#utp_net{
      cur_window_packets = CurWindowPackets0,
      cur_window = CurWindow0,
      outbuf = OutBuf0,
      seq_nr = SeqNR0
-    },lists:reverse(Packets),Now,ReplyMicro}.
+    },lists:reverse(Packets)}.
 
 do_send(Net,Proc)->
   MaxSendBytes = max_send_bytes(Net),
   {Net0,Proc0,TxQ} = fill_from_proc(Net, MaxSendBytes, Proc),
-  Result = send_tx_queue(Net0, TxQ),
-  {Result,Proc0}.
+  TxQ0 = queue:to_list(TxQ),
+  Now = ai_utp_util:microsecond(),
+  {Net1,Packets} =
+    if erlang:length(TxQ0) > 0 ->
+        transmit(Net0#utp_net{last_send = Now}, TxQ0,Now);
+       true ->{Net0,[]}
+    end,
+  {{Net1,Packets,Now,Net1#utp_net.reply_micro},Proc0}.
 
 do_read(#utp_net{inbuf = InBuf} = Net)->
   Size = erlang:byte_size(InBuf),
@@ -308,9 +319,35 @@ expire_resend(#utp_net{ack_nr = AckNR,
                 end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
-on_tick(Net,Proc)->
+force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now)->
+  Diff = Now - LastSend,
+  Packets0 =
+    if ((State == ?ESTABLISHED) orelse (State == ?CLOSING)) andalso
+       ((Diff > ?MAX_SEND_IDLE_TIME) andalso erlang:length(Packets) == 0) ->
+        [send_ack(Net)];
+       true  -> Packets
+    end,
+  if erlang:length(Packets0) > 0 ->
+      {Net#utp_net{last_send = Now},Packets0};
+     true ->{ Net,Packets0 }
+  end.
+
+on_tick({?ERROR,_},Net,Proc)->
   Now = ai_utp_util:microsecond(),
-  RTO = rto(Net),
-  {Net0,Packets0} = expire_resend(Net,Now,RTO),
-  {{Net1,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
-  {{Net1,Packets0 ++ Packets1,Now,ReplyMicro},Proc0}.
+  {{Net,[],Now,Net#utp_net.reply_micro},Proc};
+on_tick(?CLOSED,Net,Proc)->
+  Now = ai_utp_util:microsecond(),
+  {{Net,[],Now,Net#utp_net.reply_micro},Proc};
+on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
+  Now = ai_utp_util:microsecond(),
+  Diff = Now - LastReceived,
+  if Diff >= ?MAX_RECV_IDLE_TIME ->
+      {{Net#utp_net{state = {?ERROR,econnaborted}},
+       [],Now,Net#utp_net.reply_micro},Proc};
+     true ->
+      RTO = rto(Net),
+      {Net0,Packets0} = expire_resend(Net,Now,RTO),
+      {{Net1,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
+      {Net2,Packets} = force_state(State,Net1,Packets0 ++ Packets1,Now),
+      {{Net2,Packets,Now,ReplyMicro},Proc0}
+  end.

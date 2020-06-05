@@ -21,7 +21,9 @@
 -define(OPT_RECV_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
 -define(OPT_SEND_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
 
--define(REORDER_BUFFER_SIZE, 32).
+%us
+-define(MAX_RECV_IDLE_TIME,30000000).
+-define(MAX_SEND_IDLE_TIME,25000000).
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
 %% 每个来回最大可以增加3000 bytes的窗口
@@ -85,16 +87,15 @@
          rtt = none,
          our_ledbat = none,
          peer_ledbat = none,
-         %% Round trip time measurements and LEDBAT
-         min_rtt = 30000000 :: integer(),
          %% --------------------
          %% ms, When was the window last totally full (in send direction)
          last_maxed_out_window :: integer(),
-         maxed_out_window = false,
          fin_sent = false,
          fin_acked = false,
          got_fin = false,
          eof_seq_no = -1,
          conn_id,
-         peer_conn_id
+         peer_conn_id,
+         last_send = 0 :: integer(),
+         last_recv = 0:: integer()
         }).

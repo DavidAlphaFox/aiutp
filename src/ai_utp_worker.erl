@@ -177,7 +177,7 @@ handle_call({active,true},_From,State) ->
 handle_cast({packet,Packet,Timing},
             #state{net = Net,socket = Socket,
                    remote = Remote, connector = undefined,
-                   tick_timer = Timer} = State)->
+                   tick_timer = Timer,process = Proc} = State)->
   cancle_tick_timer(Timer),
   {Net0,Packets,TS,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   case ai_utp_net:state(Net0) of
@@ -187,10 +187,12 @@ handle_cast({packet,Packet,Timing},
       if NetState == ?CLOSED ->
           handle_info(timeout, State#state{net = Net0,tick_timer = undefined});
          true ->
-          {noreply,
-           active_read(State#state{
-                         net = Net0,
-                         tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)})}
+          {{Net1,Packets1,TS1,TSDiff1},Proc0} = ai_utp_net:do_send(Net0,Proc),
+          send(Socket,Remote,Packets1,TS1,TSDiff1),
+          Timer0 = start_tick_timer(?TIMER_TIMEOUT, undefined),
+          {noreply,active_read(State#state{tick_timer = Timer0,
+                                           net = Net1,
+                                           process = Proc0})}
       end
   end;
 %% 正在进行链接
@@ -202,9 +204,10 @@ handle_cast({packet,Packet,Timing},
   case ai_utp_net:state(Net0) of
     {'ERROR',Reason} ->
       gen_server:reply(Connector, {error,Reason}),
-      handle_info(timeout,State#state{connector = undefined,
-                                      controller = undefined,
-                                      tick_timer = undefined});
+      handle_info(timeout,
+                  State#state{connector = undefined,
+                              controller = undefined,
+                              tick_timer = undefined});
     ?ESTABLISHED ->
       gen_server:reply(Connector, ok),
       {noreply,State#state{net = Net0,connector = undefined,
@@ -377,24 +380,28 @@ on_tick(?SYN_SEND,N,
                  tick_timer = undefined
                 },0};
      true ->
-      {Net0,Packet} = ai_utp_net:connect(ConnID, Net),
+      {Net0,Packet} = ai_utp_net:connect(Net,ConnID),
       ok = ai_utp_util:send(Socket, Remote, Packet, 0),
       {noreply,State#state{
                  net = Net0,
                  tick_timer = start_tick_timer(N *2, undefined)
                 }}
   end;
-on_tick(?ESTABLISHED,_,#state{socket = Socket,
-                              remote = Remote,
-                              net = Net} = State) ->
+on_tick(NetState,_,#state{socket = Socket,
+                          remote = Remote,
+                          net = Net,process = Proc} = State) ->
   
-  {Net0,Packets,TS,TSDiff} = ai_utp_net:on_tick(Net),
+  {{Net0,Packets,TS,TSDiff},Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
   case ai_utp_net:state(Net0) of
     {?ERROR,_} -> handle_info(timeout, State#state{net = Net0} );
-    _ ->
+    NetState0 ->
       send(Socket,Remote,Packets,TS,TSDiff),
-      Timer = start_tick_timer(?TIMER_TIMEOUT,undefined),
-      {noreply,State#state{tick_timer = Timer,net = Net0}}
+      Timer =
+        if NetState0 == ?CLOSED -> undefined;
+           true ->
+            start_tick_timer(?TIMER_TIMEOUT,undefined)
+        end,
+      {noreply,State#state{tick_timer = Timer,net = Net0,process = Proc0}}
   end.
 
 send(Socket,Remote,Packets,TS,TSDiff)->
@@ -406,11 +413,17 @@ active_read(#state{parent = Parent,
                    net = Net,
                    controller = Control,
                    active = true} = State)->
+  Self = self(),
   case ai_utp_net:do_read(Net) of
     {Net0,Buffer} ->
-      Self = self(),
       Control ! {utp_data,{utp,Parent,Self},Buffer},
       State#state{net = Net0,active = false};
-     _ -> State
+     _ ->
+      case  ai_utp_net:state(Net) of
+        {?ERROR,_} ->  Self ! timeout;
+        ?CLOSED -> Self ! timeout;
+        _ -> ok
+      end,
+      State
   end;
 active_read(State) -> State.

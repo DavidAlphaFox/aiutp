@@ -93,7 +93,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
 
 
 ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS, Now) ->
-  {ok, _NewRTO, NewRTT} = utp_rtt:ack_packet(RTT,TS,Now),
+  {ok, _NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,Now),
   Net#utp_net{rtt = NewRTT}.
   
 cc(#utp_net{cur_window = CurWindow} = Net,
@@ -106,9 +106,10 @@ cc(#utp_net{cur_window = CurWindow} = Net,
   Net0 = update_reply_micro(Net, Now, TS),
   Net1 = update_our_ledbat(Net0, ActualDelay),
   Net2 = update_estimate_exceed(Net1, MinRTT),
+  NowMS = Now / 1000,
   Net3 =
     if ActualDelay > 0 andalso AckBytes > 0 ->
-        congestion_control(Net2,AckBytes,Now / 1000,MinRTT);
+        congestion_control(Net2,AckBytes,NowMS,MinRTT);
        true -> Net2
     end,
   CurWindow0 = CurWindow - AckBytes,
@@ -117,8 +118,14 @@ cc(#utp_net{cur_window = CurWindow} = Net,
        true -> 0
     end,
   Net4 =
-    Net3#utp_net{max_peer_window = WndSize,
-                 cur_window = CurWindow1 },
+    if WndSize == 0 ->
+        Net3#utp_net{max_peer_window = WndSize,
+                     last_maxed_out_window = NowMS,
+                     cur_window = CurWindow1 };
+       true ->
+        Net3#utp_net{max_peer_window = WndSize,
+                     cur_window = CurWindow1 }
+    end,
   lists:foldl(
     fun(Time,Acc)-> ack_packet_rtt(Acc, Time, Now) end,
     Net4, Times).
