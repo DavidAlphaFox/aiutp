@@ -219,7 +219,7 @@ pair_incoming(Remote,Packet,Timing,
                      syns = Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({SYN,Remote0})->
+      fun({Remote0,SYN,_})->
           if
             (Remote ==  Remote0) andalso
             (SYN#utp_packet.conn_id == Packet#utp_packet.conn_id) ->
