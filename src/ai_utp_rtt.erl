@@ -48,12 +48,17 @@ rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
 
 %% ACKnowledge an incoming packet
 ack(RTT, TimeSent, TimeAcked) ->
-  true = TimeAcked >= TimeSent,
-  Estimate = ai_utp_util:bit32(TimeAcked - TimeSent) div 1000,
+  if
+    TimeAcked >= TimeSent->
+      Estimate = ai_utp_util:bit32(TimeAcked - TimeSent) div 1000,
 
-  NewRTT = update(Estimate, RTT),
-  NewRTO = rto(NewRTT),
-  {ok, NewRTO, NewRTT}.
+      NewRTT = update(Estimate, RTT),
+      NewRTO = rto(NewRTT),
+      {ok, NewRTO, NewRTT};
+    true ->
+      RTO = rto(RTT),
+      {ok,RTO,RTT}
+  end.
 
 %% Every time a socket sends or receives a packet, it updates its
 %% timeout counter. If no packet has arrived within timeout number of
