@@ -129,7 +129,7 @@ sack(_,[],I,Bin)->
      true -> <<Bin/binary,I/big-integer>>
   end;
 
-sack(Base,[#utp_packet{seq_no = SeqNo}|T],I,Bin)->
+sack(Base,[{SeqNo,_}|T],I,Bin)->
   Index = ai_utp_util:bit16(SeqNo - Base),
   if Index >= ?REORDER_BUFFER_MAX_SIZE -> sack(Base,[],I,Bin);
      true ->
