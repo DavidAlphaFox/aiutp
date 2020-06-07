@@ -4,7 +4,7 @@
 -export([process_incoming/3]).
 -export([connect/2,accept/3]).
 -export([state/1,do_send/2,do_read/1]).
--export([on_tick/3]).
+-export([on_tick/3,net_error/1]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -190,7 +190,7 @@ process_incoming(st_state,?SYN_SEND,
      true -> Net
   end;
 process_incoming(st_reset,_,Net,_,_) ->
-  Net#utp_net{state = {?ERROR,econnrefused}}.
+  Net#utp_net{state = ?CLOSED,error=econnrefused}.
 
 connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
   Packet = ai_utp_protocol:make_syn_packet(),
@@ -337,9 +337,7 @@ force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now)->
      true ->{ Net,Packets0 }
   end.
 
-on_tick({?ERROR,_},Net,Proc)->
-  Now = ai_utp_util:microsecond(),
-  {{Net,[],Now,Net#utp_net.reply_micro},Proc};
+
 on_tick(?CLOSED,Net,Proc)->
   Now = ai_utp_util:microsecond(),
   {{Net,[],Now,Net#utp_net.reply_micro},Proc};
@@ -347,7 +345,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
-      {{Net#utp_net{state = {?ERROR,econnaborted}},
+      {{Net#utp_net{state = ?CLOSED,error =econnaborted},
        [],Now,Net#utp_net.reply_micro},Proc};
      true ->
       RTO = rto(Net),
@@ -356,3 +354,6 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
       {Net2,Packets} = force_state(State,Net1,Packets0 ++ Packets1,Now),
       {{Net2,Packets,Now,ReplyMicro},Proc0}
   end.
+
+net_error(#utp_net{error = Error})->
+  Error.

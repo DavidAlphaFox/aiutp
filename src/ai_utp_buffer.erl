@@ -26,9 +26,7 @@ in(SeqNo,Payload,
     true -> duplicate;
     false ->
       Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
-      Distance = ai_utp_util:bit16(AckNR - 1 - SeqNo),
-      if (Less == true) andalso (Distance =< ?REORDER_BUFFER_MAX_SIZE) ->
-          duplicate;
+      if Less == true -> duplicate;
          true ->
           {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
       end

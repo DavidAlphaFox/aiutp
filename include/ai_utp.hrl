@@ -9,7 +9,6 @@
 -define(CLOSED,'CLOSED').
 -define(CLOSING,'CLOSING').
 -define(CLOSE_WAIT,'CLOSE_WAIT').
--define(ERROR,'ERROR').
 
 -define(RTT_MAX,9223372036854775807).
 -define(TS_DIFF_MAX,2147483647).
@@ -58,6 +57,7 @@
          %%rcvbuf setting, in bytes
          opt_rcvbuf = ?OPT_RECV_BUF,
          state = undefined,
+         error = normal,
          %% the number of packets in the send queue. Packets that haven't
          %% yet been sent count as well as packets marked as needing resend
          %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
