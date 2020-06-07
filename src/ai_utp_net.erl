@@ -107,10 +107,12 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
      true -> do_resend(Net,Now)
   end.
 
-
-process_incoming(#utp_net{state = State }= Net,
-                 #utp_packet{type = Type } = Packet,
+process_incoming(#utp_net{state = State, seq_nr = SeqNR,
+                         ack_nr = AckNR}= Net,
+                 #utp_packet{type = Type,seq_no = SeqNo,
+                             ack_no = AckNo} = Packet,
                  Timing) ->
+  io:format("~p PeerSeq:~p MyAck:~p PeerAck:~p MySeq:~p~n",[Type,SeqNo,AckNR,AckNo,SeqNR]),
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;

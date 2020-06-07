@@ -119,35 +119,8 @@ sack_packet(Bits,Pos,Warp,{Count,Acks,UnAcks})->
          true -> {Count,Acks,[Warp|UnAcks]}
       end
   end.
-sack(_,#utp_net{reorder = []}) -> undefined;
-sack(Base,#utp_net{reorder = Reorder}) ->
-  sack(Base,Reorder,undefined,<<>>).
+%sack(_,#utp_net{reorder = []}) -> undefined;
+%sack(Base,#utp_net{reorder = Reorder}) ->
+%  sack(Base,Reorder,undefined,<<>>).
+sack(_,_)-> undefined.
 
-
-sack(_,[],I,Bin)->
-  if I == undefined -> Bin;
-     true -> <<Bin/binary,I/big-integer>>
-  end;
-
-sack(Base,[{SeqNo,_}|T],I,Bin)->
-  Index = ai_utp_util:bit16(SeqNo - Base),
-  if Index >= ?REORDER_BUFFER_MAX_SIZE -> sack(Base,[],I,Bin);
-     true ->
-      Size = erlang:byte_size(Bin),
-      IndexDiff = (Index bsr 3) - (Size - 1),
-      {Bin0,I0} =
-        if (IndexDiff > 1) andalso (I == undefined)->
-            Offset = (IndexDiff - 1) * 8,
-            {<<Bin/bits,0:Offset>>,0};
-           IndexDiff > 1 ->
-            Offset = (IndexDiff - 2) * 8,
-            {<<Bin/bits,I/big-integer,0:Offset>>,0};
-           true -> {Bin,I}
-        end,
-      Mask = 1 bsl (Index band 7),
-      I1 =
-        if I0 == undefined -> Mask bor 0;
-           true -> Mask bor I0
-        end,
-      sack(Base,T,I1,Bin0)
-  end.
