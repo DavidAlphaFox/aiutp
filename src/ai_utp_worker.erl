@@ -185,7 +185,7 @@ handle_call({send,Data},From,
       Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
       {{Net0,Packets,TS,TSDiff},Proc1} = ai_utp_net:do_send(Net, Proc0),
       send(Socket,Remote,Packets,TS,TSDiff),
-      {noreply,State#state{net = Net0,process = Proc1}}
+      {noreply,active_read(State#state{net = Net0,process = Proc1})}
   end;
 handle_call({active,true},_From,State) ->
   {reply,ok,active_read(State#state{active = true})};
@@ -446,7 +446,7 @@ active_read(#state{parent = Parent,
   Self = self(),
   case ai_utp_net:do_read(Net) of
     {Net0,Buffer} ->
-      Control ! {utp_data,{utp,Parent,Self},Buffer},
+      Control ! {utp,{utp,Parent,Self},Buffer},
       State#state{net = Net0,active = false};
      _ ->
       case ai_utp_net:state(Net) of
