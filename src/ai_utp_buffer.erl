@@ -145,6 +145,9 @@ sack(Base,[{SeqNo,_}|T],I,Bin)->
            true -> {Bin,I}
         end,
       Mask = 1 bsl (Index band 7),
-      I1 = Mask bor I0,
+      I1 =
+        if I0 == undefined -> Mask bor 0;
+           true -> Mask bor I0
+        end,
       sack(Base,T,I1,Bin0)
   end.
