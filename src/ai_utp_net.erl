@@ -108,12 +108,9 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
   end.
 
 
-process_incoming(#utp_net{state = State,last_recv = LastReceived,last_send = LastSend }= Net,
-                 #utp_packet{type = Type,win_sz = PeerWinSize } = Packet,
+process_incoming(#utp_net{state = State }= Net,
+                 #utp_packet{type = Type } = Packet,
                  Timing) ->
-  WinSize = window_size(Net),
-  io:format("Peer WinSize: ~p WinSize:~p~n",[PeerWinSize,WinSize]),
-  io:format("LastSend:~p LastReceived:~p~n",[LastSend,LastReceived]),
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;
