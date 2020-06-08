@@ -129,18 +129,18 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,seq_nr = SeqNR} = Net,
        true -> none
     end,
   Now = ai_utp_util:microsecond(),
-  {LostCount,Net1,Packets0} = resend(Net0,Now),
-  #utp_net{rtt = RTT} = Net1,
-  RTT0 = ai_utp_rtt:lost(RTT,LostCount),
-  Net2 = Net1#utp_net{rtt = RTT0},
+  %{LostCount,Net1,Packets0} = resend(Net0,Now),
+  %#utp_net{rtt = RTT} = Net1,
+  %RTT0 = ai_utp_rtt:lost(RTT,LostCount),
+  %Net2 = Net1#utp_net{rtt = RTT0},
   Packets1 =
-    if AckPacket == none -> Packets ++ Packets0;
-       true -> [AckPacket|Packets] ++ Packets0
+    if AckPacket == none -> Packets;
+       true -> [AckPacket|Packets]
     end,
   Net3 =
     if erlang:length(Packets1) > 0 ->
-        Net2#utp_net{last_send = Now,last_recv = Now};
-       true -> Net2#utp_net{last_recv = Now}
+        Net0#utp_net{last_send = Now,last_recv = Now};
+       true -> Net0#utp_net{last_recv = Now}
     end,
   {Net3,Packets1,Now,Net3#utp_net.reply_micro}.
 
