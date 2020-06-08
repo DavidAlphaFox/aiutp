@@ -174,6 +174,7 @@ sack(Base,[{SeqNo,_}|T],Pos,Map)->
                    Map,lists:seq(Pos +1 ,Pos0)),
           Bits = maps:get(Pos0,Map0),
           Bits0 = Mask bor Bits,
-          sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0))
+          sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0));
+         true -> sack(Base,T,Pos,Map)
       end
   end.
