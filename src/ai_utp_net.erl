@@ -93,14 +93,15 @@ do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
                        transmissions = Trans,
                        need_resend = Resend
                       } = WrapPacket,{Count0,Packets,Out})->
-                    if Resend == true  ->
+                    if (Resend == true) and (Count0 < 5)  ->
                         {Count0+1,[Packet#utp_packet{ack_no = AckNo,
                                            win_sz = WinSize}|Packets],
                         queue:in(WrapPacket#utp_packet_wrap{
                                    need_resend = false,
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Count0,Packets,queue:in(WrapPacket, Out)}
+                       true-> {Count0,Packets,
+                               queue:in(WrapPacket#utp_packet_wrap{need_resend = false}, Out)}
                     end
                 end,{0,[],queue:new()},queue:to_list(OutBuf)),
   {Count,Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
