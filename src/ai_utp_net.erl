@@ -300,24 +300,24 @@ expire_resend(#utp_net{ack_nr = AckNR,
                    outbuf = OutBuf} = Net,Now,RTO)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {Packets,OutBuf0} =
+  {Count,Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
                        transmissions = Trans,
                        send_time = SendTime
-                      } = WrapPacket,{Packets,Out})->
+                      } = WrapPacket,{Count0,Packets,Out})->
                     Diff = (Now - SendTime) / 1000,
                     if (Diff > RTO) andalso (Trans > 0)->
-                        {[Packet#utp_packet{
+                        {Count0 + 1,[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],
                          queue:in(WrapPacket#utp_packet_wrap{
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Packets,queue:in(WrapPacket, Out)}
+                       true-> {Count0,Packets,queue:in(WrapPacket, Out)}
                     end
                 end,{[],queue:new()},queue:to_list(OutBuf)),
-  {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
+  {Count,Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 force_state(State,#utp_net{
                      last_send = LastSend
@@ -346,9 +346,9 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
        [],Now,Net#utp_net.reply_micro},Proc};
      true ->
       RTO = rto(Net),
-      {Net0,Packets0} = expire_resend(Net,Now,RTO),
+      {Count,Net0,Packets0} = expire_resend(Net,Now,RTO),
       #utp_net{rtt = RTT} = Net0,
-      RTT0 = ai_utp_rtt:lost(RTT,erlang:length(Packets0) - 1),
+      RTT0 = ai_utp_rtt:lost(RTT,Count),
       Net1 = Net0#utp_net{rtt = RTT0},
       {{Net2,Packets1,_,ReplyMicro},Proc0} = do_send(Net1,Proc),
       {Net3,Packets} = force_state(State,Net2,Packets0 ++ Packets1,Now,RTO),
