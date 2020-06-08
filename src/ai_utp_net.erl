@@ -316,7 +316,7 @@ expire_resend(#utp_net{ack_nr = AckNR,
                                    send_time = Now},Out)};
                        true-> {Count0,Packets,queue:in(WrapPacket, Out)}
                     end
-                end,{[],queue:new()},queue:to_list(OutBuf)),
+                end,{0,[],queue:new()},queue:to_list(OutBuf)),
   {Count,Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 force_state(State,#utp_net{
