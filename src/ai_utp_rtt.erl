@@ -25,7 +25,7 @@
 
 %% rtt and rtt_var are calculated by the following formula, every time
 %% a packet is ACKed:
-
+lost(none,_) -> #ai_utp_rtt{};
 lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
   Delay0 =
     if LostCount > 0 -> Delay * 1.5;
