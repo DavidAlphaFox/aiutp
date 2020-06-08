@@ -275,6 +275,7 @@ transmit(#utp_net{ack_nr = AckNR,
                      CurWindowAcc + Size,CurWindowPacketsAcc +1,
                      queue:in(WrapPacket, WarpAcc)}
                 end,{SeqNR,[],CurWindow,CurWindowPackets,OutBuf},TxQ),
+  io:format("start seqNR:~p, end seqNR:~p~n",[SeqNR,SeqNR0]),
   {Net#utp_net{
      cur_window_packets = CurWindowPackets0,
      cur_window = CurWindow0,
