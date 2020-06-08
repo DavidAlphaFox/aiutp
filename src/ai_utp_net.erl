@@ -326,7 +326,7 @@ force_state(State,#utp_net{
   Packets0 =
     if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
        andalso (erlang:length(Packets) == 0)
-       andalso (Diff > RTO)-> [send_ack(Net)];
+       andalso (Diff > ?MAX_SEND_IDLE_TIME)-> [send_ack(Net)];
        true  -> Packets
     end,
   if erlang:length(Packets0) > 0 ->
