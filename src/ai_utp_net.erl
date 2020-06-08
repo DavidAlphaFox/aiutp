@@ -111,11 +111,11 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
   if IsEmpty == true -> {0,Net,[]};
      true -> do_resend(Net,Now)
   end.
-process_incoming(#utp_net{state = State,ack_nr = AckNR} = Net,
+process_incoming(#utp_net{state = State,ack_nr = AckNR,seq_nr = SeqNR} = Net,
                  #utp_packet{type = Type,seq_no = SeqNo,ack_no = AckNo} = Packet,
                  Timing) ->
   if Type == st_data ->
-      io:format("Seq: ~p AckNR: ~p Ack:~p~n",[SeqNo,AckNR,AckNo]);
+      io:format("Seq: ~p AckNR: ~p Ack:~p SeqNR:~p~n",[SeqNo,AckNR,AckNo,SeqNR]);
      true -> ok
   end,
 
