@@ -35,16 +35,11 @@ window_size(#utp_net{cur_window = CurWindow,
 max_send_bytes(#utp_net{
                   max_window = MaxWindow,
                   max_peer_window = MaxPeerWindow,
-                  cur_window = CurWindow,
-                  cur_window_packets = CurWindowPackets})->
-  if
-    CurWindowPackets > ?REORDER_BUFFER_MAX_SIZE -> 0;
-    true ->
-      SendBytes = MaxWindow - CurWindow,
-      if SendBytes >= ?PACKET_SIZE ->
-          erlang:min(MaxPeerWindow,SendBytes);
-         true -> 0
-      end
+                  cur_window = CurWindow})->
+  SendBytes = MaxWindow - CurWindow,
+  if SendBytes >= ?PACKET_SIZE ->
+      erlang:min(MaxPeerWindow,SendBytes);
+     true -> 0
   end.
 
 %% 最后阶段计算并清理所有被Ack过的包
@@ -107,12 +102,9 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
      true -> do_resend(Net,Now)
   end.
 
-process_incoming(#utp_net{state = State, seq_nr = SeqNR,
-                         ack_nr = AckNR}= Net,
-                 #utp_packet{type = Type,seq_no = SeqNo,
-                             ack_no = AckNo} = Packet,
+process_incoming(#utp_net{state = State}= Net,
+                 #utp_packet{type = Type} = Packet,
                  Timing) ->
-  io:format("~p PeerSeq:~p MyAck:~p PeerAck:~p MySeq:~p~n",[Type,SeqNo,AckNR,AckNo,SeqNR]),
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;
