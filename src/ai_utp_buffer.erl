@@ -128,7 +128,6 @@ sack_packet(Bits,Pos,Warp,{Count,Acks,UnAcks})->
       end
   end.
 
-sack(_,_)-> undefined.
 sack(_,#utp_net{reorder = []}) -> undefined;
 sack(Base,#utp_net{reorder = Reorder}) ->
   sack(Base,Reorder,undefined,<<>>).
