@@ -27,10 +27,16 @@ ack_bytes(AckPackets,Now)->
         end
     end, {?RTT_MAX,[],0}, AckPackets).
 
-window_size(#utp_net{cur_window = CurWindow,
-                     max_window = MaxWindow})->
-  if MaxWindow > CurWindow ->
-      MaxWindow - CurWindow;
+window_size(#utp_net{opt_rcvbuf = OptRcvBuf,
+                     inbuf = InBuf,
+                     reorder = Reorder}) ->
+  RLength = erlang:length(Reorder),
+  Size = erlang:byte_size(InBuf),
+  if RLength < ?HALF_CIRCLE ->
+      if OptRcvBuf > Size ->
+          OptRcvBuf - Size;
+         true -> 0
+      end;
      true -> 0
   end.
 max_send_bytes(#utp_net{
@@ -74,8 +80,6 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
   end.
 
 
-
-
 do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
@@ -102,10 +106,14 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
   if IsEmpty == true -> {Net,[]};
      true -> do_resend(Net,Now)
   end.
-
-process_incoming(#utp_net{state = State} = Net,
-                 #utp_packet{type = Type} = Packet,
+process_incoming(#utp_net{state = State,ack_nr = AckNR} = Net,
+                 #utp_packet{type = Type,seq_no = SeqNo,ack_no = AckNo} = Packet,
                  Timing) ->
+  if Type == st_data ->
+      io:format("Seq: ~p AckNR: ~p Ack:~p~n",[SeqNo,AckNR,AckNo]);
+     true -> ok
+  end,
+
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;
