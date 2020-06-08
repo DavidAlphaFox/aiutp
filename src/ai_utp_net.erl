@@ -333,12 +333,16 @@ expire_resend(#utp_net{ack_nr = AckNR,
                 end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
-force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now)->
+force_state(State,#utp_net{last_send = LastSend,
+                           reorder = Reorder} = Net,Packets,Now,RTO)->
   Diff = Now - LastSend,
   Packets0 =
-    if ((State == ?ESTABLISHED) orelse (State == ?CLOSING)) andalso
-       ((Diff > ?MAX_SEND_IDLE_TIME) andalso erlang:length(Packets) == 0) ->
-        [send_ack(Net)];
+    if (State == ?ESTABLISHED) orelse (State == ?CLOSING) ->
+        RLength = erlang:length(Reorder),
+        if Diff > ?MAX_SEND_IDLE_TIME -> [send_ack(Net)];
+           (Diff > RTO ) and (RLength > 0) -> [send_ack(Net)];
+           true -> Packets
+        end;
        true  -> Packets
     end,
   if erlang:length(Packets0) > 0 ->
@@ -360,7 +364,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
       RTO = rto(Net),
       {Net0,Packets0} = expire_resend(Net,Now,RTO),
       {{Net1,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
-      {Net2,Packets} = force_state(State,Net1,Packets0 ++ Packets1,Now),
+      {Net2,Packets} = force_state(State,Net1,Packets0 ++ Packets1,Now,RTO),
       {{Net2,Packets,Now,ReplyMicro},Proc0}
   end.
 
