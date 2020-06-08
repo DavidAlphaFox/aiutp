@@ -3,11 +3,11 @@
 -export([rto/1,ack/3,lost/2]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
--define(DEFAULT_RTT_TIMEOUT, 500).
+-define(DEFAULT_RTT_TIMEOUT, 300).
 
 -record(ai_utp_rtt, {
-                     rtt = 500 :: integer(),
-                     var = 800 :: integer(),
+                     rtt = 300 :: integer(),
+                     var = 500 :: integer(),
                      delay = 1.5
                     }).
 
