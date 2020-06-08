@@ -168,23 +168,27 @@ sack(_,[],Pos,Map)->
      true -> Bin0
   end;
 sack(Base,[{SeqNo,_}|T],Pos,Map)->
-  Index = ai_utp_util:bit16(SeqNo - Base),
-  %% 0 - 991,共992个元素
-  if Index >= 992 -> sack(Base,[],Pos,Map);
-     true ->
-      Pos0 = Index bsr 3,
-      Mask = 1 bsl (Index band 7),
-      if Pos0 == Pos ->
-          Bits = maps:get(Pos,Map),
-          Bits0 = Mask bor Bits,
-          sack(Base,T,Pos,maps:put(Pos0,Bits0,Map));
-         Pos0 > Pos ->
-          Map0 = lists:foldl(
-                   fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
-                   Map,lists:seq(Pos +1 ,Pos0)),
-          Bits = maps:get(Pos0,Map0),
-          Bits0 = Mask bor Bits,
-          sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0));
-         true -> sack(Base,T,Pos,Map)
-      end
+  Less = ai_utp_util:wrapping_compare_less(Base, SeqNo, ?ACK_NO_MASK),
+  if (Less == true) or (SeqNo == Base)->
+      Index = ai_utp_util:bit16(SeqNo - Base),
+      %% 0 - 991,共992个元素
+      if Index >= 992 -> sack(Base,[],Pos,Map);
+         true ->
+          Pos0 = Index bsr 3,
+          Mask = 1 bsl (Index band 7),
+          if
+            Pos0 > Pos ->
+              Map0 = lists:foldl(
+                       fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
+                       Map,lists:seq(Pos +1 ,Pos0)),
+              Bits = maps:get(Pos0,Map0),
+              Bits0 = Mask bor Bits,
+              sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0));
+            true ->
+              Bits = maps:get(Pos,Map),
+              Bits0 = Mask bor Bits,
+              sack(Base,T,Pos,maps:put(Pos0,Bits0,Map))
+          end
+      end;
+     true -> sack(Base,T,Pos,Map)
   end.
