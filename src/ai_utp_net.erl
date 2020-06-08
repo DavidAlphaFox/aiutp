@@ -83,22 +83,23 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
 do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {Packets,OutBuf0} =
+  {_,Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
                        transmissions = Trans,
                        need_resend = Resend
-                      } = WrapPacket,{Packets,Out})->
-                    if Resend == true  ->
-                        {[Packet#utp_packet{ack_no = AckNo,
+                      } = WrapPacket,{Count,Packets,Out})->
+                    if (Resend == true) andalso (Count < 10)  ->
+                        {Count +1,[Packet#utp_packet{ack_no = AckNo,
                                            win_sz = WinSize}|Packets],
                         queue:in(WrapPacket#utp_packet_wrap{
                                    need_resend = false,
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Packets,queue:in(WrapPacket, Out)}
+                       true-> {Count,Packets,
+                               queue:in(WrapPacket#utp_packet_wrap{need_resend = false}, Out)}
                     end
-                end,{[],queue:new()},queue:to_list(OutBuf)),
+                end,{0,[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 resend(#utp_net{outbuf = OutBuf} = Net,Now)->
@@ -315,7 +316,7 @@ expire_resend(#utp_net{ack_nr = AckNR,
                       } = WrapPacket,{Count,Packets,Out})->
                     Diff = (Now - SendTime) / 1000,
                     if (Diff > RTO) andalso (Trans > 0)
-                       andalso (Count < 5)->
+                       andalso (Count < 10)->
                         {Count +1 ,[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],

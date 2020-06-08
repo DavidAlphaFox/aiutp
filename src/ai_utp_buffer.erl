@@ -97,10 +97,9 @@ fast_resend(_,_,[])-> [];
 fast_resend(AckNo,WindowStart,
             [#utp_packet_wrap{
                 wanted = Wanted,
-                transmissions = Trans,
                 packet = #utp_packet{seq_no = WindowStart}} = H|T] = OutBuf) ->
   Diff = ai_utp_util:bit16(WindowStart - AckNo),
-  if (Diff == 1) and (Trans == 1) ->
+  if Diff == 1 ->
       Packet =
         if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
             H#utp_packet_wrap{wanted = Wanted + 1, need_resend = true};
@@ -114,14 +113,16 @@ fast_resend(_,_,OutBuf) -> OutBuf.
 sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
-  lists:foldl(fun(#utp_packet_wrap{
-                     packet = #utp_packet{seq_no = SeqNo}} = Warp,
-                  {Acks0,UnAcks0} = Acc)->
-                  Pos = ai_utp_util:bit16(SeqNo - AckNo - 2),
-                  if Pos < Max ->sack_packet(Bits,Pos,Warp,Acc);
-                     true ->{Acks0,[Warp|UnAcks0]}
-                  end
-              end, {[],[]}, lists:reverse(OutBuf)).
+  {_,Acks,UnAcks} =
+    lists:foldl(fun(#utp_packet_wrap{
+                       packet = #utp_packet{seq_no = SeqNo}} = Warp,
+                    {Count,Acks0,UnAcks0} = Acc)->
+                    Pos = ai_utp_util:bit16(SeqNo - AckNo - 2),
+                    if Pos < Max ->sack_packet(Bits,Pos,Warp,Acc);
+                       true ->{Count,Acks0,[Warp|UnAcks0]}
+                    end
+                end, {0,[],[]}, lists:reverse(OutBuf)),
+  {Acks,UnAcks}.
 
 ack_bit(Bits,Pos)->
   Pos0 = (Pos bsr 3) * 8 + 7 - (Pos band 7),
@@ -134,10 +135,15 @@ ack_bit(Bits,Pos)->
       Bit
   end.
 
-sack_packet(Bits,Pos,Warp,{Acks,UnAcks})->
+sack_packet(Bits,Pos,Warp,{Count,Acks,UnAcks})->
   Bit = ack_bit(Bits,Pos),
-  if Bit == 1 -> {[Warp|Acks],UnAcks};
-     true -> {Acks,[Warp|UnAcks]}
+  if Bit == 1 -> {Count + 1,[Warp|Acks],UnAcks};
+     true ->
+      if Count > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+          {Count,Acks,[Warp#utp_packet_wrap{need_resend = true}|UnAcks]};
+         true ->
+          {Count,Acks,[Warp|UnAcks]}
+      end
   end.
 
 sack(_,#utp_net{reorder = []}) -> undefined;
