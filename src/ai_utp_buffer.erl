@@ -134,11 +134,14 @@ sack_packet(AckNo,Bits,OutBuf)->
                       if
                         Index < Max ->
                           Pos = Index bsr 3,
-                          Bit = maps:get(Pos,Map),
-                          Mask = 1 bsl (Index band 7),
-                          Set = Bit band Mask,
-                          if Set == 0 -> {Acks0,[Warp|UnAcks0]};
-                             true ->{[Warp|Acks0],UnAcks0}
+                          case maps:get(Pos,Map) of
+                            0 -> {Acks0,[Warp|UnAcks0]};
+                            Bit ->
+                              Mask = 1 bsl (Index band 7),
+                              Set = Bit band Mask,
+                              if Set == 0 -> {Acks0,[Warp|UnAcks0]};
+                                 true ->{[Warp|Acks0],UnAcks0}
+                              end
                           end;
                         true ->{Acks0,[Warp|UnAcks0]}
                       end;
