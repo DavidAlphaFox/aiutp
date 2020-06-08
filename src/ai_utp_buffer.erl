@@ -55,35 +55,43 @@ recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
 recv_reorder(Net)-> {ok,Net}.
 
 ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
-                          seq_nr = SeqNR,outbuf = OutBuf} = Net)->
+                                seq_nr = SeqNR,outbuf = OutBuf} = Net)->
   IsEmpty = queue:is_empty(OutBuf),
   if IsEmpty == true -> {[],Net};
      true ->
-      {Packets,OutBuf0} = ack_packet(AckNo,SeqNR,CurWindowPackets,
-                                     queue:to_list(OutBuf)),
-      {Packets0,OutBuf1} = sack_packet(AckNo, SAcks, OutBuf0),
+      %% 最老的序列号
+      WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+      %% AckNo必须小于SeqNR，distance = 0的时候，不应该进行ack
       AckDistance = ack_distance(CurWindowPackets, SeqNR, AckNo),
+
+      {Packets,OutBuf0} =
+        if AckDistance == 0 -> {[],queue:to_list(OutBuf)};
+           true -> ack_distance_packet(WindowStart,AckDistance,queue:to_list(OutBuf))
+        end,
+      {Packets0,OutBuf1} = sack_packet(AckNo, SAcks, OutBuf0),
       {Packets ++ Packets0,
        Net#utp_net{outbuf = queue:from_list(OutBuf1),
                    cur_window_packets = CurWindowPackets - AckDistance}}
   end.
 
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
+  %% ack的序列号需要小于SeqNo
+  Less = ai_utp_util:wrapping_compare_less(AckNo, SeqNR, ?ACK_NO_MASK),
   AckDistance = ai_utp_util:bit16(CurWindowPackets - (SeqNR - 1 - AckNo)),
-  if AckDistance > CurWindowPackets -> 0;
-     true -> AckDistance
+  if Less == true ->
+      if AckDistance > CurWindowPackets -> 0;
+         true -> AckDistance
+      end;
+     true -> 0
   end.
 
-ack_packet(AckNo,SeqNR,CurWindowPackets,OutBuf)->
-  %% 最老的序列号
-  WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-  %% 计算Ack的包的数量
-  AckDistance = ack_distance(CurWindowPackets, SeqNR, AckNo),
-  lists:partition(fun(#utp_packet_wrap{
-                         packet = #utp_packet{seq_no = SeqNo}})->
-                      Distance = ai_utp_util:bit16(SeqNo - WindowStart),
-                      Distance =< AckDistance
-                  end, OutBuf).
+ack_distance_packet(WindowStart,AckDistance,OutBuf)->
+  lists:partition(
+    fun(#utp_packet_wrap{
+           packet = #utp_packet{seq_no = SeqNo}})->
+        Distance = ai_utp_util:bit16(SeqNo - WindowStart),
+        Distance < AckDistance
+    end, OutBuf).
 
 sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
