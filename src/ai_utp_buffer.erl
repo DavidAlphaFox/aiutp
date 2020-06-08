@@ -161,8 +161,8 @@ sack(_,[],Pos,Map)->
   end;
 sack(Base,[{SeqNo,_}|T],Pos,Map)->
   Index = ai_utp_util:bit16(SeqNo - Base),
-  %% 0 - 127,共128个元素
-  if Index >= 1016 -> sack(Base,[],Pos,Map);
+  %% 0 - 991,共992个元素
+  if Index >= 992 -> sack(Base,[],Pos,Map);
      true ->
       Pos0 = Index bsr 3,
       Mask = 1 bsl (Index band 7),
