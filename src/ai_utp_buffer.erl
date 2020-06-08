@@ -76,7 +76,10 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
        Net#utp_net{outbuf = queue:from_list(OutBuf2),
                    cur_window_packets = CurWindowPackets - AckDistance}}
   end.
-
+65533 65534 65535 0 1 2
+cur = 6
+seqNR = 3
+AckNo = 65534
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
   %% ack的序列号需要小于SeqNo
   Less = ai_utp_util:wrapping_compare_less(AckNo, SeqNR, ?ACK_NO_MASK),
@@ -172,7 +175,7 @@ sack(Base,[{SeqNo,_}|T],Pos,Map)->
   if (Less == true) or (SeqNo == Base)->
       Index = ai_utp_util:bit16(SeqNo - Base),
       %% 0 - 991,共992个元素
-      if Index >= 992 -> sack(Base,[],Pos,Map);
+      if Index >= 800 -> sack(Base,[],Pos,Map);
          true ->
           Pos0 = Index bsr 3,
           Mask = 1 bsl (Index band 7),
