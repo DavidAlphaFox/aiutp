@@ -258,12 +258,13 @@ transmit(#utp_net{ack_nr = AckNR,
                        peer_conn_id = PeerConnID
                       }= Net,TxQ,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
+  WindowSize = window_size(Net),
   {SeqNR0,Packets,CurWindow0,CurWindowPackets0,OutBuf0} =
     lists:foldl(fun(Bin,{SeqNo,Acc,CurWindowAcc,
                          CurWindowPacketsAcc,WarpAcc})->
                     Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
                     Packet0 = Packet#utp_packet{payload = Bin,
-                                                win_sz = MaxWindow - CurWindowAcc,
+                                                win_sz = WinSize,
                                                 conn_id = PeerConnID},
                     Size = erlang:byte_size(Bin),
                     WrapPacket = #utp_packet_wrap{
