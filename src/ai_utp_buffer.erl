@@ -68,9 +68,10 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
         if AckDistance == 0 -> {[],queue:to_list(OutBuf)};
            true -> ack_distance_packet(WindowStart,AckDistance,queue:to_list(OutBuf))
         end,
-      {Packets0,OutBuf1} = sack_packet(AckNo, SAcks, OutBuf0),
+      OutBuf1 = fast_resend(AckNo,WindowStart,OutBuf0),
+      {Packets0,OutBuf2} = sack_packet(AckNo, SAcks, OutBuf1),
       {Packets ++ Packets0,
-       Net#utp_net{outbuf = queue:from_list(OutBuf1),
+       Net#utp_net{outbuf = queue:from_list(OutBuf2),
                    cur_window_packets = CurWindowPackets - AckDistance}}
   end.
 
@@ -92,6 +93,23 @@ ack_distance_packet(WindowStart,AckDistance,OutBuf)->
         Distance = ai_utp_util:bit16(SeqNo - WindowStart),
         Distance < AckDistance
     end, OutBuf).
+
+fast_resend(_,_,[])-> [];
+fast_resend(AckNo,WindowStart,
+            [#utp_packet_wrap{
+                wanted = Wanted,
+                packet = #utp_packet{seq_no = WindowStart}} = H|T] = OutBuf) ->
+  Diff = ai_utp_util:bit16(WindowStart - AckNo),
+  if Diff == 1 ->
+      Packet =
+        if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
+            H#utp_packet_wrap{wanted = Wanted + 1, need_resend = true};
+           true -> H#utp_packet_wrap{wanted = Wanted + 1}
+        end,
+      [Packet|T];
+     true -> OutBuf
+  end;
+fast_resend(_,_,OutBuf) -> OutBuf.
 
 sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
@@ -134,10 +152,17 @@ sack(Base,#utp_net{reorder = Reorder}) ->
 
 
 sack(_,[],I,Bin)->
-  if I == undefined -> Bin;
-     true -> <<Bin/binary,I/big-integer>>
+  Bin0 =
+    if I == undefined -> Bin;
+       true -> <<Bin/binary,I/big-integer>>
+    end,
+  Size = erlang:byte_size(Bin0),
+  Rem = Size rem 4,
+  if (Size > 0) and (Rem > 0)->
+      Offset = (4 - Rem) * 8,
+      <<Bin0/binary,0:Offset>>;
+     true -> Bin0
   end;
-
 sack(Base,[{SeqNo,_}|T],I,Bin)->
   Index = ai_utp_util:bit16(SeqNo - Base),
   if Index >= ?REORDER_BUFFER_MAX_SIZE -> sack(Base,[],I,Bin);

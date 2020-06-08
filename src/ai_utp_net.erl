@@ -102,7 +102,7 @@ resend(#utp_net{outbuf = OutBuf} = Net,Now)->
      true -> do_resend(Net,Now)
   end.
 
-process_incoming(#utp_net{state = State}= Net,
+process_incoming(#utp_net{state = State} = Net,
                  #utp_packet{type = Type} = Packet,
                  Timing) ->
   {Net0,Packets} =
@@ -336,7 +336,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
-      {{Net#utp_net{state = ?CLOSED,error =econnaborted},
+      {{Net#utp_net{state = ?CLOSED,error = econnaborted},
        [],Now,Net#utp_net.reply_micro},Proc};
      true ->
       RTO = rto(Net),

@@ -48,6 +48,7 @@
 -record(utp_packet_wrap, {packet,
                           transmissions = 0,
                           payload = 0,
+                          wanted = 0,
                           send_time = 0,
                           need_resend = false
                          }).
@@ -68,9 +69,9 @@
          %% don't count either
          cur_window = 0,
          %% maximum window size, in bytes
-         max_window = ?OPT_SEND_BUF,
+         max_window = ?OPT_SEND_BUF * 4,
          %% max receive window for other end, in bytes
-         max_peer_window = ?OPT_RECV_BUF,
+         max_peer_window = ?OPT_RECV_BUF * 4,
          %% All sequence numbers up to including this have been properly received
          %% by us
          ack_nr = undefined,
