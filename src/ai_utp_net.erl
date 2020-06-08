@@ -5,7 +5,6 @@
 -export([connect/2,accept/3]).
 -export([state/1,do_send/2,do_read/1]).
 -export([on_tick/3,net_error/1]).
--export([resend/2]).
 
 ack_bytes(AckPackets,Now)->
   lists:foldl(
@@ -83,33 +82,28 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
      true -> none
   end.
 
-
-do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
-  AckNo = ai_utp_util:bit16(AckNR - 1),
-  WinSize = window_size(Net),
-  {Count,Packets,OutBuf0} =
-    lists:foldl(fun(#utp_packet_wrap{
-                       packet = Packet,
-                       transmissions = Trans,
-                       need_resend = Resend
-                      } = WrapPacket,{Count0,Packets,Out})->
-                    if (Resend == true) and (Count0 < 5)  ->
-                        {Count0+1,[Packet#utp_packet{ack_no = AckNo,
-                                           win_sz = WinSize}|Packets],
-                        queue:in(WrapPacket#utp_packet_wrap{
-                                   need_resend = false,
-                                   transmissions = Trans + 1,
-                                   send_time = Now},Out)};
-                       true-> {Count0,Packets,
-                               queue:in(WrapPacket#utp_packet_wrap{need_resend = false}, Out)}
-                    end
-                end,{0,[],queue:new()},queue:to_list(OutBuf)),
-  {Count,Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
-
-resend(#utp_net{outbuf = OutBuf} = Net,Now)->
+fast_resend(#utp_net{outbuf = OutBuf,
+                     ack_nr = AckNR} = Net,Now)->
   IsEmpty = queue:is_empty(OutBuf),
-  if IsEmpty == true -> {0,Net,[]};
-     true -> do_resend(Net,Now)
+  if IsEmpty == true -> {Net,[]};
+     true ->
+      AckNo = ai_utp_util:bit16(AckNR - 1),
+      WinSize = window_size(Net),
+      {{value,Wrap},OutBuf0} = queue:out(OutBuf),
+      #utp_packet_wrap{
+         packet = Packet,
+         transmissions = Trans,
+         need_resend = Resend
+        } = Wrap,
+      if Resend == true ->
+          OutBuf1 =  queue:in_r(Wrap#utp_packet_wrap{
+                                  need_resend = false,
+                                  transmissions = Trans + 1,
+                                  send_time = Now},OutBuf0),
+          {Net#utp_net{outbuf = OutBuf1},
+           [Packet#utp_packet{ack_no = AckNo,win_sz = WinSize}]};
+         true -> {Net,[]}
+      end
   end.
 process_incoming(#utp_net{state = State,ack_nr = AckNR,seq_nr = SeqNR} = Net,
                  #utp_packet{type = Type,seq_no = SeqNo,ack_no = AckNo} = Packet,
@@ -129,20 +123,18 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,seq_nr = SeqNR} = Net,
        true -> none
     end,
   Now = ai_utp_util:microsecond(),
-  %{LostCount,Net1,Packets0} = resend(Net0,Now),
-  %#utp_net{rtt = RTT} = Net1,
-  %RTT0 = ai_utp_rtt:lost(RTT,LostCount),
-  %Net2 = Net1#utp_net{rtt = RTT0},
+  {Net1,Packets0} = fast_resend(Net0,Now),
+  
   Packets1 =
-    if AckPacket == none -> Packets;
-       true -> [AckPacket|Packets]
+    if AckPacket == none -> Packets ++ Packets0;
+       true -> [AckPacket|Packets] ++ Packets0
     end,
-  Net3 =
+  Net2 =
     if erlang:length(Packets1) > 0 ->
-        Net0#utp_net{last_send = Now,last_recv = Now};
-       true -> Net0#utp_net{last_recv = Now}
+        Net1#utp_net{last_send = Now,last_recv = Now};
+       true -> Net1#utp_net{last_recv = Now}
     end,
-  {Net3,Packets1,Now,Net3#utp_net.reply_micro}.
+  {Net2,Packets1,Now,Net2#utp_net.reply_micro}.
 
 process_incoming(st_state, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR} = Net,
@@ -334,14 +326,12 @@ expire_resend(#utp_net{ack_nr = AckNR,
                 end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
-force_state(State,#utp_net{last_send = LastSend,
-                           reorder = Reorder} = Net,Packets,Now,RTO)->
+force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now,RTO)->
   Diff = Now - LastSend,
   Packets0 =
     if (State == ?ESTABLISHED) orelse (State == ?CLOSING) ->
-        RLength = erlang:length(Reorder),
         if Diff > ?MAX_SEND_IDLE_TIME -> [send_ack(Net)|Packets];
-           (Diff > RTO ) and (RLength > 0) -> [send_ack(Net)|Packets];
+           Diff > RTO -> [send_ack(Net)|Packets];
            true -> Packets
         end;
        true  -> Packets
@@ -364,9 +354,12 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
      true ->
       RTO = rto(Net),
       {Net0,Packets0} = expire_resend(Net,Now,RTO),
-      {{Net1,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
-      {Net2,Packets} = force_state(State,Net1,Packets0 ++ Packets1,Now,RTO),
-      {{Net2,Packets,Now,ReplyMicro},Proc0}
+      #utp_net{rtt = RTT} = Net0,
+      RTT0 = ai_utp_rtt:lost(RTT,erlang:length(Packets0) - 1),
+      Net1 = Net0#utp_net{rtt = RTT0},
+      {{Net2,Packets1,_,ReplyMicro},Proc0} = do_send(Net1,Proc),
+      {Net3,Packets} = force_state(State,Net2,Packets0 ++ Packets1,Now,RTO),
+      {{Net3,Packets,Now,ReplyMicro},Proc0}
   end.
 
 net_error(#utp_net{error = Error})->
