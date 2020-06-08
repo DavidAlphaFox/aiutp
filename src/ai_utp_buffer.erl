@@ -21,12 +21,14 @@ in(SeqNo,Payload,
   recv_reorder(Net0#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)});
 in(SeqNo,Payload,
    #utp_net { reorder = OD,ack_nr = AckNR } = Net) ->
-  case orddict:is_key(SeqNo, OD) of
-    true -> duplicate;
-    false ->
-      Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
-      if Less == true -> duplicate;
-         true ->
+  Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
+  Diff = ai_utp_util:bit16(SeqNo - AckNR),
+  if Less == true -> duplicate;
+     Diff > ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
+     true ->
+      case orddict:is_key(SeqNo, OD) of
+        true -> duplicate;
+        false ->
           {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
       end
   end.
@@ -160,7 +162,7 @@ sack(_,[],Pos,Map)->
 sack(Base,[{SeqNo,_}|T],Pos,Map)->
   Index = ai_utp_util:bit16(SeqNo - Base),
   %% 0 - 127,共128个元素
-  if Index >= 128 -> sack(Base,[],Pos,Map);
+  if Index >= 1016 -> sack(Base,[],Pos,Map);
      true ->
       Pos0 = Index bsr 3,
       Mask = 1 bsl (Index band 7),
