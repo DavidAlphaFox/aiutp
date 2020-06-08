@@ -327,10 +327,8 @@ force_state(State,#utp_net{
   Diff = Now - LastSend,
   Packets0 =
     if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
-       andalso (erlang:length(Packets) == 0)->
-        if Diff > RTO -> [send_ack(Net)|Packets];
-           true -> Packets
-        end;
+       andalso (erlang:length(Packets) == 0)
+       andalso (Diff > RTO)-> [send_ack(Net)];
        true  -> Packets
     end,
   if erlang:length(Packets0) > 0 ->
