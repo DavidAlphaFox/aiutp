@@ -113,47 +113,43 @@ fast_resend(AckNo,WindowStart,
   end;
 fast_resend(_,_,OutBuf) -> OutBuf.
 
+
+sack_map(<<>>,_,Map) -> Map;
+sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
+  sack_map(Rest,N+1,maps:put(N,Bits,Map)).
+
 sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
+  Map = sack_map(Bits,0,#{}),
   Base = ai_utp_util:bit16(AckNo + 2),
   lists:foldl(fun(#utp_packet_wrap{
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
-                  {Acks0,UnAcks0} = Acc)->
-                  Pos = ai_utp_util:bit16(SeqNo - Base),
-                  if Pos < Max ->sack_packet(Bits,Pos,Warp,Acc);
+                  {Acks0,UnAcks0})->
+                  Index = ai_utp_util:bit16(SeqNo - Base),
+                  if Index < Max ->
+                      Pos = Index bsr 3,
+                      Bit = maps:get(Pos,Map),
+                      Mask = 1 bsl (Index band 7),
+                      Set = Bit band Mask,
+                      if Set == 0 -> {Acks0,[Warp|UnAcks0]};
+                         true ->{[Warp|Acks0],UnAcks0}
+                      end;
                      true ->{Acks0,[Warp|UnAcks0]}
                   end
               end, {[],[]}, lists:reverse(OutBuf)).
-  
-
-ack_bit(Bits,Pos)->
-  Pos0 = (Pos bsr 3) * 8 + 7 - (Pos band 7),
-  if
-    Pos0 > 0 ->
-      <<_:Pos0,Bit:1,_/bits>> = Bits,
-      Bit;
-    true ->
-      <<Bit:1,_/bits>> = Bits,
-      Bit
-  end.
-
-sack_packet(Bits,Pos,Warp,{Acks,UnAcks})->
-  Bit = ack_bit(Bits,Pos),
-  if Bit == 1 -> {[Warp|Acks],UnAcks};
-     true -> {Acks,[Warp|UnAcks]}
-  end.
 
 sack(_,#utp_net{reorder = []}) -> undefined;
 sack(Base,#utp_net{reorder = Reorder}) ->
-  sack(Base,Reorder,undefined,<<>>).
+  sack(Base,Reorder,0,#{0 => 0}).
 
 
-sack(_,[],I,Bin)->
-  Bin0 =
-    if I == undefined -> Bin;
-       true -> <<Bin/binary,I/big-integer>>
-    end,
+sack(_,[],Pos,Map)->
+  Bin0 = lists:foldl(
+           fun(BI,BAcc)->
+               Bits = maps:get(BI,Map),
+               <<BAcc/binary,Bits/big-integer>>
+           end, <<>>, lists:seq(0, Pos)),
   Size = erlang:byte_size(Bin0),
   Rem = Size rem 4,
   if (Size > 0) and (Rem > 0)->
@@ -161,26 +157,23 @@ sack(_,[],I,Bin)->
       <<Bin0/binary,0:Offset>>;
      true -> Bin0
   end;
-sack(Base,[{SeqNo,_}|T],I,Bin)->
+sack(Base,[{SeqNo,_}|T],Pos,Map)->
   Index = ai_utp_util:bit16(SeqNo - Base),
-  if Index >= 100 -> sack(Base,[],I,Bin);
-     Index >= 0 ->
-      Size = erlang:byte_size(Bin),
-      IndexDiff = (Index bsr 3) - (Size - 1),
-      {Bin0,I0} =
-        if (IndexDiff > 1) andalso (I == undefined)->
-            Offset = (IndexDiff - 1) * 8,
-            {<<Bin/bits,0:Offset>>,0};
-           IndexDiff > 1 ->
-            Offset = (IndexDiff - 2) * 8,
-            {<<Bin/bits,I/big-integer,0:Offset>>,0};
-           true -> {Bin,I}
-        end,
+  %% 0 - 127,共128个元素
+  if Index >= 128 -> sack(Base,[],Pos,Map);
+     true ->
+      Pos0 = Index bsr 3,
       Mask = 1 bsl (Index band 7),
-      I1 =
-        if I0 == undefined -> Mask bor 0;
-           true -> Mask bor I0
-        end,
-      sack(Base,T,I1,Bin0);
-     true -> sack(Base,T,I,Bin)
+      if Pos0 == Pos ->
+          Bits = maps:get(Pos,Map),
+          Bits0 = Mask bor Bits,
+          sack(Base,T,Pos,maps:put(Pos0,Bits0,Map));
+         Pos0 > Pos ->
+          Map0 = lists:foldl(
+                   fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
+                   Map,lists:seq(Pos +1 ,Pos0)),
+          Bits = maps:get(Pos0,Map0),
+          Bits0 = Mask bor Bits,
+          sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0))
+      end
   end.
