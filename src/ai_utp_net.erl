@@ -251,14 +251,13 @@ fill_from_proc(Net,Bytes,Proc,TxQ) ->
 
 transmit(#utp_net{ack_nr = AckNR,
                        seq_nr = SeqNR,
-                       max_window = MaxWindow,
                        cur_window = CurWindow,
                        cur_window_packets = CurWindowPackets,
                        outbuf = OutBuf,
                        peer_conn_id = PeerConnID
                       }= Net,TxQ,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
-  WindowSize = window_size(Net),
+  WinSize = window_size(Net),
   {SeqNR0,Packets,CurWindow0,CurWindowPackets0,OutBuf0} =
     lists:foldl(fun(Bin,{SeqNo,Acc,CurWindowAcc,
                          CurWindowPacketsAcc,WarpAcc})->
