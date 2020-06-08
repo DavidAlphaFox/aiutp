@@ -8,7 +8,7 @@
 -record(ai_utp_rtt, {
                      rtt = 500 :: integer(),
                      var = 800 :: integer(),
-                     delay = 1.5
+                     delay = 2
                     }).
 
 
@@ -28,11 +28,11 @@
 lost(none,_) -> #ai_utp_rtt{};
 lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
   Delay0 =
-    if LostCount > 0 -> Delay * 1.5;
-       true  -> Delay / 1.5
+    if LostCount > 0 -> Delay * 2;
+       true  -> Delay / 2
     end,
-  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8};
-     Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
+  if Delay0 > 1024 -> RTT#ai_utp_rtt{delay = 1024};
+     Delay0 < 2 -> RTT#ai_utp_rtt{delay = 2};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
 

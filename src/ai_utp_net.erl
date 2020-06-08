@@ -31,9 +31,8 @@ window_size(#utp_net{opt_rcvbuf = OptRcvBuf,
                      reorder = Reorder}) ->
   RLength = erlang:length(Reorder),
   Size = erlang:byte_size(InBuf),
-  if RLength < ?HALF_CIRCLE ->
-      if OptRcvBuf > Size ->
-          OptRcvBuf - Size;
+  if RLength < ?REORDER_BUFFER_MAX_SIZE ->
+      if OptRcvBuf > Size ->OptRcvBuf - Size;
          true -> 0
       end;
      true -> 0
@@ -43,11 +42,10 @@ max_send_bytes(#utp_net{
                   max_peer_window = MaxPeerWindow,
                   cur_window_packets = CurWindowPackets,
                   cur_window = CurWindow})->
-  if CurWindowPackets > ?HALF_CIRCLE -> 0;
+  if CurWindowPackets > ?REORDER_BUFFER_MAX_SIZE-> 0;
      true->
       SendBytes = MaxWindow - CurWindow,
-      if SendBytes >= ?PACKET_SIZE ->
-          erlang:min(MaxPeerWindow,SendBytes);
+      if SendBytes >= ?PACKET_SIZE -> erlang:min(MaxPeerWindow,SendBytes);
          true -> 0
       end
   end.

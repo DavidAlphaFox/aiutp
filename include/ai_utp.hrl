@@ -55,9 +55,9 @@
                          }).
 -record(utp_net,
         {%%sndbuf setting, in bytes
-         opt_sndbuf = ?OPT_SEND_BUF *4,
+         opt_sndbuf = ?OPT_SEND_BUF,
          %%rcvbuf setting, in bytes
-         opt_rcvbuf = ?OPT_RECV_BUF * 4,
+         opt_rcvbuf = ?OPT_RECV_BUF,
          state = undefined,
          error = normal,
          %% the number of packets in the send queue. Packets that haven't
@@ -70,9 +70,9 @@
          %% don't count either
          cur_window = 0,
          %% maximum window size, in bytes
-         max_window = ?OPT_SEND_BUF * 4,
+         max_window = ?OPT_SEND_BUF,
          %% max receive window for other end, in bytes
-         max_peer_window = ?OPT_RECV_BUF * 4,
+         max_peer_window = ?OPT_RECV_BUF,
          %% All sequence numbers up to including this have been properly received
          %% by us
          ack_nr = undefined,
