@@ -321,12 +321,12 @@ expire_resend(#utp_net{ack_nr = AckNR,
 
 force_state(State,#utp_net{
                      last_send = LastSend
-                    } = Net,Packets,Now)->
+                    } = Net,Packets,Now,RTO)->
   Diff = Now - LastSend,
   Packets0 =
     if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
        andalso (erlang:length(Packets) == 0)
-       andalso (Diff > ?MAX_SEND_IDLE_TIME)-> [send_ack(Net)];
+       andalso (Diff > RTO)-> [send_ack(Net)];
        true  -> Packets
     end,
   if erlang:length(Packets0) > 0 ->
@@ -351,7 +351,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
       RTT0 = ai_utp_rtt:lost(RTT,Count),
       Net1 = Net0#utp_net{rtt = RTT0},
       {{Net2,Packets1,_,ReplyMicro},Proc0} = do_send(Net1,Proc),
-      {Net3,Packets} = force_state(State,Net2,Packets0 ++ Packets1,Now),
+      {Net3,Packets} = force_state(State,Net2,Packets0 ++ Packets1,Now,RTO),
       {{Net3,Packets,Now,ReplyMicro},Proc0}
   end.
 
