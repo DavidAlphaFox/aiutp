@@ -73,13 +73,13 @@ fill_send_window(N, #utp_process{ sender = SQ } = PI) when is_integer(N) ->
     zero -> zero
   end.
 
-dequeue(0, _Q, <<>>) -> zero;
+dequeue(0, _Q, Bin) when erlang:byte_size(Bin) == 0 -> zero;
 dequeue(0, Q, Bin) -> {done, Bin, Q};
 dequeue(N, Q, Acc) ->
   {R, NQ} = queue:out(Q),
   case R of
-    empty when Acc == <<>> -> zero;
-    empty when Acc =/= <<>> -> {partial, Acc, Q}; 
+    empty when erlang:byte_size(Acc) == 0 -> zero;
+    empty when erlang:byte_size(Acc) > 0 -> {partial, Acc, Q};
     {value, {sender, From, Data}} when byte_size(Data) =< N ->
       gen_server:reply(From, ok),
       dequeue(N - byte_size(Data), NQ, <<Acc/binary, Data/binary>>);

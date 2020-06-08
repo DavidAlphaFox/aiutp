@@ -240,14 +240,13 @@ fill_from_proc(Net,Bytes,Proc,TxQ) ->
     if Bytes =< ?PACKET_SIZE -> Bytes;
        true -> ?PACKET_SIZE
     end,
-  Remain = Bytes - ToFill,
-  io:format("~p,~p,~p~n",[Bytes,ToFill,Remain]),
+
   case ai_utp_process:fill_send_window(ToFill, Proc) of
     {filled,Bin,Proc1}->
-      fill_from_proc(Net,Remain,Proc1,
+      fill_from_proc(Net,Bytes - ToFill,Proc1,
                      queue:in(Bin,TxQ));
-    {partial,Bin,Proc1}-> {Net,Proc1,
-                           queue:in(Bin,TxQ)};
+    {partial,Bin,Proc1}->
+      {Net,Proc1,queue:in(Bin,TxQ)};
     zero -> {Net,Proc,TxQ}
   end.
 
