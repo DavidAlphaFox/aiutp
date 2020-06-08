@@ -315,6 +315,8 @@ expire_resend(#utp_net{ack_nr = AckNR,
                        send_time = SendTime
                       } = WrapPacket,{Count0,Packets,Out})->
                     Diff = (Now - SendTime) / 1000,
+                    #utp_packet{seq_no} = Packet,
+                    io:format("Expire_resend: ~p~n",[SeqNo]),
                     if (Diff > RTO) andalso (Trans > 0)
                        andalso (Count0 =< ?REORDER_BUFFER_MAX_SIZE)->
                         {Count0 + 1,[Packet#utp_packet{
