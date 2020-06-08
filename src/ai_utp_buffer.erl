@@ -129,7 +129,8 @@ sack_packet(AckNo,Bits,OutBuf)->
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
                   {Acks0,UnAcks0})->
                   Index = ai_utp_util:bit16(SeqNo - Base),
-                  if Index < Max ->
+                  if
+                    Index < Max ->
                       Pos = Index bsr 3,
                       Bit = maps:get(Pos,Map),
                       Mask = 1 bsl (Index band 7),
