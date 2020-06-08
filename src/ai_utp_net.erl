@@ -321,12 +321,17 @@ expire_resend(#utp_net{ack_nr = AckNR,
                 end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
-force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now,RTO)->
+force_state(State,#utp_net{
+                     last_send = LastSend,
+                     reorder = Reorder
+                    } = Net,Packets,Now,RTO)->
   Diff = Now - LastSend,
   Packets0 =
-    if (State == ?ESTABLISHED) orelse (State == ?CLOSING) ->
+    if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
+       andalso (erlang:length(Packets) == 0) ->
+        RLen = erlang:length(Reorder),
         if Diff > ?MAX_SEND_IDLE_TIME -> [send_ack(Net)|Packets];
-           Diff > RTO -> [send_ack(Net)|Packets];
+           (Diff > RTO) andalso (RLen > 0) -> [send_ack(Net)|Packets];
            true -> Packets
         end;
        true  -> Packets
