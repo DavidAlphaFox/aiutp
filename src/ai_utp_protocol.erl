@@ -67,9 +67,9 @@ decode_packet(Packet) ->
 
   %% Decode packet
   <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
-    TS:32/integer,TSDiff:32/integer,
-    WindowSize:32/integer,
     SeqNo:16/integer,AckNo:16/integer,
+    WindowSize:32/integer,
+    TS:32/integer,TSDiff:32/integer,
     ExtPayload/binary>> = Packet,
   {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
 
@@ -126,9 +126,9 @@ encode(#utp_packet {type = Type,
   EncTy = encode_type(Type),
 
   <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
-    TS:32/integer,TSDiff:32/integer,
-    WSize:32/integer,
     SeqNo:16/integer, AckNo:16/integer,
+    WSize:32/integer,
+    TS:32/integer,TSDiff:32/integer,
     ExtBin/binary,Payload/binary>>.
 
 encode_extensions([]) -> {0, <<>>};
