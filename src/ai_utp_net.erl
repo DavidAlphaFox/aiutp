@@ -258,13 +258,15 @@ transmit(#utp_net{ack_nr = AckNR,
                       }= Net,TxQ,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {SeqNR0,Packets,CurWindow0,CurWindowPackets0,OutBuf0} =
+  {SeqNR0,Packets,CurWindow0,
+   CurWindowPackets0,OutBuf0} =
     lists:foldl(fun(Bin,{SeqNo,Acc,CurWindowAcc,
                          CurWindowPacketsAcc,WarpAcc})->
                     Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
-                    Packet0 = Packet#utp_packet{payload = Bin,
-                                                win_sz = WinSize,
-                                                conn_id = PeerConnID},
+                    Packet0 = Packet#utp_packet{
+                                payload = Bin,
+                                win_sz = WinSize,
+                                conn_id = PeerConnID},
                     Size = erlang:byte_size(Bin),
                     WrapPacket = #utp_packet_wrap{
                                     packet = Packet0,
@@ -275,7 +277,6 @@ transmit(#utp_net{ack_nr = AckNR,
                      CurWindowAcc + Size,CurWindowPacketsAcc +1,
                      queue:in(WrapPacket, WarpAcc)}
                 end,{SeqNR,[],CurWindow,CurWindowPackets,OutBuf},TxQ),
-  io:format("start seqNR:~p, end seqNR:~p~n",[SeqNR,SeqNR0]),
   {Net#utp_net{
      cur_window_packets = CurWindowPackets0,
      cur_window = CurWindow0,
@@ -314,7 +315,8 @@ expire_resend(#utp_net{ack_nr = AckNR,
                        send_time = SendTime
                       } = WrapPacket,{Count0,Packets,Out})->
                     Diff = (Now - SendTime) / 1000,
-                    if (Diff > RTO) andalso (Trans > 0)->
+                    if (Diff > RTO) andalso (Trans > 0)
+                       andalso (Count0 =< ?REORDER_BUFFER_MAX_SIZE)->
                         {Count0 + 1,[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],
