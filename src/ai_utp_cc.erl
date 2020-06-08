@@ -89,7 +89,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
        true -> ScaledGain
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,?MIN_WINDOW_SIZE,OptSndBuf),
-  Net#utp_net{max_window = LedbatCwnd}.
+  Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
 ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS, Now) ->
