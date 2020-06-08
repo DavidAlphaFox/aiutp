@@ -105,13 +105,9 @@ fast_resend(#utp_net{outbuf = OutBuf,
          true -> {Net,[]}
       end
   end.
-process_incoming(#utp_net{state = State,seq_nr = SeqNR, ack_nr = AckNR} = Net,
-                 #utp_packet{type = Type,seq_no = SeqNo,ack_no = AckNo} = Packet,
+process_incoming(#utp_net{state = State} = Net,
+                 #utp_packet{type = Type} = Packet,
                  Timing) ->
-  if Type == st_data ->
-      io:format("Seq:~p,AckNR:~p,Ack:~p,SeqNR:~p~n",[SeqNo,AckNR,AckNo,SeqNR]);
-     true -> ok
-  end,
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;
