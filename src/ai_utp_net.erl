@@ -307,24 +307,23 @@ expire_resend(#utp_net{ack_nr = AckNR,
                    outbuf = OutBuf} = Net,Now,RTO)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {_,Packets,OutBuf0} =
+  {Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
                        transmissions = Trans,
                        send_time = SendTime
-                      } = WrapPacket,{Count,Packets,Out})->
+                      } = WrapPacket,{Packets,Out})->
                     Diff = (Now - SendTime) / 1000,
-                    if (Diff > RTO) andalso (Trans > 0)
-                       andalso (Count < 10)->
-                        {Count +1 ,[Packet#utp_packet{
+                    if (Diff > RTO) andalso (Trans > 0)->
+                        {[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],
                          queue:in(WrapPacket#utp_packet_wrap{
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Count,Packets,queue:in(WrapPacket, Out)}
+                       true-> {Packets,queue:in(WrapPacket, Out)}
                     end
-                end,{0,[],queue:new()},queue:to_list(OutBuf)),
+                end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 force_state(State,#utp_net{last_send = LastSend} = Net,Packets,Now)->
