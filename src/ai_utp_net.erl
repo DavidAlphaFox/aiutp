@@ -238,7 +238,7 @@ fill_from_proc(Net, 0, Proc,TxQ)-> {Net,Proc,TxQ};
 fill_from_proc(Net,Bytes,Proc,TxQ) ->
   ToFill =
     if Bytes =< ?PACKET_SIZE -> Bytes;
-       true -> ? PACKET_SIZE
+       true -> ?PACKET_SIZE
     end,
   case ai_utp_process:fill_send_window(ToFill, Proc) of
     {filled,Bin,Proc1}->
