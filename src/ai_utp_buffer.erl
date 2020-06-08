@@ -14,9 +14,6 @@ in(SeqNo,Payload,
   Net0 = recv(State,Payload,Net),
   {fin,Net0#utp_net{ack_nr = ai_utp_util:bit16(SeqNo+1)}};
 
-in(SeqNo,<<>>,
-   #utp_net{ack_nr = SeqNo} = Net)->
-  {ok,Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)}};
 in(SeqNo,Payload,
    #utp_net{state = State,
             ack_nr = SeqNo} = Net)->
