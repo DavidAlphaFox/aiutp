@@ -1,13 +1,14 @@
 -module(ai_utp_rtt).
 
--export([rto/1,ack/3]).
+-export([rto/1,ack/3,lost/2]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
 -define(DEFAULT_RTT_TIMEOUT, 500).
 
 -record(ai_utp_rtt, {
                      rtt = 500 :: integer(),
-                     var = 800 :: integer()
+                     var = 800 :: integer(),
+                     delay = 1.5
                     }).
 
 
@@ -25,6 +26,15 @@
 %% rtt and rtt_var are calculated by the following formula, every time
 %% a packet is ACKed:
 
+lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
+  Delay0 =
+    if LostCount > 0 -> Delay * 1.5;
+       true  -> Delay / 1.5
+    end,
+  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8};
+     Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
+     true -> RTT#ai_utp_rtt{delay = Delay}
+  end.
 
 update(Estimate,#ai_utp_rtt { rtt = LastRTT, var = Var} ) ->
       Delta = LastRTT - Estimate,
@@ -41,9 +51,9 @@ update(Estimate,none)->
 %% The default timeout for packets associated with the socket is also
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
-rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
+rto(#ai_utp_rtt { rtt = RTT, var = Var, delay = Delay}) ->
   RTO = max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+  RTO * Delay.
 
 
 %% ACKnowledge an incoming packet

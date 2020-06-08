@@ -83,27 +83,27 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
 do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {Packets,OutBuf0} =
+  {Count,Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
                        transmissions = Trans,
                        need_resend = Resend
-                      } = WrapPacket,{Packets,Out})->
+                      } = WrapPacket,{Count0,Packets,Out})->
                     if Resend == true  ->
-                        {[Packet#utp_packet{ack_no = AckNo,
+                        {Count0+1,[Packet#utp_packet{ack_no = AckNo,
                                            win_sz = WinSize}|Packets],
                         queue:in(WrapPacket#utp_packet_wrap{
                                    need_resend = false,
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Packets,queue:in(WrapPacket, Out)}
+                       true-> {Count0,Packets,queue:in(WrapPacket, Out)}
                     end
-                end,{[],queue:new()},queue:to_list(OutBuf)),
-  {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
+                end,{0,[],queue:new()},queue:to_list(OutBuf)),
+  {Count,Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 resend(#utp_net{outbuf = OutBuf} = Net,Now)->
   IsEmpty = queue:is_empty(OutBuf),
-  if IsEmpty == true -> {Net,[]};
+  if IsEmpty == true -> {0,Net,[]};
      true -> do_resend(Net,Now)
   end.
 process_incoming(#utp_net{state = State,ack_nr = AckNR} = Net,
@@ -124,17 +124,20 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR} = Net,
        true -> none
     end,
   Now = ai_utp_util:microsecond(),
-  {Net1,Packets0} = resend(Net0,Now),
+  {LostCount,Net1,Packets0} = resend(Net0,Now),
+  #utp_net{rtt = RTT} = Net1,
+  RTT0 = ai_utp_rtt:lost(RTT,LostCount),
+  Net2 = Net1#utp_net{rtt = RTT0},
   Packets1 =
     if AckPacket == none -> Packets ++ Packets0;
        true -> [AckPacket|Packets] ++ Packets0
     end,
-  Net2 =
+  Net3 =
     if erlang:length(Packets1) > 0 ->
-        Net1#utp_net{last_send = Now,last_recv = Now};
-       true -> Net1#utp_net{last_recv = Now}
+        Net2#utp_net{last_send = Now,last_recv = Now};
+       true -> Net2#utp_net{last_recv = Now}
     end,
-  {Net2,Packets1,Now,Net2#utp_net.reply_micro}.
+  {Net3,Packets1,Now,Net3#utp_net.reply_micro}.
 
 process_incoming(st_state, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR} = Net,
