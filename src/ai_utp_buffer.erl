@@ -124,8 +124,8 @@ sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   Map = sack_map(Bits,0,#{}),
-  io:format("AckNo: ~p Map: ~p~n",[AckNo,Map]),
   Base = ai_utp_util:bit16(AckNo + 2),
+  io:format("recv AckNo: ~p Map: ~p~n",[Base,Map]),
   lists:foldl(fun(#utp_packet_wrap{
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
                   {Acks0,UnAcks0})->
@@ -156,7 +156,7 @@ sack(Base,#utp_net{reorder = Reorder}) ->
 
 sack(_,[],0,#{0 := 0}) -> undefined;
 sack(AckNo,[],Pos,Map)->
-  io:format("AckNo: ~p Map: ~p~n",[AckNo,Map]),
+  io:format("send AckNo: ~p Map: ~p~n",[AckNo,Map]),
   Bin0 = lists:foldl(
            fun(BI,BAcc)->
                Bits = maps:get(BI,Map),
