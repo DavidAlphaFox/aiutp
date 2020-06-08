@@ -32,7 +32,7 @@ window_size(#utp_net{opt_rcvbuf = OptRcvBuf,
                      reorder = Reorder}) ->
   RLength = erlang:length(Reorder),
   Size = erlang:byte_size(InBuf),
-  if RLength < ?REORDER_BUFFER_MAX_SIZE ->
+  if RLength < ?HALF_CIRCLE ->
       if OptRcvBuf > Size ->
           OptRcvBuf - Size;
          true -> 0
