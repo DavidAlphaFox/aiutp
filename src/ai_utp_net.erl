@@ -83,23 +83,22 @@ send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
 do_resend(#utp_net{ack_nr = AckNR,outbuf = OutBuf} = Net,Now)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {_,Packets,OutBuf0} =
+  {Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
                        transmissions = Trans,
                        need_resend = Resend
-                      } = WrapPacket,{Count,Packets,Out})->
-                    if (Resend == true) andalso (Count < 10)  ->
-                        {Count +1,[Packet#utp_packet{ack_no = AckNo,
+                      } = WrapPacket,{Packets,Out})->
+                    if Resend == true  ->
+                        {[Packet#utp_packet{ack_no = AckNo,
                                            win_sz = WinSize}|Packets],
                         queue:in(WrapPacket#utp_packet_wrap{
                                    need_resend = false,
                                    transmissions = Trans + 1,
                                    send_time = Now},Out)};
-                       true-> {Count,Packets,
-                               queue:in(WrapPacket#utp_packet_wrap{need_resend = false}, Out)}
+                       true-> {Packets,queue:in(WrapPacket, Out)}
                     end
-                end,{0,[],queue:new()},queue:to_list(OutBuf)),
+                end,{[],queue:new()},queue:to_list(OutBuf)),
   {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
 
 resend(#utp_net{outbuf = OutBuf} = Net,Now)->

@@ -165,7 +165,7 @@ sack(_,[],I,Bin)->
   end;
 sack(Base,[{SeqNo,_}|T],I,Bin)->
   Index = ai_utp_util:bit16(SeqNo - Base),
-  if Index >= 31 -> sack(Base,[],I,Bin);
+  if Index >= 64 -> sack(Base,[],I,Bin);
      true ->
       Size = erlang:byte_size(Bin),
       IndexDiff = (Index bsr 3) - (Size - 1),
