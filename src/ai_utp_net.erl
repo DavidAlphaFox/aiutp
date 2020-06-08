@@ -42,11 +42,15 @@ window_size(#utp_net{opt_rcvbuf = OptRcvBuf,
 max_send_bytes(#utp_net{
                   max_window = MaxWindow,
                   max_peer_window = MaxPeerWindow,
+                  cur_window_packets = CurWindowPackets,
                   cur_window = CurWindow})->
-  SendBytes = MaxWindow - CurWindow,
-  if SendBytes >= ?PACKET_SIZE ->
-      erlang:min(MaxPeerWindow,SendBytes);
-     true -> 0
+  if CurWindowPackets > ?HALF_CIRCLE -> 0;
+     true->
+      SendBytes = MaxWindow - CurWindow,
+      if SendBytes >= ?PACKET_SIZE ->
+          erlang:min(MaxPeerWindow,SendBytes);
+         true -> 0
+      end
   end.
 
 %% 最后阶段计算并清理所有被Ack过的包

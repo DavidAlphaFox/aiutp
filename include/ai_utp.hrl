@@ -14,7 +14,7 @@
 -define(TS_DIFF_MAX,2147483647).
 -define(SEQ_NO_MASK, 16#FFFF).
 -define(ACK_NO_MASK, 16#FFFF).
--define(HALF_CIRCLE, 16#7FFF - 3).
+-define(HALF_CIRCLE, 16#6FFF).
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE, 1024).
 -define(PACKET_SIZE, 360).
@@ -55,9 +55,9 @@
                          }).
 -record(utp_net,
         {%%sndbuf setting, in bytes
-         opt_sndbuf = ?OPT_SEND_BUF,
+         opt_sndbuf = ?OPT_SEND_BUF *4,
          %%rcvbuf setting, in bytes
-         opt_rcvbuf = ?OPT_RECV_BUF,
+         opt_rcvbuf = ?OPT_RECV_BUF * 4,
          state = undefined,
          error = normal,
          %% the number of packets in the send queue. Packets that haven't
