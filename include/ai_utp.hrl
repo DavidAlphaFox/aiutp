@@ -57,7 +57,7 @@
         {%%sndbuf setting, in bytes
          opt_sndbuf = ?OPT_SEND_BUF,
          %%rcvbuf setting, in bytes
-         opt_rcvbuf = ?OPT_RECV_BUF,
+         opt_recvbuf = ?OPT_RECV_BUF,
          state = undefined,
          error = normal,
          %% the number of packets in the send queue. Packets that haven't
@@ -82,10 +82,13 @@
          %% do a fast resend with. This makes sure we only do a fast-resend
          %% once per packet. We can resend the packet with this sequence number
          %% or any later packet (with a higher sequence number).
-         inbuf = <<>>,
          reorder = array:new(16#FFFF,fixed),
          reorder_size = 0,
          outbuf = queue:new(),
+         recvbuf = queue:new(),
+         recvbuf_size = 0,
+         sndbuf = queue:new(),
+         sndbuf_size = 0,
          reply_micro,
          rtt = none,
          our_ledbat = none,

@@ -39,8 +39,13 @@ in(SeqNo,Payload,
 
 recv(?ESTABLISHED,<<>>,Net) -> Net;
 recv(?ESTABLISHED,Payload,
-     #utp_net{inbuf = InBuf} = Net) ->
-  Net#utp_net{inbuf = <<InBuf/binary,Payload/binary>>};
+     #utp_net{recvbuf = RecvBuf,
+              recvbuf_size = RecvBufSize} = Net) ->
+  Size = erlang:byte_size(Payload),
+  Net#utp_net{
+    recvbuf = queue:in({Size,Payload},RecvBuf),
+    recvbuf_size = RecvBufSize + Size};
+
 recv(_,_,Net) -> Net.
 
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
