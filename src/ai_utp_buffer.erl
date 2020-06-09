@@ -146,7 +146,7 @@ sacked(Map,Index,Max,Warp,
       end;
      true ->{Lost,Acked,Acks0,[Warp|UnAcks0]}
   end.
-sack_packet(_,undefined,OutBuf)-> {0,[],OutBuf};
+sack_packet(_,undefined,OutBuf)-> {0,0,[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   Map = sack_map(Bits,0,#{}),
