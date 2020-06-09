@@ -28,7 +28,7 @@
 -define(CONGESTION_CONTROL_TARGET, 100000).
 %% 每个来回最大可以增加3000 bytes的窗口
 % bytes
--define(MAX_CWND_INCREASE_BYTES_PER_RTT, 3000).
+-define(MAX_CWND_INCREASE_BYTES_PER_RTT, 10000).
 
 %% 最小的传输窗口是3000 bytes
 % bytes

@@ -90,7 +90,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
                                  ?MIN_WINDOW_SIZE,OptSndBuf),
-  io:format("MaxWindow: ~p~n",[LedbatCwnd]),
+  io:format("ScaledGain:~p MaxWindow: ~p~n",[ScaledGain0,LedbatCwnd]),
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
