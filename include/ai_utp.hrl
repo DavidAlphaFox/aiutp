@@ -26,13 +26,16 @@
 -define(MAX_SEND_IDLE_TIME,5000000).
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
+%% ms窗口劣化
+-define(MAX_WINDOW_DECAY,100).
 %% 每个来回最大可以增加3000 bytes的窗口
 % bytes
--define(MAX_CWND_INCREASE_BYTES_PER_RTT, 10000).
+-define(MAX_CWND_INCREASE_BYTES_PER_RTT, 102400).
 
 %% 最小的传输窗口是3000 bytes
 % bytes
--define(MIN_WINDOW_SIZE, 100000).
+-define(MIN_WINDOW_SIZE, 102400).
+-define(MAX_WINDOW_SIZE,14680064).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
 
 -record(utp_packet, {type           :: utp_packet_type(),
@@ -96,6 +99,7 @@
          %% --------------------
          %% ms, When was the window last totally full (in send direction)
          last_maxed_out_window :: integer(),
+         last_decay_win :: integer(),
          fin_sent = false,
          fin_acked = false,
          got_fin = false,

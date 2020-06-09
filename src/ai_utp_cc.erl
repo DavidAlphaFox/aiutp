@@ -1,6 +1,6 @@
 -module(ai_utp_cc).
 -include("ai_utp.hrl").
--export([cc/6]).
+-export([cc/7]).
 
 %% 对Peer的计算
 update_peer_ledbat(Net,0)-> Net;
@@ -59,7 +59,6 @@ update_estimate_exceed(#utp_net{our_ledbat = Ours} = NW,MinRTT) ->
   end.
 
 congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
-                            opt_sndbuf = OptSndBuf,
                             cur_window = CurWindow,
                             last_maxed_out_window = LastMaxedOutWindow }=Net,
                    AckedBytes, NowMS,MinRTT)->
@@ -84,24 +83,37 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   %% window, in order to keep the gain within sane boundries.
   WindowFactor = (CurWindow - AckedBytes) / MaxWindow,
 
-   ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
+  ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
   ScaledGain0 =
     if (NowMS - LastMaxedOutWindow) > 1000 andalso ScaledGain > 0 -> 0;
        true -> ScaledGain
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
-                                 ?MIN_WINDOW_SIZE,OptSndBuf * 4),
-  io:format("OurDelay:~p WindowFactor:~p DelayFactor:~p ScaledGain:~p MaxWindow: ~p~n",
-            [OurDelay,WindowFactor,DelayFactor,ScaledGain0,LedbatCwnd]),
+                                 ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
 ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS, Now) ->
   {ok, _NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,Now),
   Net#utp_net{rtt = NewRTT}.
-  
+
+
+update_decay_window(Net,0,_)->Net;
+update_decay_window(#utp_net{last_decay_win = LastDecay,
+                            max_window = MaxWindow} = Net,
+                    Lost,NowMS) when Lost > 0->
+  if (NowMS - LastDecay) > ?MAX_WINDOW_DECAY ->
+      MaxWindow0 = ai_utp_util:clamp(erlang:floor(MaxWindow bsr 1),
+                                     ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
+      Net#utp_net{max_window = MaxWindow0, last_decay_win = NowMS};
+     true -> Net
+  end;
+update_decay_window(Net,_,_) ->Net.
+
+
+
 cc(#utp_net{cur_window = CurWindow} = Net,
-   {TS,TSDiff,Now},MinRTT,AckBytes,Times,WndSize)->
+   {TS,TSDiff,Now},MinRTT,AckBytes,Lost,Times,WndSize)->
   TSDiff0 = ai_utp_util:bit32(TSDiff),
   ActualDelay =
     if TSDiff0 == ?TS_DIFF_MAX -> 0;
@@ -111,10 +123,11 @@ cc(#utp_net{cur_window = CurWindow} = Net,
   Net1 = update_our_ledbat(Net0, ActualDelay),
   Net2 = update_estimate_exceed(Net1, MinRTT),
   NowMS = Now / 1000,
+  Net2a = update_decay_window(Net2,Lost,NowMS),
   Net3 =
     if ActualDelay > 0 andalso AckBytes > 0 ->
-        congestion_control(Net2,AckBytes,NowMS,MinRTT);
-       true -> Net2
+        congestion_control(Net2a,AckBytes,NowMS,MinRTT);
+       true -> Net2a
     end,
   CurWindow0 = CurWindow - AckBytes,
   CurWindow1 =

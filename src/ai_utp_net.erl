@@ -68,10 +68,10 @@ ack(#utp_net{last_ack = LastAck} =Net,
   %% 只更新了reorder
   if (Less == true) orelse (LastAck0 == AckNo) ->
       SAcks = proplists:get_value(sack, Ext,undefined),
-      {AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
+      {Lost,AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
       {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
       ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
-                   AckBytes,lists:reverse(Times),WndSize);
+                   AckBytes,Lost,lists:reverse(Times),WndSize);
      true -> Net
   end.
         
@@ -211,6 +211,7 @@ connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
      conn_id = ConnID,
      peer_conn_id = ai_utp_util:bit16(ConnID + 1),
      seq_nr = 2,
+     last_decay_win = Now /1000,
      state = ?SYN_SEND},
    Packet#utp_packet{conn_id = ConnID,
                      win_sz = MaxWindow}}.
@@ -232,6 +233,7 @@ accept(#utp_net{max_window = MaxWindow} = Net,
            peer_conn_id = PeerConnID,
            ack_nr = ai_utp_util:bit16(AckNo + 1),
            seq_nr = ai_utp_util:bit16(SeqNo + 1) ,
+           last_decay_win = Now /1000,
            state  = ?SYN_RECEIVE},
   {Net0,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
    ConnID,Now - TS}.

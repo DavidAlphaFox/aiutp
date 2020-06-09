@@ -76,8 +76,8 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
                                        queue:to_list(OutBuf))
         end,
       OutBuf1 = fast_resend(AckNo,WindowStart,OutBuf0),
-      {Packets0,OutBuf2} = sack_packet(AckNo, SAcks, OutBuf1),
-      {Packets ++ Packets0,
+      {Lost,Packets0,OutBuf2} = sack_packet(AckNo, SAcks, OutBuf1),
+      {Lost,Packets ++ Packets0,
        Net#utp_net{outbuf = queue:from_list(OutBuf2),
                    cur_window_packets = CurWindowPackets - AckDistance}}
   end.
@@ -125,14 +125,14 @@ sack_map(<<>>,_,Map) -> Map;
 sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
   sack_map(Rest,N+1,maps:put(N,Bits,Map)).
 
-sack_packet(_,undefined,OutBuf)-> {[],OutBuf};
+sack_packet(_,undefined,OutBuf)-> {0,[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   Map = sack_map(Bits,0,#{}),
   Base = ai_utp_util:bit16(AckNo + 2),
   lists:foldl(fun(#utp_packet_wrap{
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
-                  {Acks0,UnAcks0})->
+                  {Lost,Acks0,UnAcks0})->
                   Less = ai_utp_util:wrapping_compare_less(Base, SeqNo, ?ACK_NO_MASK),
                   if (Less == true) orelse (SeqNo == Base)->
                       Index = ai_utp_util:bit16(SeqNo - Base),
@@ -140,19 +140,19 @@ sack_packet(AckNo,Bits,OutBuf)->
                         Index < Max ->
                           Pos = Index bsr 3,
                           case maps:get(Pos,Map) of
-                            0 -> {Acks0,[Warp|UnAcks0]};
+                            0 -> {Lost+1,Acks0,[Warp|UnAcks0]};
                             Bit ->
                               Mask = 1 bsl (Index band 7),
                               Set = Bit band Mask,
-                              if Set == 0 -> {Acks0,[Warp|UnAcks0]};
-                                 true ->{[Warp|Acks0],UnAcks0}
+                              if Set == 0 -> {Lost+1,Acks0,[Warp|UnAcks0]};
+                                 true ->{Lost,[Warp|Acks0],UnAcks0}
                               end
                           end;
-                        true ->{Acks0,[Warp|UnAcks0]}
+                        true ->{Lost,Acks0,[Warp|UnAcks0]}
                       end;
-                     true -> {Acks0,[Warp|UnAcks0]}
+                     true -> {Lost,Acks0,[Warp|UnAcks0]}
                   end
-              end, {[],[]}, lists:reverse(OutBuf)).
+              end, {0,[],[]}, lists:reverse(OutBuf)).
 
 sack(_,#utp_net{reorder_size = 0})-> undefined;
 sack(Base,#utp_net{reorder = Reorder}) ->
