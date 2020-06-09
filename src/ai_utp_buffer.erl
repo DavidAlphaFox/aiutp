@@ -63,7 +63,7 @@ recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
 ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
                                 seq_nr = SeqNR,outbuf = OutBuf} = Net)->
   IsEmpty = queue:is_empty(OutBuf),
-  if IsEmpty == true -> {[],Net};
+  if IsEmpty == true -> {0,[],Net};
      true ->
       %% 最老的序列号
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
