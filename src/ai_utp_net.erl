@@ -97,6 +97,7 @@ send_ack(#utp_net{ack_nr = AckNR,reorder_size = RSize},
      true -> none
   end.
 
+
 fast_resend(#utp_net{outbuf = OutBuf,
                      ack_nr = AckNR} = Net,Now)->
   IsEmpty = queue:is_empty(OutBuf),
@@ -104,21 +105,34 @@ fast_resend(#utp_net{outbuf = OutBuf,
      true ->
       AckNo = ai_utp_util:bit16(AckNR - 1),
       WinSize = window_size(Net),
-      {{value,Wrap},OutBuf0} = queue:out(OutBuf),
-      #utp_packet_wrap{
-         packet = Packet,
-         transmissions = Trans,
-         need_resend = Resend
-        } = Wrap,
-      if Resend == true ->
-          OutBuf1 =  queue:in_r(Wrap#utp_packet_wrap{
-                                  need_resend = false,
-                                  transmissions = Trans + 1,
-                                  send_time = Now},OutBuf0),
-          {Net#utp_net{outbuf = OutBuf1},
-           [Packet#utp_packet{ack_no = AckNo,win_sz = WinSize}]};
-         true -> {Net,[]}
-      end
+      {_,Packets0,OutBuf0} =
+        lists:foldl(fun(#utp_packet_wrap{
+                           packet = Packet,
+                           transmissions = Trans,
+                           need_resend = Resend
+                          } = Wrap,{Count,Packets,Out})->
+
+                        if Count > 10 ->
+                            Wrap0 = Wrap#utp_packet_wrap{need_resend = false},
+                            {Count,Packets,queue:in(Wrap0,Out)};
+                           true->
+                            if Resend == true ->
+                                Packet0 = Packet#utp_packet{ack_no = AckNo,
+                                                            win_sz = WinSize},
+                                Wrap0 = Wrap#utp_packet_wrap{
+                                          need_resend = false,
+                                          packet = Packet0,
+                                          transmissions = Trans + 1,
+                                          send_time = Now},
+                                {Count+1,[Packet0|Packets],queue:in(Wrap0,Out)};
+                               true ->
+                                Wrap0 = Wrap#utp_packet_wrap{need_resend = false},
+                                {Count +1,Packets,queue:in(Wrap0,Out)}
+                            end
+                        end
+                    end,{0,[],queue:new()},queue:to_list(OutBuf)),
+          {Net#utp_net{outbuf = OutBuf0},
+           lists:reverse(Packets0)}
   end.
 process_incoming(#utp_net{state = State} = Net,
                  #utp_packet{type = Type} = Packet,
