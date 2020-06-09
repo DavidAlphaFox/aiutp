@@ -399,13 +399,8 @@ expire_resend(AckNo,WinSize,OutBuf,Resend) ->
     {{value,WrapPacket},OutBuf0} ->
       #utp_packet_wrap{packet = Packet,transmissions = Trans,
                        send_time = SendTime } = WrapPacket,
-      #utp_packet{seq_nao = SeqNo} = Packet,
-      Distance = ai_utp_util:bit16(SeqNo - LastAck),
       Packet0 = Packet#utp_packet{ack_no = AckNo,win_sz = WinSize},
-      if (SendTime == undefined) andalso
-         (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
-          case send(Net,Packet0,ReplyMicro) of
-            {ok,SendTime}->
+      if SendTime == undefined ->
               Resend0 = queue:in(WrapPacket#utp_packet_wrap{
                                    transmissions =  1,
                                    send_time = SendTime },Resend),
