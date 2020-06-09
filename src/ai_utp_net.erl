@@ -379,7 +379,7 @@ expire_resend(#utp_net{ack_nr = AckNR,
                     #utp_packet{seq_no = SeqNo} = Packet,
                     Distance = ai_utp_util:bit16(SeqNo - LastAck),
                     if (Diff > RTO) andalso (Trans > 0)
-                       andalso (Distance < ?REORDER_BUFFER_MAX_SIZE)->
+                       andalso (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
                         {[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],
