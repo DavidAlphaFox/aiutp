@@ -158,8 +158,12 @@ process_incoming(#utp_net{state = State} = Net,
         Net1#utp_net{last_send = Now,last_recv = Now};
        true -> Net1#utp_net{last_recv = Now}
     end,
-  {{Net3,Packets2,_,ReplyMicro},Proc0} = do_send(Net2,Proc,true),
-  {{Net3,Packets1 ++ Packets2,Now,ReplyMicro},Proc0}.
+  if Net2#utp_net.cur_window_packets >= ?OUTGOING_BUFFER_MAX_SIZE ->
+      {{Net2,Packets1,Now,Net2#utp_net.reply_micro},Proc};
+     true ->
+      {{Net3,Packets2,_,ReplyMicro},Proc0} = do_send(Net2,Proc,true),
+      {{Net3,Packets1 ++ Packets2,Now,ReplyMicro},Proc0}
+  end.
 
 process_incoming(st_state, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR} = Net,
@@ -402,7 +406,7 @@ expire_resend(#utp_net{ack_nr = AckNR,
                     #utp_packet{seq_no = SeqNo} = Packet,
                     Distance = ai_utp_util:bit16(SeqNo - LastAck),
                     if (Diff > RTO) andalso (Trans > 0)
-                       andalso (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
+                       andalso (Distance < 10)->
                         {[Packet#utp_packet{
                                       ack_no = AckNo,
                                       win_sz = WinSize}|Packets],
