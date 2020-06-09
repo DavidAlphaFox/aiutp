@@ -82,7 +82,7 @@
          %% do a fast resend with. This makes sure we only do a fast-resend
          %% once per packet. We can resend the packet with this sequence number
          %% or any later packet (with a higher sequence number).
-         reorder = array:new(16#FFFF,fixed),
+         reorder = array:new(16#FFFF + 1,fixed),
          reorder_size = 0,
          outbuf = queue:new(),
          recvbuf = queue:new(),
