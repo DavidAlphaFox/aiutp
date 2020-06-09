@@ -28,10 +28,9 @@ ack_bytes(AckPackets,Now)->
 
 window_size(#utp_net{opt_rcvbuf = OptRcvBuf,
                      inbuf = InBuf,
-                     reorder = Reorder}) ->
-  RLength = erlang:length(Reorder),
+                     reorder_size = RSize}) ->
   Size = erlang:byte_size(InBuf),
-  if RLength < ?REORDER_BUFFER_MAX_SIZE ->
+  if RSize < ?REORDER_BUFFER_MAX_SIZE ->
       if OptRcvBuf > Size -> OptRcvBuf - Size;
          true -> 0
       end;
@@ -58,11 +57,12 @@ ack(#utp_net{last_ack = LastAck} =Net,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
   LastAck0 =
-    if LastAck == undefined -> ai_utp_util:bit16(AckNo -1);
+    if LastAck == undefined -> AckNo;
        true -> LastAck
     end,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
-  if Less == true ->
+  %% 只更新了reorder
+  if (Less == true) orelse (LastAck0 == AckNo) ->
       SAcks = proplists:get_value(sack, Ext,undefined),
       {AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
       {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
@@ -86,10 +86,10 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
   Packet#utp_packet{win_sz = window_size(Net),
                     conn_id = PeerConnID}.
 
-send_ack(#utp_net{ack_nr = AckNR,reorder = Reorder},
-         #utp_net{ack_nr = AckNR0,reorder = Reorder0} = Net1)->
+send_ack(#utp_net{ack_nr = AckNR,reorder_size = RSize},
+         #utp_net{ack_nr = AckNR0,reorder_size = RSize0} = Net1)->
   if (AckNR /= AckNR0) orelse
-     (Reorder /= Reorder0) -> send_ack(Net1);
+     (RSize /= RSize0) -> send_ack(Net1);
      true -> none
   end.
 

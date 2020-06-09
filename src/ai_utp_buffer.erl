@@ -20,7 +20,8 @@ in(SeqNo,Payload,
   Net0 = recv(State,Payload,Net),
   recv_reorder(Net0#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)});
 in(SeqNo,Payload,
-   #utp_net { reorder = OD,ack_nr = AckNR } = Net) ->
+   #utp_net { reorder = OD,ack_nr = AckNR,
+              reorder_size = RSize} = Net) ->
   Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
   Diff = ai_utp_util:bit16(SeqNo - AckNR),
   if Less == true -> duplicate;
@@ -28,7 +29,10 @@ in(SeqNo,Payload,
      true ->
       case array:get(SeqNo, OD) of
         undefined ->
-          {ok,Net#utp_net{ reorder = array:set(SeqNo, Payload, OD) }};
+          {ok,Net#utp_net{
+                reorder = array:set(SeqNo, Payload, OD),
+                reorder_size = RSize + 1
+               }};
         _ -> duplicate
       end
   end.
@@ -39,13 +43,15 @@ recv(?ESTABLISHED,Payload,
   Net#utp_net{inbuf = <<InBuf/binary,Payload/binary>>};
 recv(_,_,Net) -> Net.
 
-recv_reorder(#utp_net{state = State,ack_nr = SeqNo,reorder = OD} = Net) ->
+recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
+                      reorder = OD,reorder_size = RSize} = Net) ->
   case array:get(SeqNo,OD) of
     undefined -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
       recv_reorder(Net0#utp_net{reorder = array:set(SeqNo,undefined,OD),
-                            ack_nr = ai_utp_util:bit16(SeqNo + 1)})
+                                reorder_size = RSize -1,
+                                ack_nr = ai_utp_util:bit16(SeqNo + 1)})
   end.
 
 
@@ -160,5 +166,7 @@ sack(Base,#utp_net{reorder = Reorder}) ->
                       {Pos0,Bit0,Acc}
                   end
               end,{0,0,<<>>},lists:seq(0, 799)),
-  Acc.
+  if erlang:byte_size(Acc) > 0 -> Acc;
+     true -> undefined
+  end.
 

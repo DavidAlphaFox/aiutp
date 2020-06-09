@@ -84,6 +84,7 @@
          %% or any later packet (with a higher sequence number).
          inbuf = <<>>,
          reorder = array:new(16#FFFF,fixed),
+         reorder_size = 0,
          outbuf = queue:new(),
          reply_micro,
          rtt = none,
