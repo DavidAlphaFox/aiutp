@@ -63,28 +63,33 @@ decode(Packet) ->
 -spec decode_packet(binary()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet) ->
-  RecvTS = ai_utp_util:microsecond(),
 
-  %% Decode packet
-  <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
-    SeqNo:16/integer,AckNo:16/integer,
-    WindowSize:32/integer,
-    TS:32/integer,TSDiff:32/integer,
-    ExtPayload/binary>> = Packet,
-  {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
+  <<CRC:32/integer,Body/binary>> = Packet,
+  CRCSum = erlang:crc32(Body),
+  if CRC /= CRCSum -> {error,drop};
+     true ->
+      %% Decode packet
+      <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
+        SeqNo:16/integer,AckNo:16/integer,
+        WindowSize:32/integer,
+        TS:32/integer,TSDiff:32/integer,
+        ExtPayload/binary>> = Body,
+      {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
 
-    %% Validate packet contents
-  Ty = decode_type(Type),
-  ok = validate_packet_type(Ty, Payload),
+      %% Validate packet contents
+      Ty = decode_type(Type),
+      ok = validate_packet_type(Ty, Payload),
+      RecvTS = ai_utp_util:microsecond(),
+      {#utp_packet{type = Ty,
+                   conn_id = ConnectionId,
+                   win_sz = WindowSize,
+                   seq_no = SeqNo,
+                   ack_no = AckNo,
+                   extension = Extensions,
+                   payload = Payload},
+       {TS,TSDiff,RecvTS}}
+  end.
 
-  {#utp_packet{type = Ty,
-           conn_id = ConnectionId,
-           win_sz = WindowSize,
-           seq_no = SeqNo,
-           ack_no = AckNo,
-           extension = Extensions,
-           payload = Payload},
-   {TS,TSDiff,RecvTS}}.
 
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
 decode_extensions(?EXT_SACK, <<Next:8/integer,
@@ -124,12 +129,14 @@ encode(#utp_packet {type = Type,
                 payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-
-  <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
-    SeqNo:16/integer, AckNo:16/integer,
-    WSize:32/integer,
-    TS:32/integer,TSDiff:32/integer,
-    ExtBin/binary,Payload/binary>>.
+  Body =
+    <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
+      SeqNo:16/integer, AckNo:16/integer,
+      WSize:32/integer,
+      TS:32/integer,TSDiff:32/integer,
+      ExtBin/binary,Payload/binary>>,
+  CRCSum = erlang:crc32(Body),
+  <<CRCSum:32/integer,Body/binary>>.
 
 encode_extensions([]) -> {0, <<>>};
 encode_extensions([{sack, Bits} | R]) ->
