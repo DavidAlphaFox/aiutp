@@ -1,7 +1,7 @@
 -module(ai_utp_net).
 -include("ai_utp.hrl").
 
--export([process_incoming/3]).
+-export([process_incoming/4]).
 -export([connect/2,accept/3]).
 -export([state/1,do_send/2,do_read/1]).
 -export([on_tick/3,net_error/1]).
@@ -122,7 +122,7 @@ fast_resend(#utp_net{outbuf = OutBuf,
   end.
 process_incoming(#utp_net{state = State} = Net,
                  #utp_packet{type = Type} = Packet,
-                 Timing) ->
+                 Timing,Proc) ->
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;
@@ -144,7 +144,8 @@ process_incoming(#utp_net{state = State} = Net,
         Net1#utp_net{last_send = Now,last_recv = Now};
        true -> Net1#utp_net{last_recv = Now}
     end,
-  {Net2,Packets1,Now,Net2#utp_net.reply_micro}.
+  {{Net3,Packets2,_,ReplyMicro},Proc0} = do_send(Net2,Proc,true),
+  {{Net3,Packets1 ++ Packets2,Now,ReplyMicro},Proc0}.
 
 process_incoming(st_state, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR} = Net,
