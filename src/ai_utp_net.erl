@@ -53,14 +53,13 @@ max_send_bytes(#utp_net{
 
 %% 最后阶段计算并清理所有被Ack过的包
 ack(#utp_net{last_ack = LastAck} =Net,
-    #utp_packet{ack_no = AckNo,type = Type,
+    #utp_packet{ack_no = AckNo,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
   LastAck0 =
     if LastAck == undefined -> AckNo;
        true -> LastAck
     end,
-  io:format("Type:~p AckNo:~p LastAckNo:~p~n",[Type,AckNo,LastAck]),
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder
   if (Less == true) orelse (LastAck0 == AckNo) ->
@@ -117,13 +116,9 @@ fast_resend(#utp_net{outbuf = OutBuf,
          true -> {Net,[]}
       end
   end.
-process_incoming(#utp_net{state = State,ack_nr = AckNR, last_ack = LastAckNo} = Net,
-                 #utp_packet{type = Type, seq_no = SeqNo} = Packet,
+process_incoming(#utp_net{state = State} = Net,
+                 #utp_packet{type = Type} = Packet,
                  Timing) ->
-  if Type == st_data ->
-      io:format("SeqNo:~p AckNR:~p LastAckNo: ~p~n",[SeqNo,AckNR,LastAckNo]);
-     true -> ok
-  end,
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;

@@ -51,9 +51,9 @@ update(Estimate,none)->
 %% The default timeout for packets associated with the socket is also
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
-rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
+rto(#ai_utp_rtt { rtt = RTT, var = Var,delay = Delay}) ->
   RTO = max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+  RTO * Delay.
 
 
 %% ACKnowledge an incoming packet
