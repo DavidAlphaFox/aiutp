@@ -155,15 +155,13 @@ sack(Base,#utp_net{reorder = Reorder}) ->
                   Pos0 = Index bsr 3,
                   Mask = 1 bsl (Index band 7),
                   SeqNo = ai_utp_util:bit16(Base + Index),
-                  if Pos0 > Pos ->
-                      Acc0 = <<Acc/binary,Bit/big-integer>>,
-                      case array:get(SeqNo, Reorder) of
-                        undefined -> {Pos0,0,Acc0};
-                        _ -> {Pos0,Mask,Acc0}
-                      end;
-                     true ->
-                      Bit0 = Bit bor Mask,
-                      {Pos0,Bit0,Acc}
+                  {Bit0,Acc0} =
+                  if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
+                     true ->{Bit,Acc}
+                  end,
+                  case array:get(SeqNo, Reorder) of
+                    undefined -> {Pos0,Bit0,Acc0};
+                    _ -> {Pos0,Bit0 bor Mask,Acc0}
                   end
               end,{0,0,<<>>},lists:seq(0, 799)),
   if erlang:byte_size(Acc) > 0 -> Acc;

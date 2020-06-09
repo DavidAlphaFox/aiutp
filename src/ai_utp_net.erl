@@ -52,16 +52,25 @@ max_send_bytes(#utp_net{
   end.
 
 %% 最后阶段计算并清理所有被Ack过的包
-ack(Net,
+ack(#utp_net{last_ack = LastAck} =Net,
     #utp_packet{ack_no = AckNo,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
-  SAcks = proplists:get_value(sack, Ext,undefined),
-  {AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
-  {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
-  ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
-               AckBytes,lists:reverse(Times),WndSize).
-
+  LastAck0 =
+    if LastAck == undefined -> AckNo;
+       true -> LastAck
+    end,
+  Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
+  %% 只更新了reorder
+  if (Less == true) orelse (LastAck0 == AckNo) ->
+      SAcks = proplists:get_value(sack, Ext,undefined),
+      {AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
+      {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
+      ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
+                   AckBytes,lists:reverse(Times),WndSize);
+     true -> Net
+  end.
+        
 
 
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
