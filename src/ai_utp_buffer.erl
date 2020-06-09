@@ -163,18 +163,13 @@ sack(AckNo,[],Pos,Map)->
            end, <<>>, lists:seq(0, Pos)),
   Size = erlang:byte_size(Bin0),
   io:format("send AckNo: ~p Size: ~p~n",[AckNo,Size]),
-  Rem = Size rem 4,
-  if Rem > 0->
-      Offset = (4 - Rem) * 8,
-      <<Bin0/binary,0:Offset>>;
-     true -> Bin0
-  end;
+  Bin0;
 sack(Base,[{SeqNo,_}|T],Pos,Map)->
   Less = ai_utp_util:wrapping_compare_less(Base, SeqNo, ?ACK_NO_MASK),
   if (Less == true) or (SeqNo == Base)->
       Index = ai_utp_util:bit16(SeqNo - Base),
-      %% 0 - 799,共800个元素
-      if Index >= 800 -> sack(Base,[],Pos,Map);
+      %% 0 - 639,共640个元素
+      if Index >= 640 -> sack(Base,[],Pos,Map);
          true ->
           Pos0 = Index bsr 3,
           Mask = 1 bsl (Index band 7),

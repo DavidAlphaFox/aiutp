@@ -78,16 +78,19 @@ decode_packet(Packet) ->
 
       %% Validate packet contents
       Ty = decode_type(Type),
-      ok = validate_packet_type(Ty, Payload),
-      RecvTS = ai_utp_util:microsecond(),
-      {#utp_packet{type = Ty,
-                   conn_id = ConnectionId,
-                   win_sz = WindowSize,
-                   seq_no = SeqNo,
-                   ack_no = AckNo,
-                   extension = Extensions,
-                   payload = Payload},
-       {TS,TSDiff,RecvTS}}
+      Verified = validate_packet_type(Ty, Payload),
+      if Verified /= ok -> {error,drop};
+         true ->
+          RecvTS = ai_utp_util:microsecond(),
+          {#utp_packet{type = Ty,
+                       conn_id = ConnectionId,
+                       win_sz = WindowSize,
+                       seq_no = SeqNo,
+                       ack_no = AckNo,
+                       extension = Extensions,
+                       payload = Payload},
+           {TS,TSDiff,RecvTS}}
+      end
   end.
 
 
