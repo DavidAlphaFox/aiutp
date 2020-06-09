@@ -64,15 +64,16 @@ decode(Packet) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet) ->
 
-  <<CRC:32/integer,Body/binary>> = Packet,
+  <<CRC:32/big-integer,Body/binary>> = Packet,
   CRCSum = erlang:crc32(Body),
   if CRC /= CRCSum -> {error,drop};
      true ->
       %% Decode packet
-      <<1:4/integer, Type:4/integer, Extension:8/integer, ConnectionId:16/integer,
-        SeqNo:16/integer,AckNo:16/integer,
-        WindowSize:32/integer,
-        TS:32/integer,TSDiff:32/integer,
+      <<1:4/big-integer, Type:4/big-integer,
+        Extension:8/big-integer, ConnectionId:16/big-integer,
+        SeqNo:16/big-integer,AckNo:16/big-integer,
+        WindowSize:32/big-integer,
+        TS:32/big-integer,TSDiff:32/big-integer,
         ExtPayload/binary>> = Body,
       {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
 
@@ -95,12 +96,12 @@ decode_packet(Packet) ->
 
 
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
-decode_extensions(?EXT_SACK, <<Next:8/integer,
-                               Len:8/integer, R/binary>>, Acc) ->
+decode_extensions(?EXT_SACK, <<Next:8/big-integer,
+                               Len:8/big-integer, R/binary>>, Acc) ->
   <<Bits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{sack, Bits} | Acc]);
-decode_extensions(?EXT_BITS, <<Next:8/integer,
-                               Len:8/integer, R/binary>>, Acc) ->
+decode_extensions(?EXT_BITS, <<Next:8/big-integer,
+                               Len:8/big-integer, R/binary>>, Acc) ->
   <<ExtBits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{ext_bits, ExtBits} | Acc]).
 
@@ -133,23 +134,24 @@ encode(#utp_packet {type = Type,
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
   Body =
-    <<1:4/integer, EncTy:4/integer, Extension:8/integer, ConnID:16/integer,
-      SeqNo:16/integer, AckNo:16/integer,
-      WSize:32/integer,
-      TS:32/integer,TSDiff:32/integer,
+    <<1:4/big-integer, EncTy:4/big-integer,
+      Extension:8/big-integer, ConnID:16/big-integer,
+      SeqNo:16/big-integer, AckNo:16/big-integer,
+      WSize:32/big-integer,
+      TS:32/big-integer,TSDiff:32/big-integer,
       ExtBin/binary,Payload/binary>>,
   CRCSum = erlang:crc32(Body),
-  <<CRCSum:32/integer,Body/binary>>.
+  <<CRCSum:32/big-integer,Body/binary>>.
 
 encode_extensions([]) -> {0, <<>>};
 encode_extensions([{sack, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),
-  {?EXT_SACK, <<Next:8/integer, Sz:8/integer, Bits/binary, Bin/binary>>};
+  {?EXT_SACK, <<Next:8/big-integer, Sz:8/big-integer, Bits/binary, Bin/binary>>};
 encode_extensions([{ext_bits, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),
-  {?EXT_BITS, <<Next:8/integer, Sz:8/integer, Bits/binary, Bin/binary>>}.
+  {?EXT_BITS, <<Next:8/big-integer, Sz:8/big-integer, Bits/binary, Bin/binary>>}.
 
 encode_type(st_data) -> ?ST_DATA;
 encode_type(st_fin) -> ?ST_FIN;

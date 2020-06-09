@@ -26,10 +26,10 @@ in(SeqNo,Payload,
   if Less == true -> duplicate;
      Diff > ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
-      case orddict:is_key(SeqNo, OD) of
-        true -> duplicate;
-        false ->
-          {ok,Net#utp_net{ reorder = orddict:store(SeqNo, Payload, OD) }}
+      case array:get(SeqNo, OD) of
+        undefined ->
+          {ok,Net#utp_net{ reorder = array:set(SeqNo, Payload, OD) }};
+        _ -> duplicate
       end
   end.
 
@@ -39,21 +39,15 @@ recv(?ESTABLISHED,Payload,
   Net#utp_net{inbuf = <<InBuf/binary,Payload/binary>>};
 recv(_,_,Net) -> Net.
 
+recv_reorder(#utp_net{state = State,ack_nr = SeqNo,reorder = OD} = Net) ->
+  case array:get(SeqNo,OD) of
+    undefined -> {ok,Net};
+    Payload ->
+      Net0 = recv(State, Payload, Net),
+      recv_reorder(Net0#utp_net{reorder = array:set(SeqNo,undefined,OD),
+                            ack_nr = ai_utp_util:bit16(SeqNo + 1)})
+  end.
 
-
-recv_reorder(#utp_net{ reorder = [] } = Net) ->{ok,Net};
-%% 接收对端最后一个数据包
-recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
-                      got_fin = true,eof_seq_no = SeqNo,
-                      reorder = [{SeqNo, PL} | R]} = Net) ->
-  Net0 = recv(State, PL, Net),
-  {fin,Net0#utp_net{reorder = R}};
-recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
-                      reorder = [{SeqNo, PL} | R]} = Net) ->
-  Net0 = recv(State, PL, Net),
-  recv_reorder(Net0#utp_net{reorder = R,
-                            ack_nr = ai_utp_util:bit16(SeqNo + 1)});
-recv_reorder(Net)-> {ok,Net}.
 
 ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
                                 seq_nr = SeqNR,outbuf = OutBuf} = Net)->
@@ -125,7 +119,6 @@ sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   Map = sack_map(Bits,0,#{}),
   Base = ai_utp_util:bit16(AckNo + 2),
-  io:format("recv AckNo: ~p Size: ~p~n",[Base,Max/8]),
   lists:foldl(fun(#utp_packet_wrap{
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
                   {Acks0,UnAcks0})->
@@ -150,42 +143,22 @@ sack_packet(AckNo,Bits,OutBuf)->
                   end
               end, {[],[]}, lists:reverse(OutBuf)).
 
-sack(_,#utp_net{reorder = []}) -> undefined;
 sack(Base,#utp_net{reorder = Reorder}) ->
-  sack(Base,Reorder,0,#{0 => 0}).
+{_,_,Acc} = lists:foldl(
+              fun(Index,{Pos,Bit,Acc})->
+                  Pos0 = Index bsr 3,
+                  Mask = 1 bsl (Index band 7),
+                  SeqNo = ai_utp_util:bit16(Base + Index),
+                  if Pos0 > Pos ->
+                      Acc0 = <<Acc/binary,Bit/big-integer>>,
+                      case array:get(SeqNo, Reorder) of
+                        undefined -> {Pos0,0,Acc0};
+                        _ -> {Pos0,Mask,Acc0}
+                      end;
+                     true ->
+                      Bit0 = Bit bor Mask,
+                      {Pos0,Bit0,Acc}
+                  end
+              end,{0,0,<<>>},lists:seq(0, 799)),
+  Acc.
 
-sack(_,[],0,#{0 := 0}) -> undefined;
-sack(AckNo,[],Pos,Map)->
-  Bin0 = lists:foldl(
-           fun(BI,BAcc)->
-               Bits = maps:get(BI,Map),
-               <<BAcc/binary,Bits/big-integer>>
-           end, <<>>, lists:seq(0, Pos)),
-  Size = erlang:byte_size(Bin0),
-  io:format("send AckNo: ~p Size: ~p~n",[AckNo,Size]),
-  Bin0;
-sack(Base,[{SeqNo,_}|T],Pos,Map)->
-  Less = ai_utp_util:wrapping_compare_less(Base, SeqNo, ?ACK_NO_MASK),
-  if (Less == true) or (SeqNo == Base)->
-      Index = ai_utp_util:bit16(SeqNo - Base),
-      %% 0 - 639,共640个元素
-      if Index >= 640 -> sack(Base,[],Pos,Map);
-         true ->
-          Pos0 = Index bsr 3,
-          Mask = 1 bsl (Index band 7),
-          if
-            Pos0 > Pos ->
-              Map0 = lists:foldl(
-                       fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
-                       Map,lists:seq(Pos +1 ,Pos0)),
-              Bits = maps:get(Pos0,Map0),
-              Bits0 = Mask bor Bits,
-              sack(Base,T,Pos0,maps:put(Pos0,Bits0,Map0));
-            true ->
-              Bits = maps:get(Pos,Map),
-              Bits0 = Mask bor Bits,
-              sack(Base,T,Pos,maps:put(Pos0,Bits0,Map))
-          end
-      end;
-     true -> sack(Base,T,Pos,Map)
-  end.

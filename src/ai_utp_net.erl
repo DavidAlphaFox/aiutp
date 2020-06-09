@@ -55,7 +55,7 @@ max_send_bytes(#utp_net{
 %% 最后阶段计算并清理所有被Ack过的包
 ack(#utp_net{last_ack = LastAck} =Net,
     #utp_packet{ack_no = AckNo,
-                    win_sz = WndSize,extension = Ext},
+                win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
   LastAck0 =
     if LastAck == undefined -> ai_utp_util:bit16(AckNo -1);
@@ -360,7 +360,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
       {{Net#utp_net{state = ?CLOSED,error = econnaborted},
-       [],Now,Net#utp_net.reply_micro},Proc};
+        [],Now,Net#utp_net.reply_micro},Proc};
      true ->
       RTO = rto(Net),
       {Count,Net0,Packets0} = expire_resend(Net,Now,RTO),

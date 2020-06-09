@@ -17,7 +17,7 @@
 -define(HALF_CIRCLE, 16#6FFF).
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE, 1024).
--define(PACKET_SIZE, 1180).
+-define(PACKET_SIZE, 1176).
 -define(OPT_RECV_BUF, 1208320).
 -define(OPT_SEND_BUF, 1208320).
 
@@ -83,7 +83,7 @@
          %% once per packet. We can resend the packet with this sequence number
          %% or any later packet (with a higher sequence number).
          inbuf = <<>>,
-         reorder = [],
+         reorder = array:new(16#FFFF,fixed),
          outbuf = queue:new(),
          reply_micro,
          rtt = none,
