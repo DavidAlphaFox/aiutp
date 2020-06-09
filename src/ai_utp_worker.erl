@@ -214,20 +214,17 @@ handle_cast({packet,Packet,Timing},
                    remote = Remote, connector = undefined,
                    process = Proc,
                    tick_timer = Timer} = State)->
-  cancle_tick_timer(Timer),
+
   {Net0,Packets,TS,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   NetState = ai_utp_net:state(Net0),
   send(Socket,Remote,Packets,TS,TSDiff),
   if NetState == ?CLOSED ->
+      cancle_tick_timer(Timer),
       {noreply,active_read(State#state{net = Net0,tick_timer = undefined})};
      true ->
       {{Net1,TxQ,Now,ReplyMicro},Proc0} = ai_utp_net:do_send(Net0, Proc),
       send(Socket,Remote,TxQ,Now,ReplyMicro),
-      Timer0 = start_tick_timer(?TIMER_TIMEOUT, undefined),
-      {noreply,active_read(State#state{
-                             tick_timer = Timer0,
-                             process = Proc0,
-                             net = Net1})}
+      {noreply,active_read(State#state{process = Proc0,net = Net1})}
   end;
 %% 正在进行链接
 handle_cast({packet,Packet,Timing},
