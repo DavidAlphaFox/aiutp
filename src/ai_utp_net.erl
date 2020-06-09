@@ -220,7 +220,7 @@ accept(#utp_net{max_window = MaxWindow} = Net,
           conn_id = PeerConnID,
           seq_no = AckNo,
           win_sz = PeerWinSize} = Packet,
-       {_,_,Now} = Timing)->
+       {TS,_,Now} = Timing)->
 
   SeqNo = ai_utp_util:bit16_random(),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
@@ -234,9 +234,8 @@ accept(#utp_net{max_window = MaxWindow} = Net,
            ack_nr = ai_utp_util:bit16(AckNo + 1),
            seq_nr = ai_utp_util:bit16(SeqNo + 1) ,
            state  = ?SYN_RECEIVE},
-  Net1 = ack(Net0, Packet, Timing),
-  {Net1,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
-   ConnID,Net1#utp_net.reply_micro}.
+  {Net0,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
+   ConnID,Now - TS}.
 
 state(#utp_net{state = State})-> State.
 rto(#utp_net{rtt = RTT})-> ai_utp_rtt:rto(RTT).
