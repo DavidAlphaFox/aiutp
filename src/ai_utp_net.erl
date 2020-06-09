@@ -53,13 +53,14 @@ max_send_bytes(#utp_net{
 
 %% 最后阶段计算并清理所有被Ack过的包
 ack(#utp_net{last_ack = LastAck} =Net,
-    #utp_packet{ack_no = AckNo,
+    #utp_packet{ack_no = AckNo,type = Type,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
   LastAck0 =
     if LastAck == undefined -> AckNo;
        true -> LastAck
     end,
+  io:format("Type:~p AckNo:~p LastAckNo:~p",[Type,AckNo,LastAck]),
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder
   if (Less == true) orelse (LastAck0 == AckNo) ->
