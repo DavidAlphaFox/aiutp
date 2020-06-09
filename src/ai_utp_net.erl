@@ -134,9 +134,12 @@ fast_resend(#utp_net{outbuf = OutBuf,
           {Net#utp_net{outbuf = OutBuf0},
            lists:reverse(Packets0)}
   end.
-process_incoming(#utp_net{state = State} = Net,
-                 #utp_packet{type = Type} = Packet,
+process_incoming(#utp_net{state = State,ack_nr = AckNR,
+                          seq_nr = SeqNR,reorder_size = RSize} = Net,
+                 #utp_packet{type = Type,seq_no= SeqNo} = Packet,
                  Timing,Proc) ->
+  io:format("Type: ~p seqNo: ~p ackNR:~p seqNR: ~p ReorderSize: ~p~n",
+            [Type,SeqNo,AckNR,SeqNR,RSize]),
   {Net0,Packets} =
     case process_incoming(Type,State,Net,Packet,Timing) of
       {_,_} = R -> R;

@@ -69,7 +69,7 @@ decode_packet(Packet) ->
   if CRC /= CRCSum -> {error,drop};
      true ->
       %% Decode packet
-      <<1:4/big-integer, Type:4/big-integer,
+      <<Type:8/big-integer,
         Extension:8/big-integer, ConnectionId:16/big-integer,
         SeqNo:16/big-integer,AckNo:16/big-integer,
         WindowSize:32/big-integer,
@@ -134,7 +134,7 @@ encode(#utp_packet {type = Type,
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
   Body =
-    <<1:4/big-integer, EncTy:4/big-integer,
+    <<EncTy:8/big-integer,
       Extension:8/big-integer, ConnID:16/big-integer,
       SeqNo:16/big-integer, AckNo:16/big-integer,
       WSize:32/big-integer,
