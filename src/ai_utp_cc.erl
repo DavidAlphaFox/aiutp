@@ -60,12 +60,15 @@ update_estimate_exceed(#utp_net{our_ledbat = Ours} = NW,MinRTT) ->
 
 congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
                             opt_sndbuf = OptSndBuf,
+                            cur_window = CurWindow,
                             last_maxed_out_window = LastMaxedOutWindow }=Net,
                    AckedBytes, NowMS,MinRTT)->
   OurDelay = min(MinRTT,ai_utp_ledbat:get_value(OurLedbat)),
-  TargetDelay = ?CONGESTION_CONTROL_TARGET,
 
-  TargetOffset = TargetDelay - OurDelay,
+  TargetOffset = ?CONGESTION_CONTROL_TARGET  - OurDelay,
+%% The delay factor is how much we are off the target:
+  DelayFactor = TargetOffset / ?CONGESTION_CONTROL_TARGET,
+ 
   %% this is the same as:
   %%
   %%    (min(off_target, target) / target) * (bytes_acked / max_window) * MAX_CWND_INCREASE_BYTES_PER_RTT
@@ -79,11 +82,9 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   %% the min around the bytes_acked protects against the case where the window size was recently
   %% shrunk and the number of acked bytes exceeds that. This is considered no more than one full
   %% window, in order to keep the gain within sane boundries.
-  WindowFactor = min(AckedBytes, MaxWindow) / max(MaxWindow, AckedBytes),
+  WindowFactor = (CurWindow - AckedBytes) / MaxWindow,
 
-  %% The delay factor is how much we are off the target:
-  DelayFactor = TargetOffset / TargetDelay,
-  ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
+   ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
   ScaledGain0 =
     if (NowMS - LastMaxedOutWindow) > 1000 andalso ScaledGain > 0 -> 0;
        true -> ScaledGain

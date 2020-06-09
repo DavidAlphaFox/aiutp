@@ -55,9 +55,9 @@
                          }).
 -record(utp_net,
         {%%sndbuf setting, in bytes
-         opt_sndbuf = ?OPT_SEND_BUF,
+         opt_sndbuf = ?OPT_SEND_BUF * 4,
          %%rcvbuf setting, in bytes
-         opt_recvbuf = ?OPT_RECV_BUF,
+         opt_recvbuf = ?OPT_RECV_BUF * 4,
          state = undefined,
          error = normal,
          %% the number of packets in the send queue. Packets that haven't
