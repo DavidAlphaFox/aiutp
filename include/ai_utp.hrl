@@ -32,7 +32,7 @@
 
 %% 最小的传输窗口是3000 bytes
 % bytes
--define(MIN_WINDOW_SIZE, 3000).
+-define(MIN_WINDOW_SIZE, 100000).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
 
 -record(utp_packet, {type           :: utp_packet_type(),

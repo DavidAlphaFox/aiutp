@@ -88,7 +88,9 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
     if (NowMS - LastMaxedOutWindow) > 1000 andalso ScaledGain > 0 -> 0;
        true -> ScaledGain
     end,
-  LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,?MIN_WINDOW_SIZE,OptSndBuf),
+  LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
+                                 ?MIN_WINDOW_SIZE,OptSndBuf),
+  io:format("MaxWindow: ~p~n",[LedbatCwnd]),
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
