@@ -89,8 +89,9 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
        true -> ScaledGain
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
-                                 ?MIN_WINDOW_SIZE,OptSndBuf),
-  io:format("ScaledGain:~p MaxWindow: ~p~n",[ScaledGain0,LedbatCwnd]),
+                                 ?MIN_WINDOW_SIZE,OptSndBuf * 4),
+  io:format("OurDelay:~p WindowFactor:~p DelayFactor:~p ScaledGain:~p MaxWindow: ~p~n",
+            [OurDelay,WindowFactor,DelayFactor,ScaledGain0,LedbatCwnd]),
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
