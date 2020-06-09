@@ -203,14 +203,15 @@ process_incoming(st_reset,_,Net,_,_) ->
   Net#utp_net{state = ?CLOSED,error=econnrefused}.
 
 connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
-  Packet = ai_utp_protocol:make_syn_packet(),
+  SeqNo = ai_utp_util:bit16_random(),
+  Packet = ai_utp_protocol:make_syn_packet(SeqNo),
   Now =  ai_utp_util:microsecond(),
   {Net#utp_net{
      last_send = Now,
      last_recv = Now,
      conn_id = ConnID,
      peer_conn_id = ai_utp_util:bit16(ConnID + 1),
-     seq_nr = 2,
+     seq_nr = ai_utp_util:bit16(SeqNo + 1),
      last_decay_win = Now /1000,
      state = ?SYN_SEND},
    Packet#utp_packet{conn_id = ConnID,
@@ -221,7 +222,6 @@ accept(#utp_net{max_window = MaxWindow} = Net,
           seq_no = AckNo,
           win_sz = PeerWinSize},
        {TS,_,Now})->
-
   SeqNo = ai_utp_util:bit16_random(),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
   ConnID = ai_utp_util:bit16(PeerConnID + 1),

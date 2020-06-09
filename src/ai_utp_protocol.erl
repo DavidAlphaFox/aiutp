@@ -2,7 +2,7 @@
 -include("ai_utp.hrl").
 
 -export([decode/1,encode/2,encode/3]).
--export([make_syn_packet/0,make_ack_packet/2,
+-export([make_syn_packet/1,make_ack_packet/2,
          make_ack_packet/3,make_reset_packet/2,
          make_data_packet/2]).
 
@@ -28,9 +28,9 @@ make_reset_packet(ConnID,AckNo)->
           win_sz = 0,
           extension = [],
           conn_id = ConnID}.
-make_syn_packet() ->
+make_syn_packet(SeqNo) ->
   #utp_packet { type = st_syn,
-            seq_no = 1,
+            seq_no = SeqNo,
             ack_no = 0,
             extension = ?SYN_EXTS}.
 make_ack_packet(SeqNo,AckNo,Ext)->
