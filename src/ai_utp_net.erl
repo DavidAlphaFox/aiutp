@@ -343,14 +343,22 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
   end.
 
 
+%% try to full fill one package
+do_send(Net,Proc)-> do_send(Net,Proc,false).
 
-do_send(Net,Proc)->
+
+do_send(Net,Proc,Quick)->
   MaxBufSize = sndbuf_remain(Net),
   MaxSendBytes = max_send_bytes(Net),
   {Net0,Proc0} = fill_buffer(Net,MaxBufSize + MaxSendBytes,Proc),
   Now = ai_utp_util:microsecond(),
-  {Net1,TxQ} = fill_tx_queue(Now,Net0,MaxSendBytes),
-  {{Net1,TxQ,Now,Net1#utp_net.reply_micro},Proc0}.
+  if (Quick == true) orelse
+     (Net0#utp_net.sndbuf_size >= ?PACKET_SIZE)->
+      {Net1,TxQ} = fill_tx_queue(Now,Net0,MaxSendBytes),
+      {{Net1,TxQ,Now,Net1#utp_net.reply_micro},Proc0};
+     true ->
+      {{Net0,[],Now,Net0#utp_net.reply_micro},Proc0}
+  end.
 
 do_read(#utp_net{
            recvbuf_size = RecvBufSize,
@@ -419,7 +427,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
      true ->
       RTO = rto(Net),
       {Net0,Packets0} = expire_resend(Net,Now,RTO),
-      {{Net2,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc),
+      {{Net2,Packets1,_,ReplyMicro},Proc0} = do_send(Net0,Proc,true),
       {Net3,Packets} = force_state(State,Net2,Packets0 ++ Packets1,Now,RTO),
       {{Net3,Packets,Now,ReplyMicro},Proc0}
   end.
