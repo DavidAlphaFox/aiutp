@@ -161,9 +161,9 @@ sack(Base,#utp_net{reorder = Reorder}) ->
                   Mask = 1 bsl (Index band 7),
                   SeqNo = ai_utp_util:bit16(Base + Index),
                   {Bit0,Acc0} =
-                  if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
-                     true ->{Bit,Acc}
-                  end,
+                    if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
+                       true ->{Bit,Acc}
+                    end,
                   case array:get(SeqNo, Reorder) of
                     undefined -> {Pos0,Bit0,Acc0};
                     _ -> {Pos0,Bit0 bor Mask,Acc0}
