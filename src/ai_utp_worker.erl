@@ -212,7 +212,7 @@ handle_call(active,_From,#state{active = Active}=State) ->
 handle_cast({packet,Packet,Timing},
             #state{net = Net,socket = Socket,
                    remote = Remote, connector = undefined,
-                   tick_timer = Timer,process = Proc} = State)->
+                   tick_timer = Timer} = State)->
   cancle_tick_timer(Timer),
   {Net0,Packets,TS,TSDiff} = ai_utp_net:process_incoming(Net,Packet, Timing),
   NetState = ai_utp_net:state(Net0),
@@ -220,12 +220,10 @@ handle_cast({packet,Packet,Timing},
   if NetState == ?CLOSED ->
       {noreply,active_read(State#state{net = Net0,tick_timer = undefined})};
      true ->
-      {{Net1,Packets1,TS1,TSDiff1},Proc0} = ai_utp_net:do_send(Net0,Proc),
-      send(Socket,Remote,Packets1,TS1,TSDiff1),
       Timer0 = start_tick_timer(?TIMER_TIMEOUT, undefined),
-      {noreply,active_read(State#state{tick_timer = Timer0,
-                                       net = Net1,
-                                       process = Proc0})}
+      {noreply,active_read(State#state{
+                             tick_timer = Timer0,
+                             net = Net0})}
   end;
 %% 正在进行链接
 handle_cast({packet,Packet,Timing},
@@ -427,8 +425,7 @@ on_tick(NetState,_,#state{socket = Socket,
   send(Socket,Remote,Packets,TS,TSDiff),
   Timer =
     if NetState0 == ?CLOSED -> undefined;
-       true ->
-        start_tick_timer(?TIMER_TIMEOUT,undefined)
+       true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
   {noreply,
    active_read(State#state{tick_timer = Timer,net = Net0,process = Proc0})

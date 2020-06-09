@@ -315,12 +315,6 @@ expire_resend(#utp_net{ack_nr = AckNR,
                    outbuf = OutBuf} = Net,Now,RTO)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  case queue:out(OutBuf) of
-    {{value,#utp_packet_wrap{packet = P}},_}->
-      #utp_packet{seq_no = FSeqNo} = P,
-      io:format("resend :~p~n",[FSeqNo]);
-    _ -> ok
-  end,
   {Count,Packets,OutBuf0} =
     lists:foldl(fun(#utp_packet_wrap{
                        packet = Packet,
@@ -360,6 +354,7 @@ force_state(State,#utp_net{
 on_tick(?CLOSED,Net,Proc)->
   Now = ai_utp_util:microsecond(),
   {{Net,[],Now,Net#utp_net.reply_micro},Proc};
+
 on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
