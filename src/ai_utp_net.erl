@@ -228,16 +228,17 @@ connect(#utp_net{max_window = MaxWindow} = Net,ConnID)->
   SeqNo = ai_utp_util:bit16_random(),
   Packet = ai_utp_protocol:make_syn_packet(SeqNo),
   Now =  ai_utp_util:microsecond(),
-  {Net#utp_net{
-     last_send = Now,
-     last_recv = Now,
-     conn_id = ConnID,
-     peer_conn_id = ai_utp_util:bit16(ConnID + 1),
-     seq_nr = ai_utp_util:bit16(SeqNo + 1),
-     last_decay_win = Now /1000,
-     state = ?SYN_SEND},
-   Packet#utp_packet{conn_id = ConnID,
-                     win_sz = MaxWindow}}.
+  Net0 = Net#utp_net{
+           last_send = Now,
+           last_recv = Now,
+           conn_id = ConnID,
+           peer_conn_id = ai_utp_util:bit16(ConnID + 1),
+           seq_nr = ai_utp_util:bit16(SeqNo + 1),
+           last_decay_win = Now /1000,
+           state = ?SYN_SEND},
+  send(Net0,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0),
+  Net0.
+
 accept(#utp_net{max_window = MaxWindow} = Net,
        #utp_packet{
           conn_id = PeerConnID,
@@ -247,6 +248,7 @@ accept(#utp_net{max_window = MaxWindow} = Net,
   SeqNo = ai_utp_util:bit16_random(),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
   ConnID = ai_utp_util:bit16(PeerConnID + 1),
+  ReplyMicro = Now - TS,
   Net0 = Net#utp_net{
            last_send = Now,
            last_recv = Now,
@@ -256,9 +258,10 @@ accept(#utp_net{max_window = MaxWindow} = Net,
            ack_nr = ai_utp_util:bit16(AckNo + 1),
            seq_nr = ai_utp_util:bit16(SeqNo + 1) ,
            last_decay_win = Now /1000,
+           reply_micro = ReplyMicro,
            state  = ?SYN_RECEIVE},
-  {Net0,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
-   ConnID,Now - TS}.
+  send(Net0,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},ReplyMicro),
+  {Net0,ConnID}.
 
 state(#utp_net{state = State})-> State.
 rto(#utp_net{rtt = RTT})-> ai_utp_rtt:rto(RTT).
@@ -276,22 +279,30 @@ fill_buffer(#utp_net{sndbuf = SndBuf,
     zero -> {Net,Proc}
   end.
 
-fill_tx_queue(_,Net,0) -> {Net,[]};
-fill_tx_queue(Now,Net,Bytes) ->
-  fill_tx_queue(Now,Net,Bytes,queue:new()).
 
-fill_tx_queue(_,Net,0,TxQ) -> {Net,queue:to_list(TxQ)};
-fill_tx_queue(_,#utp_net{sndbuf_size = 0}= Net,_,TxQ) ->
-  {Net,queue:to_list(TxQ)};
-fill_tx_queue(Now,#utp_net{
-                     seq_nr = SeqNo,
-                     ack_nr = AckNR,
-                     cur_window = CurWindow,
-                     cur_window_packets = CurWindowPackets,
-                     outbuf = OutBuf,
-                     peer_conn_id = PeerConnID,
-                     sndbuf = SndBuf,
-                     sndbuf_size = SndBufSize} = Net,Bytes,TxQ) ->
+
+
+send_packet(Net,ToFill,Packet,ReplyMicro,LastSend)->
+  case send(Net,Packet,ReplyMicro) of
+    {ok,Now} -> {Now,#utp_packet_wrap{packet = Packet,transmissions = 1,
+                                 payload = ToFill,send_time = Now}};
+    _ -> {LastSend,#utp_packet_wrap{packet = Packet,transmissions = 0,
+                                    payload = ToFill,send_time = undefined}}
+  end.
+
+fill_tx_queue(Net,0) -> Net;
+fill_tx_queue(#utp_net{sndbuf_size = 0}= Net,_) -> Net;
+fill_tx_queue(#utp_net{
+                 last_send = LastSend,
+                 seq_nr = SeqNo,
+                 ack_nr = AckNR,
+                 cur_window = CurWindow,
+                 cur_window_packets = CurWindowPackets,
+                 outbuf = OutBuf,
+                 peer_conn_id = PeerConnID,
+                 sndbuf = SndBuf,
+                 reply_micro = ReplyMicro,
+                 sndbuf_size = SndBufSize} = Net,Bytes) ->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
   ToFill =
@@ -304,42 +315,33 @@ fill_tx_queue(Now,#utp_net{
       Packet0 = Packet#utp_packet{payload = Bin,
                                   win_sz = WinSize,
                                   conn_id = PeerConnID},
-      WrapPacket = #utp_packet_wrap{
-                      packet = Packet0,
-                      transmissions = 1,
-                      payload = ToFill,
-                      send_time = Now},
+      {LastSend0,WrapPacket} = send_packet(Net, ToFill, Packet0,
+                                           ReplyMicro,LastSend),
       Net0 = Net#utp_net{
-               last_send = Now,
+               last_send = LastSend0,
                seq_nr = ai_utp_util:bit16(SeqNo + 1),
                cur_window = CurWindow + ToFill,
                cur_window_packets = CurWindowPackets + 1,
                outbuf = queue:in(WrapPacket,OutBuf),
                sndbuf_size = SndBufSize - ToFill,
-               sndbuf = SndBuf0
-              },
-      fill_tx_queue(Now, Net0,Bytes - ToFill,queue:in(Packet0,TxQ));
+               sndbuf = SndBuf0},
+      fill_tx_queue(Net0,Bytes - ToFill);
     {Filled,Bin,SndBuf0}->
       Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
       Packet0 = Packet#utp_packet{payload = Bin,
                                   win_sz = WinSize,
                                   conn_id = PeerConnID},
-      WrapPacket = #utp_packet_wrap{
-                      packet = Packet0,
-                      transmissions = 1,
-                      payload = Filled,
-                      send_time = Now},
-      Net0 = Net#utp_net{
-               last_send = Now,
+      {LastSend0,WrapPacket} = send_packet(Net,Filled, Packet0,
+                                           ReplyMicro,LastSend),
+      Net#utp_net{
+               last_send = LastSend0,
                seq_nr = ai_utp_util:bit16(SeqNo + 1),
                cur_window = CurWindow + Filled,
                cur_window_packets = CurWindowPackets + 1,
                outbuf = queue:in(WrapPacket,OutBuf),
                sndbuf_size = SndBufSize - Filled,
-               sndbuf = SndBuf0
-              },
-      {Net0,queue:to_list(queue:in(Packet0,TxQ))};
-    zero -> {Net,queue:to_list(TxQ)}
+               sndbuf = SndBuf0};
+    zero -> Net
   end.
 
 fill_from_buffer(_,_,0) -> zero;
@@ -368,18 +370,15 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 %% try to full fill one package
 do_send(Net,Proc)-> do_send(Net,Proc,false).
 
-
 do_send(Net,Proc,Quick)->
   MaxBufSize = sndbuf_remain(Net),
   MaxSendBytes = max_send_bytes(Net),
   {Net0,Proc0} = fill_buffer(Net,MaxBufSize + MaxSendBytes,Proc),
-  Now = ai_utp_util:microsecond(),
   if (Quick == true) orelse
      (Net0#utp_net.sndbuf_size >= ?PACKET_SIZE)->
-      {Net1,TxQ} = fill_tx_queue(Now,Net0,MaxSendBytes),
-      {{Net1,TxQ,Now,Net1#utp_net.reply_micro},Proc0};
-     true ->
-      {{Net0,[],Now,Net0#utp_net.reply_micro},Proc0}
+      Net1 = fill_tx_queue(Net0,MaxSendBytes),
+      {Net1,Proc0};
+     true -> {Net0,Proc0}
   end.
 
 do_read(#utp_net{
@@ -393,33 +392,51 @@ do_read(#utp_net{
      true -> Net
   end.
 
+expire_resend(_,_,false,OutBuf,ResendOut) -> queue:join(ResendOut,OutBuf);
+expire_resend(AckNo,WinSize,OutBuf,Resend) ->
+  case queue:out(OutBuf) of
+    {empty,_} -> Resend;
+    {{value,WrapPacket},OutBuf0} ->
+      #utp_packet_wrap{packet = Packet,transmissions = Trans,
+                       send_time = SendTime } = WrapPacket,
+      #utp_packet{seq_nao = SeqNo} = Packet,
+      Distance = ai_utp_util:bit16(SeqNo - LastAck),
+      Packet0 = Packet#utp_packet{ack_no = AckNo,win_sz = WinSize},
+      if (SendTime == undefined) andalso
+         (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
+          case send(Net,Packet0,ReplyMicro) of
+            {ok,SendTime}->
+              Resend0 = queue:in(WrapPacket#utp_packet_wrap{
+                                   transmissions =  1,
+                                   send_time = SendTime },Resend),
+              expire_resend(AckNo,WinSize,LastAck,OutBuf0,Resend0)
+            _ -> queue:join(Resend,OutBuf)
+          end;
+
 
 expire_resend(#utp_net{ack_nr = AckNR,
                        last_ack = LastAck,
                        outbuf = OutBuf} = Net,Now,RTO)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = window_size(Net),
-  {Packets,OutBuf0} =
-    lists:foldl(fun(#utp_packet_wrap{
-                       packet = Packet,
-                       transmissions = Trans,
-                       send_time = SendTime
-                      } = WrapPacket,{Packets,Out})->
-                    Diff = (Now - SendTime) / 1000,
-                    #utp_packet{seq_no = SeqNo} = Packet,
-                    Distance = ai_utp_util:bit16(SeqNo - LastAck),
-                    if (Diff > RTO) andalso (Trans > 0)
-                       andalso (Distance < 10)->
-                        {[Packet#utp_packet{
-                                      ack_no = AckNo,
-                                      win_sz = WinSize}|Packets],
-                         queue:in(WrapPacket#utp_packet_wrap{
-                                   transmissions = Trans + 1,
-                                   send_time = Now},Out)};
-                       true-> {Packets,queue:in(WrapPacket, Out)}
+  OutBuf0 = lists:foldl(
+              fun(,Out)->
+
+                     true ->
+                      Diff = (Now - SendTime) / 1000,
+                      if (Diff > RTO) andalso (Trans > 0)
+                         andalso (Distance < 10)->
+                          case send(Net,Packet0,ReplyMicro) of
+                            {ok,SendTime}->
+                              queue:in(WrapPacket#utp_packet_wrap{
+                                         transmissions =  Trans + 1,
+                                         send_time = SendTime },Out);
+                            _ -> queue:in(WrapPacket,Out)
+                          end;
+                       true-> queue:in(WrapPacket, Out)
                     end
-                end,{[],queue:new()},queue:to_list(OutBuf)),
-  {Net#utp_net{outbuf = OutBuf0},lists:reverse(Packets)}.
+                end,queue:new(),queue:to_list(OutBuf)),
+  Net#utp_net{outbuf = OutBuf0}.
 
 force_state(State,#utp_net{last_send = LastSend } = Net,
             Packets,Now,RTO)->
@@ -456,3 +473,6 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
 
 net_error(#utp_net{error = Error})->
   Error.
+
+send(#utp_net{socket = Socket,remote = Remote},Packet,TSDiff)->
+  ai_utp_util:send(Socket, Remote, Packet, TSDiff).

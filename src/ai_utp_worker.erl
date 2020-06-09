@@ -112,9 +112,8 @@ init([Parent,Socket]) ->
           parent = Parent,
           socket = Socket,
           parent_monitor = ParentMonitor,
-          net = #utp_net{},
-          process = ai_utp_process:new()
-         }}.
+          net = #utp_net{socket = Socket},
+          process = ai_utp_process:new()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -135,8 +134,7 @@ handle_call({connect,Control,Remote},From,
             #state{net = Net,socket = Socket} = State)->
   case register_conn(Remote) of
     {ok,ConnID} ->
-      {Net0,Packet} = ai_utp_net:connect(Net,ConnID),
-      ai_utp_util:send(Socket, Remote, Packet, 0),
+      Net0 = ai_utp_net:connect(Net#utp_net{remote = Remote},ConnID),
       {noreply,State#state{
                  remote = Remote,
                  controller = Control,
@@ -144,27 +142,23 @@ handle_call({connect,Control,Remote},From,
                  connector = From,
                  net = Net0,
                  conn_id = ConnID,
-                 tick_timer = start_tick_timer(?SYN_TIMEOUT, undefined)
-                }};
+                 tick_timer = start_tick_timer(?SYN_TIMEOUT, undefined)}};
     _ -> {reply,{error,eagain},0}
   end;
 handle_call({accept,Control, Remote, Packet,Timing},From,
-           #state{net = Net,socket = Socket} = State)->
-  {Net0,SynPacket,ConnID,TSDiff} = ai_utp_net:accept(Net,Packet,Timing),
+           #state{net = Net} = State)->
+  {Net0,ConnID} = ai_utp_net:accept(Net#utp_net{remote = Remote},Packet,Timing),
   case ai_utp_conn:alloc(Remote, ConnID) of
-    ok ->
-      ai_utp_util:send(Socket,Remote,SynPacket,TSDiff),
-      {reply,ok,State#state{
-                  remote = Remote,
-                  net = Net0,controller = Control,
-                  controller_monitor = erlang:monitor(process,Control),
-                  conn_id = ConnID,
-                  tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)
-                 }};
+    ok -> {reply,ok,State#state{
+                      remote = Remote,
+                      net = Net0,controller = Control,
+                      controller_monitor = erlang:monitor(process,Control),
+                      conn_id = ConnID,
+                      tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)
+                     }};
     Error ->
       gen_server:reply(From, Error),
-      handle_info(timeout, State#state{net = Net0,
-                                       controller = undefined})
+      handle_info(timeout, State#state{net = Net0,controller = undefined})
   end;
 handle_call({controlling_process,OldControl,NewControl,Active},_From,
            #state{controller = OldControl,controller_monitor = CMonitor} = State)->
@@ -174,8 +168,7 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
                                     active = Active,
                                     controller_monitor = CMonitor0})};
 handle_call({send,Data},From,
-            #state{socket = Socket,remote = Remote,
-                   process = Proc,net = Net} = State)->
+            #state{process = Proc,net = Net} = State)->
   case ai_utp_net:state(Net) of
     ?CLOSED ->
       Reason = ai_utp_net:net_error(Net),
@@ -183,8 +176,7 @@ handle_call({send,Data},From,
       {reply,{error,Reason},State};
     _ ->
       Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
-      {{Net0,Packets,TS,TSDiff},Proc1} = ai_utp_net:do_send(Net, Proc0),
-      send(Socket,Remote,Packets,TS,TSDiff),
+      {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
       {noreply,active_read(State#state{net = Net0,process = Proc1})}
   end;
 handle_call({active,true},_From,State) ->

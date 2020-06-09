@@ -39,17 +39,21 @@ wrapping_compare_less(L,R,Mask)->
   Up < Down.
 
 send(Socket,Remote,Packet,TS,TSDiff)->
-  send_aux(1,Socket,Remote,ai_utp_protocol:encode(Packet, TS,TSDiff)).
+  send_aux(1,Socket,Remote,TS,ai_utp_protocol:encode(Packet,TS,TSDiff)).
 send(Socket,Remote,Packet,TSDiff)->
-  send_aux(1,Socket,Remote,ai_utp_protocol:encode(Packet, TSDiff)).
-send_aux(0,Socket,Remote,Payload)->
-  gen_udp:send(Socket,Remote,Payload);
-send_aux(N,Socket,Remote,Payload) ->
+  TS = microsecond(),
+  send_aux(1,Socket,Remote,TS,ai_utp_protocol:encode(Packet, TS,TSDiff)).
+send_aux(0,Socket,Remote,TS,Payload)->
   case gen_udp:send(Socket,Remote,Payload) of
-    ok -> ok;
+    ok -> {ok,TS};
+    Error -> Error
+  end;
+send_aux(N,Socket,Remote,TS,Payload) ->
+  case gen_udp:send(Socket,Remote,Payload) of
+    ok -> {ok,TS};
     {error,enobufs}->
       timer:sleep(150), % Wait a bit for the queue to clear
-      send_aux(N-1, Socket, Remote, Payload);
+      send_aux(N-1, Socket, Remote,microsecond(),Payload);
     Error -> Error
   end.
 

@@ -56,57 +56,57 @@
                           send_time = 0,
                           need_resend = false
                          }).
--record(utp_net,
-        {%%sndbuf setting, in bytes
-         opt_sndbuf = ?OPT_SEND_BUF * 4,
-         %%rcvbuf setting, in bytes
-         opt_recvbuf = ?OPT_RECV_BUF * 4,
-         state = undefined,
-         error = normal,
-         %% the number of packets in the send queue. Packets that haven't
-         %% yet been sent count as well as packets marked as needing resend
-         %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
-         cur_window_packets = 0,
-         %% how much of the window is used, number of bytes in-flight
-         %% packets that have not yet been sent do not count, packets
-         %% that are marked as needing to be re-sent (due to a timeout)
-         %% don't count either
-         cur_window = 0,
-         %% maximum window size, in bytes
-         max_window = ?OPT_SEND_BUF,
-         %% max receive window for other end, in bytes
-         max_peer_window = ?OPT_RECV_BUF,
-         %% All sequence numbers up to including this have been properly received
-         %% by us
-         ack_nr = undefined,
-         %% This is the sequence number for the next packet to be sent.
-         seq_nr = undefined,
-         %% This is the sequence number of the next packet we're allowed to
-         %% do a fast resend with. This makes sure we only do a fast-resend
-         %% once per packet. We can resend the packet with this sequence number
-         %% or any later packet (with a higher sequence number).
-         reorder = array:new(16#FFFF + 1,fixed),
-         reorder_size = 0,
-         outbuf = queue:new(),
-         recvbuf = queue:new(),
-         recvbuf_size = 0,
-         sndbuf = queue:new(),
-         sndbuf_size = 0,
-         reply_micro,
-         rtt = none,
-         our_ledbat = none,
-         peer_ledbat = none,
-         %% --------------------
-         %% ms, When was the window last totally full (in send direction)
-         last_maxed_out_window :: integer(),
-         last_decay_win :: integer(),
-         fin_sent = false,
-         fin_acked = false,
-         got_fin = false,
-         eof_seq_no = -1,
-         conn_id,
-         peer_conn_id,
-         last_send = 0 :: integer(),
-         last_recv = 0:: integer(),
-         last_ack = undefined
-        }).
+-record(utp_net,{%%sndbuf setting, in bytes
+                 opt_sndbuf = ?OPT_SEND_BUF * 4,
+                 %%rcvbuf setting, in bytes
+                 opt_recvbuf = ?OPT_RECV_BUF * 4,
+                 socket = undefined,
+                 remote = undefined,
+                 state = undefined,
+                 error = normal,
+                 %% the number of packets in the send queue. Packets that haven't
+                 %% yet been sent count as well as packets marked as needing resend
+                 %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
+                 cur_window_packets = 0,
+                 %% how much of the window is used, number of bytes in-flight
+                 %% packets that have not yet been sent do not count, packets
+                 %% that are marked as needing to be re-sent (due to a timeout)
+                 %% don't count either
+                 cur_window = 0,
+                 %% maximum window size, in bytes
+                 max_window = ?OPT_SEND_BUF,
+                 %% max receive window for other end, in bytes
+                 max_peer_window = ?OPT_RECV_BUF,
+                 %% All sequence numbers up to including this have been properly received
+                 %% by us
+                 ack_nr = undefined,
+                 %% This is the sequence number for the next packet to be sent.
+                 seq_nr = undefined,
+                 %% This is the sequence number of the next packet we're allowed to
+                 %% do a fast resend with. This makes sure we only do a fast-resend
+                 %% once per packet. We can resend the packet with this sequence number
+                 %% or any later packet (with a higher sequence number).
+                 reorder = array:new(16#FFFF + 1,fixed),
+                 reorder_size = 0,
+                 outbuf = queue:new(),
+                 recvbuf = queue:new(),
+                 recvbuf_size = 0,
+                 sndbuf = queue:new(),
+                 sndbuf_size = 0,
+                 reply_micro = 0,
+                 rtt = none,
+                 our_ledbat = none,
+                 peer_ledbat = none,
+                 %% --------------------
+                 %% ms, When was the window last totally full (in send direction)
+                 last_maxed_out_window :: integer(),
+                 last_decay_win :: integer(),
+                 fin_sent = false,
+                 fin_acked = false,
+                 got_fin = false,
+                 eof_seq_no = -1,
+                 conn_id,
+                 peer_conn_id,
+                 last_send = 0 :: integer(),
+                 last_recv = 0:: integer(),
+                 last_ack = undefined}).
