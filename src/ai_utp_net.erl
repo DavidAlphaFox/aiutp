@@ -219,8 +219,8 @@ accept(#utp_net{max_window = MaxWindow} = Net,
        #utp_packet{
           conn_id = PeerConnID,
           seq_no = AckNo,
-          win_sz = PeerWinSize} = Packet,
-       {TS,_,Now} = Timing)->
+          win_sz = PeerWinSize},
+       {TS,_,Now})->
 
   SeqNo = ai_utp_util:bit16_random(),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
