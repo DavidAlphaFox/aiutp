@@ -60,7 +60,7 @@ ack(#utp_net{last_ack = LastAck} =Net,
     if LastAck == undefined -> AckNo;
        true -> LastAck
     end,
-  io:format("Type:~p AckNo:~p LastAckNo:~p",[Type,AckNo,LastAck]),
+  io:format("Type:~p AckNo:~p LastAckNo:~p~n",[Type,AckNo,LastAck]),
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder
   if (Less == true) orelse (LastAck0 == AckNo) ->
