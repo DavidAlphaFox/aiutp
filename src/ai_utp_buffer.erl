@@ -154,7 +154,8 @@ sack_packet(AckNo,Bits,OutBuf)->
                   end
               end, {[],[]}, lists:reverse(OutBuf)).
 
-sack(Base,#utp_net{reorder = Reorder}) ->
+sack(_,#utp_net{reorder_size = 0})-> undefined;
+sack(Base,#utp_net{reorder = Reorder,reorder_size = RSize}) ->
 {_,_,Acc} = lists:foldl(
               fun(Index,{Pos,Bit,Acc})->
                   Pos0 = Index bsr 3,
@@ -168,7 +169,7 @@ sack(Base,#utp_net{reorder = Reorder}) ->
                     undefined -> {Pos0,Bit0,Acc0};
                     _ -> {Pos0,Bit0 bor Mask,Acc0}
                   end
-              end,{0,0,<<>>},lists:seq(0, 799)),
+              end,{0,0,<<>>},lists:seq(0, RSize - 1)),
   if erlang:byte_size(Acc) > 0 -> Acc;
      true -> undefined
   end.
