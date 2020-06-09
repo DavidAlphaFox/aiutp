@@ -75,8 +75,8 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
            true -> ack_distance_packet(WindowStart,AckDistance,
                                        queue:to_list(OutBuf))
         end,
-      OutBuf1 = fast_resend(AckNo,WindowStart,OutBuf0),
-      {Lost,Packets0,OutBuf2} = sack_packet(AckNo, SAcks, OutBuf1),
+      {Lost,Acked,Packets0,OutBuf1} = sack_packet(AckNo, SAcks, OutBuf0),
+      OutBuf2 = fast_resend(AckNo,WindowStart,Acked,OutBuf1),
       {Lost,Packets ++ Packets0,
        Net#utp_net{outbuf = queue:from_list(OutBuf2),
                    cur_window_packets = CurWindowPackets - AckDistance}}
@@ -101,8 +101,8 @@ ack_distance_packet(WindowStart,AckDistance,OutBuf)->
         Distance < AckDistance
     end, OutBuf).
 
-fast_resend(_,_,[])-> [];
-fast_resend(AckNo,WindowStart,
+fast_resend(_,_,_,[])-> [];
+fast_resend(AckNo,WindowStart,Acked,
             [#utp_packet_wrap{
                 wanted = Wanted,
                 transmissions = Trans,
@@ -110,21 +110,42 @@ fast_resend(AckNo,WindowStart,
   Diff = ai_utp_util:bit16(WindowStart - AckNo),
   if Diff == 1 ->
       Packet =
-        if (Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND) and
-           (Trans == 1)->
+        if ((Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND) and (Trans == 1)) orelse
+           (Acked > ?DUPLICATE_ACKS_BEFORE_RESEND)->
             H#utp_packet_wrap{wanted = Wanted + 1, need_resend = true};
            true -> H#utp_packet_wrap{wanted = Wanted + 1}
         end,
       [Packet|T];
      true -> OutBuf
   end;
-fast_resend(_,_,OutBuf) -> OutBuf.
+fast_resend(_,_,_,OutBuf) -> OutBuf.
 
 
 sack_map(<<>>,_,Map) -> Map;
 sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
   sack_map(Rest,N+1,maps:put(N,Bits,Map)).
 
+need_resend(Acked,#utp_packet_wrap{transmissions = Trans} = Warp)->
+  if (Acked > ?DUPLICATE_ACKS_BEFORE_RESEND) andalso
+     (Trans > 0)-> Warp#utp_packet_wrap{need_resend = true};
+     true -> Warp
+  end.
+
+sacked(Map,Index,Max,Warp,
+       {Lost,Acked,Acks0,UnAcks0})->
+  if Index < Max ->
+      Pos = Index bsr 3,
+      case maps:get(Pos,Map) of
+        0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Warp)|UnAcks0]};
+        Bit ->
+          Mask = 1 bsl (Index band 7),
+          Set = Bit band Mask,
+          if Set == 0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Warp)|UnAcks0]};
+             true ->{Lost,Acked+1,[Warp|Acks0],UnAcks0}
+          end
+      end;
+     true ->{Lost,Acked,Acks0,[Warp|UnAcks0]}
+  end.
 sack_packet(_,undefined,OutBuf)-> {0,[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
@@ -132,27 +153,14 @@ sack_packet(AckNo,Bits,OutBuf)->
   Base = ai_utp_util:bit16(AckNo + 2),
   lists:foldl(fun(#utp_packet_wrap{
                      packet = #utp_packet{seq_no = SeqNo}} = Warp,
-                  {Lost,Acks0,UnAcks0})->
+                  {Lost,Acked,Acks0,UnAcks0} = Acc)->
                   Less = ai_utp_util:wrapping_compare_less(Base, SeqNo, ?ACK_NO_MASK),
                   if (Less == true) orelse (SeqNo == Base)->
                       Index = ai_utp_util:bit16(SeqNo - Base),
-                      if
-                        Index < Max ->
-                          Pos = Index bsr 3,
-                          case maps:get(Pos,Map) of
-                            0 -> {Lost+1,Acks0,[Warp|UnAcks0]};
-                            Bit ->
-                              Mask = 1 bsl (Index band 7),
-                              Set = Bit band Mask,
-                              if Set == 0 -> {Lost+1,Acks0,[Warp|UnAcks0]};
-                                 true ->{Lost,[Warp|Acks0],UnAcks0}
-                              end
-                          end;
-                        true ->{Lost,Acks0,[Warp|UnAcks0]}
-                      end;
-                     true -> {Lost,Acks0,[Warp|UnAcks0]}
+                      sacked(Map,Index,Max,Warp,Acc);
+                     true -> {Lost,Acked,Acks0,[Warp|UnAcks0]}
                   end
-              end, {0,[],[]}, lists:reverse(OutBuf)).
+              end, {0,0,[],[]}, lists:reverse(OutBuf)).
 
 sack(_,#utp_net{reorder_size = 0})-> undefined;
 sack(Base,#utp_net{reorder = Reorder}) ->
