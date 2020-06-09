@@ -228,9 +228,9 @@ handle_cast({packet,Packet,Timing},
 %% 正在进行链接
 handle_cast({packet,Packet,Timing},
             #state{net = Net,connector = Connector,
-                   tick_timer = Timer} = State)->
+                   tick_timer = Timer,process = Proc} = State)->
   cancle_tick_timer(Timer),
-  {Net0,_,_,_} = ai_utp_net:process_incoming(Net,Packet, Timing),
+  {{Net0,_,_,_},Proc0} = ai_utp_net:process_incoming(Net,Packet, Timing,Proc),
   case ai_utp_net:state(Net0) of
     ?CLOSED ->
       gen_server:reply(Connector,
@@ -241,7 +241,7 @@ handle_cast({packet,Packet,Timing},
                               tick_timer = undefined});
     ?ESTABLISHED ->
       gen_server:reply(Connector, ok),
-      {noreply,State#state{net = Net0,connector = undefined,
+      {noreply,State#state{net = Net0,connector = undefined,process = Proc0,
                            tick_timer = start_tick_timer(?TIMER_TIMEOUT,undefined)}};
     _ ->
       gen_server:reply(Connector, {error,econnaborted}),
