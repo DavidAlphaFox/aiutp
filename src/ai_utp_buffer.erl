@@ -148,7 +148,7 @@ sack_packet(Index,Base, Last,Map, OutBuf, Packets,Acked,Lost)->
   end.
 
 
-%% AckNo+2 =< SACK < SeqNR
+%% AckNo+2 =< SACK < SeqNR - 1
 sack_packet(_, _, undefined, OutBuf)-> {0,[],OutBuf};
 sack_packet(AckNo,SeqNR,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
@@ -156,7 +156,8 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
   Base0 = ai_utp_util:bit16(AckNo + 1),
   Base = ai_utp_util:bit16(AckNo + 2),
   Last = ai_utp_util:bit16(Base + Max - 1),
-  Less = ai_utp_util:wrapping_compare_less(Last,SeqNR,?ACK_NO_MASK),
+  SeqNo = ai_utp_util:bit16(SeqNR -1),
+  Less = ai_utp_util:wrapping_compare_less(Last,SeqNo,?ACK_NO_MASK),
   if Less /= true -> {0,[],OutBuf};
      true ->
       {Lost,_,Packets,OutBuf0} = sack_packet(Last,Base,Base0,Map, OutBuf,[],0,0),
@@ -168,7 +169,7 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
       end
   end.
 %% 生成SACK
-%% AckNo +2 =< SACK =< AckNo + 802
+%% AckNo +2 =< SACK =< AckNo + 801
 sack(_,#utp_net{inbuf_size = 0})-> undefined;
 sack(Base,#utp_net{inbuf = InBuf}) ->
   {_,_,Acc} =
