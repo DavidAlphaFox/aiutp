@@ -33,15 +33,17 @@ window_size(#utp_net{opt_recvbuf = OptRecvBuf,
   end.
 
 sndbuf_remain(#utp_net{opt_sndbuf = OptSndBuf,
-                          sndbuf_size = SndBufSize})->
-  if OptSndBuf > SndBufSize ->
-      OptSndBuf - SndBufSize;
+                       cur_window = CurWindow,
+                       sndbuf_size = SndBufSize})->
+  BufSize = CurWindow + SndBufSize,
+  if OptSndBuf > BufSize ->
+      OptSndBuf - BufSize;
      true -> 0
   end.
 max_send_bytes(#utp_net{max_window = MaxWindow,
                         max_peer_window = MaxPeerWindow,
                         cur_window = CurWindow})->
-  SendBytes = erlang:min(MaxWindow - CurWindow),
+  SendBytes = MaxWindow - CurWindow,
   if SendBytes >= ?PACKET_SIZE -> erlang:min(MaxPeerWindow,SendBytes);
      true -> 0
   end.

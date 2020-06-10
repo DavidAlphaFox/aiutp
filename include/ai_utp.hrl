@@ -17,7 +17,7 @@
 -define(HALF_CIRCLE, 16#6FFF).
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE, 64).
--define(PACKET_SIZE, 1180).
+-define(PACKET_SIZE, 460).
 -define(OPT_RECV_BUF, 1208320).
 -define(OPT_SEND_BUF, 1208320).
 
@@ -57,9 +57,9 @@
                           need_resend = false
                          }).
 -record(utp_net,{%%sndbuf setting, in bytes
-                 opt_sndbuf = ?OPT_SEND_BUF * 4,
+                 opt_sndbuf = ?OPT_SEND_BUF * 2,
                  %%rcvbuf setting, in bytes
-                 opt_recvbuf = ?OPT_RECV_BUF * 4,
+                 opt_recvbuf = ?OPT_RECV_BUF * 2,
                  socket = undefined,
                  remote = undefined,
                  state = undefined,
