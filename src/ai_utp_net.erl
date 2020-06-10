@@ -496,12 +496,13 @@ expire_resend(#utp_net{seq_nr = SeqNR,rto_timeout = TimeOut,
                        cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
   Diff = Now / 1000 - TimeOut,
   if (CurWindowPackets > 0) and (Diff > 0)->
+      io:format("resend on time out"),
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
       {Active,Net0} = expire_resend(Net,WindowStart),
       {Active,Net0#utp_net{rto_timeout = Now + RTO}};
      true ->
       if Diff > 0 -> {true,Net#utp_net{rto_timeout = Now + RTO}};
-         true -> {true,Net}
+         true -> {false,Net}
       end
   end.
 force_state(State,Net)->
