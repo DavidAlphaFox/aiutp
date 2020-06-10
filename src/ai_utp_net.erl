@@ -19,7 +19,7 @@ ack_bytes(AckPackets,Now)->
             Bytes0 = Bytes + WrapPacket#utp_packet_wrap.payload,
             RTT0 =
               if SendTime < Now -> min(RTT, Now - SendTime );
-                 true -> min(RTT,50000)
+                 true -> min(RTT,200000)
               end,
             {RTT0,Times0,Bytes0};
            true -> {RTT,Times0,Bytes}
