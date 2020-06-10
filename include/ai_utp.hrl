@@ -82,13 +82,19 @@
                  ack_nr = undefined,
                  %% This is the sequence number for the next packet to be sent.
                  seq_nr = undefined,
+                 %% 当发送窗口中有没发送成功的
+                 %% last_seq_nr > seq_nr
+                 last_seq_nr = undefined,
                  %% This is the sequence number of the next packet we're allowed to
                  %% do a fast resend with. This makes sure we only do a fast-resend
                  %% once per packet. We can resend the packet with this sequence number
                  %% or any later packet (with a higher sequence number).
-                 reorder = array:new(16#FFFF + 1,fixed),
-                 reorder_size = 0,
-                 outbuf = queue:new(),
+                 %% inbuf 和 outbuf是用来处理socket层的
+                 %% 使用Array减少不必要的遍历
+                 inbuf = array:new(16#FFFF + 1,fixed),
+                 inbuf_size = 0,
+                 outbuf = array:new(16#FFFF + 1,fixed),
+                 %% 处理业务缓存层的
                  recvbuf = queue:new(),
                  recvbuf_size = 0,
                  sndbuf = queue:new(),

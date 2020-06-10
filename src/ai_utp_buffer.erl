@@ -20,18 +20,18 @@ in(SeqNo,Payload,
   Net0 = recv(State,Payload,Net),
   recv_reorder(Net0#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)});
 in(SeqNo,Payload,
-   #utp_net { reorder = OD,ack_nr = AckNR,
-              reorder_size = RSize} = Net) ->
+   #utp_net { inbuf = InBuf,ack_nr = AckNR,
+              inbuf_size = RSize} = Net) ->
   Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
   Diff = ai_utp_util:bit16(SeqNo - AckNR),
   if Less == true -> duplicate;
      Diff > ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
-      case array:get(SeqNo, OD) of
+      case array:get(SeqNo, InBuf) of
         undefined ->
           {ok,Net#utp_net{
-                reorder = array:set(SeqNo, Payload, OD),
-                reorder_size = RSize + 1
+                inbuf = array:set(SeqNo, Payload,InBuf),
+                inbuf_size = RSize + 1
                }};
         _ -> duplicate
       end
@@ -49,13 +49,13 @@ recv(?ESTABLISHED,Payload,
 recv(_,_,Net) -> Net.
 
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
-                      reorder = OD,reorder_size = RSize} = Net) ->
-  case array:get(SeqNo,OD) of
+                      inbuf = InBuf,inbuf_size = RSize} = Net) ->
+  case array:get(SeqNo,InBuf) of
     undefined -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
-      recv_reorder(Net0#utp_net{reorder = array:set(SeqNo,undefined,OD),
-                                reorder_size = RSize -1,
+      recv_reorder(Net0#utp_net{inbuf = array:set(SeqNo,undefined,InBuf),
+                                inbuf_size = RSize -1,
                                 ack_nr = ai_utp_util:bit16(SeqNo + 1)})
   end.
 
@@ -110,7 +110,7 @@ fast_resend(AckNo,WindowStart,Acked,
   Diff = ai_utp_util:bit16(WindowStart - AckNo),
   if Diff == 1 ->
       Packet =
-        if ((Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND) and (Trans == 1)) orelse
+        if ((Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND) and (Trans =< 1)) orelse
            (Acked > ?DUPLICATE_ACKS_BEFORE_RESEND)->
             H#utp_packet_wrap{wanted = Wanted + 1, need_resend = true};
            true -> H#utp_packet_wrap{wanted = Wanted + 1}
@@ -125,26 +125,27 @@ sack_map(<<>>,_,Map) -> Map;
 sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
   sack_map(Rest,N+1,maps:put(N,Bits,Map)).
 
-need_resend(Acked,#utp_packet_wrap{transmissions = Trans} = Warp)->
-  if (Acked > ?DUPLICATE_ACKS_BEFORE_RESEND) andalso
-     (Trans > 0)-> Warp#utp_packet_wrap{need_resend = true};
-     true -> Warp
+need_resend(Acked,Wrap)->
+  if Acked > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+      Wrap#utp_packet_wrap{need_resend = true};
+     true -> Wrap
   end.
 
-sacked(Map,Index,Max,Warp,
+sacked(Map,Index,Max,Wrap,
        {Lost,Acked,Acks0,UnAcks0})->
-  if Index < Max ->
+  #utp_packet_wrap{transmissions = Trans} = Wrap,
+  if (Index < Max) andalso ( Trans > 0 ) ->
       Pos = Index bsr 3,
       case maps:get(Pos,Map) of
-        0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Warp)|UnAcks0]};
+        0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Wrap)|UnAcks0]};
         Bit ->
           Mask = 1 bsl (Index band 7),
           Set = Bit band Mask,
-          if Set == 0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Warp)|UnAcks0]};
-             true ->{Lost,Acked+1,[Warp|Acks0],UnAcks0}
+          if Set == 0 -> {Lost+1,Acked,Acks0,[need_resend(Acked,Wrap)|UnAcks0]};
+             true ->{Lost,Acked+1,[Wrap|Acks0],UnAcks0}
           end
       end;
-     true ->{Lost,Acked,Acks0,[Warp|UnAcks0]}
+     true ->{Lost,Acked,Acks0,[Wrap|UnAcks0]}
   end.
 sack_packet(_,undefined,OutBuf)-> {0,0,[],OutBuf};
 sack_packet(AckNo,Bits,OutBuf)->
@@ -162,8 +163,8 @@ sack_packet(AckNo,Bits,OutBuf)->
                   end
               end, {0,0,[],[]}, lists:reverse(OutBuf)).
 
-sack(_,#utp_net{reorder_size = 0})-> undefined;
-sack(Base,#utp_net{reorder = Reorder}) ->
+sack(_,#utp_net{inbuf_size = 0})-> undefined;
+sack(Base,#utp_net{inbuf = InBuf}) ->
 {_,_,Acc} = lists:foldl(
               fun(Index,{Pos,Bit,Acc})->
                   Pos0 = Index bsr 3,
@@ -173,7 +174,7 @@ sack(Base,#utp_net{reorder = Reorder}) ->
                     if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
                        true ->{Bit,Acc}
                     end,
-                  case array:get(SeqNo, Reorder) of
+                  case array:get(SeqNo, InBuf) of
                     undefined -> {Pos0,Bit0,Acc0};
                     _ -> {Pos0,Bit0 bor Mask,Acc0}
                   end
