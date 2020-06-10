@@ -154,7 +154,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
   %% 快速重发前10个数据包
   Index = ai_utp_util:bit16(AckNo + 1),
-  fast_resend(Net, Index, SeqNR,10).
+  fast_resend(Net, Index, SeqNR,5).
 
 process_incoming(#utp_net{state = State, seq_nr = SeqNR,
                           last_seq_nr = LastSeqNR,ack_nr = AckNR,inbuf_size = RSize} = Net,
@@ -515,7 +515,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      expire_resend(Net,Now,RTO,WindowStart,10);
+      expire_resend(Net,Now,RTO,WindowStart,64);
      true -> {true,Net}
   end.
 force_state(State,#utp_net{last_send = LastSend } = Net,

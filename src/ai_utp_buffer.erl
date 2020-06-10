@@ -71,9 +71,28 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
        true -> ack_packet(WindowStart,AckNo,OutBuf,[])
     end,
   {Lost,Packets0,OutBuf1} = sack_packet(AckNo,SeqNR, SAcks, OutBuf0),
+  OutBuf2 = fast_resend(AckNo,SeqNR,OutBuf1),
   {Lost,Packets ++ Packets0,
-   Net#utp_net{outbuf = OutBuf1,
+   Net#utp_net{outbuf = OutBuf2,
                cur_window_packets = CurWindowPackets - AckDistance}}.
+
+fast_resend(AckNo,SeqNR,OutBuf)->
+  SeqNo = ai_utp_util:bit16(AckNo + 1),
+  Diff = ai_utp_util:bit16(SeqNR - SeqNo),
+  if Diff >= 1 ->
+      Wrap = array:get(SeqNo,OutBuf),
+      #utp_packet_wrap{ wanted = Wanted} = Wrap,
+      if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
+          array:set(SeqNo,Wrap#utp_packet_wrap{
+                            need_resend = true });
+         true ->
+          array:set(SeqNo,Wrap#utp_packet_wrap{
+                            wanted = Wanted + 1})
+      end;
+     true -> OutBuf
+  end.
+
+
 
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
   %% ack的序列号需要小于SeqNo
