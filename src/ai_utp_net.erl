@@ -156,20 +156,17 @@ fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
   Index = ai_utp_util:bit16(AckNo + 1),
   fast_resend(Net, Index, SeqNR,5).
 
-process_incoming(#utp_net{state = State, seq_nr = SeqNR,
-                          last_seq_nr = LastSeqNR,ack_nr = AckNR,inbuf_size = RSize} = Net,
-                 #utp_packet{type = Type,ack_no = AckNo,seq_no = SeqNo} = Packet,
+process_incoming(#utp_net{state = State} = Net,
+                 #utp_packet{type = Type,ack_no = AckNo} = Packet,
                  Timing,Proc) ->
-  if Type == st_data ->
-      io:format("seqNo: ~p ackNR: ~p seqNR: ~p lastSeqNR: ~p ReorderSize: ~p~n",
-            [SeqNo,AckNR,SeqNR,LastSeqNR,RSize]);
-     true -> ok
-  end,
+  
   Net0 = process_incoming(Type,State,
                           Net#utp_net{last_recv = ai_utp_util:microsecond() },
                           Packet,Timing),
   Net1 =
-    if Type == st_data -> send_ack(Net,Net0);
+    if Type == st_data ->
+        io:format("normal ack ~n"),
+        send_ack(Net,Net0);
        true -> Net0
     end,
   {SendNew,Net2} = fast_resend(AckNo,Net1),
@@ -215,7 +212,9 @@ process_incoming(st_data,?ESTABLISHED,Net,
                  #utp_packet{seq_no = SeqNo,payload = Payload
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
-    duplicate ->  send_ack(Net); %% 强制发送ACK
+    duplicate ->
+      io:format("send duplicate ack~n"),
+      send_ack(Net); %% 强制发送ACK
     {_,Net1} -> ack(Net1,Packet,Timing)
   end;
 process_incoming(st_state,?ESTABLISHED,Net, Packet,Timing) ->
@@ -523,6 +522,7 @@ force_state(State,#utp_net{last_send = LastSend } = Net,
   Diff = Now - LastSend,
   if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
      andalso ((Diff > RTO) orelse (Diff > ?MAX_SEND_IDLE_TIME))->
+      io:format("on_tick ack~n"),
       send_ack(Net);
      true  -> Net
   end.
