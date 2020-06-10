@@ -6,7 +6,7 @@
 -define(DEFAULT_RTT_TIMEOUT, 200).
 
 -record(ai_utp_rtt, {
-                     rtt = 200 :: integer(),
+                     rtt = 500 :: integer(),
                      var = 800 :: integer(),
                      delay = 1.5
                     }).
@@ -37,10 +37,11 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
   end.
 
 update(Estimate,#ai_utp_rtt { rtt = LastRTT, var = Var} ) ->
-      Delta = LastRTT - Estimate,
-      #ai_utp_rtt {
-         rtt = round(LastRTT - LastRTT/8 + Estimate/8),
-         var = round(Var + (abs(Delta) - Var) / 4) };
+  Delta = LastRTT - Estimate,
+  io:format("Estimate: ~p LastRTT: ~p Var:~p ~n",[Estimate,LastRTT,Var]),
+  #ai_utp_rtt {
+     rtt = round(LastRTT - LastRTT/8 + Estimate/8),
+     var = round(Var + (abs(Delta) - Var) / 4) };
 
 update(Estimate,none)->
   #ai_utp_rtt {
@@ -52,7 +53,7 @@ update(Estimate,none)->
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
 rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
-  RTO = max(RTT + Var * 2, ?DEFAULT_RTT_TIMEOUT),
+  RTO = max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
   RTO.
 
 
@@ -61,7 +62,6 @@ ack(RTT, TimeSent, TimeAcked) ->
   if
     TimeAcked >= TimeSent->
       Estimate = ai_utp_util:bit32(TimeAcked - TimeSent) div 1000,
-
       NewRTT = update(Estimate, RTT),
       NewRTO = rto(NewRTT),
       {ok, NewRTO, NewRTT};

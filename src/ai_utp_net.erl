@@ -482,7 +482,6 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
           Diff = (Now - SendTime) / 1000 * Trans,
           if
             (Diff > RTO) andalso (Trans > 0) ->
-              io:format("expire resend: ~p diff: ~p RTO: ~p~n",[Index,Diff,RTO]),
               case send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow}->
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
