@@ -54,7 +54,7 @@ ack(#utp_net{last_ack = LastAck} =Net,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
   LastAck0 =
-    if LastAck == undefined -> AckNo;
+    if LastAck == undefined -> ai_utp_util:bit16(AckNo -1);
        true -> LastAck
     end,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
