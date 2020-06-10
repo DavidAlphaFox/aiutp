@@ -211,7 +211,7 @@ sack(Base,#utp_net{inbuf = InBuf}) ->
                       undefined -> {Pos0,Bit0,Acc0};
                       _ -> {Pos0,Bit0 bor Mask,Acc0}
                     end
-                end,{0,0,<<>>},lists:seq(0, 799)),
+                end,{0,0,<<>>},lists:seq(0, 64)),
   if erlang:byte_size(Acc) > 0 -> Acc;
      true -> undefined
   end.
