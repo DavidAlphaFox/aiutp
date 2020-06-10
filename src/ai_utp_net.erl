@@ -513,7 +513,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,Now,RTO,WindowStart,?REORDER_BUFFER_MAX_SIZE);
      true -> {true,Net}
   end.
-force_state(State,#utp_net{last_send = LastSend } = Net)->
+force_state(State,Net)->
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
       send_ack(Net);
      true  -> Net
