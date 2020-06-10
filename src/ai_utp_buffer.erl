@@ -82,7 +82,8 @@ fast_resend(AckNo,SeqNR,OutBuf)->
   if Diff >= 1 ->
       Wrap = array:get(SeqNo,OutBuf),
       if Wrap == undefined ->
-          io:format("AckNo:~p,SeqNR:~p~n",[AckNo,SeqNR]);
+          io:format("AckNo:~p,SeqNR:~p~n",[AckNo,SeqNR]),
+          exit(normal);
          true ->
           #utp_packet_wrap{ wanted = Wanted} = Wrap,
           if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
