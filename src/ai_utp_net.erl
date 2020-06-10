@@ -154,14 +154,17 @@ fast_resend(AckNo,
   Index = ai_utp_util:bit16(AckNo + 1),
   fast_resend(Net, Index, SeqNR,10, OutBuf).
 
-process_incoming(#utp_net{state = State,ack_nr = AckNR,
-                          seq_nr = SeqNR,inbuf_size = RSize} = Net,
-                 #utp_packet{type = Type,seq_no= SeqNo,ack_no = AckNo} = Packet,
+process_incoming(#utp_net{state = State, seq_nr = SeqNR,
+                          last_seq_nr = LastSeqNR,ack_nr = AckNR,inbuf_size = RSize} = Net,
+                 #utp_packet{type = Type,ack_no = AckNo,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
-  io:format("Type: ~p seqNo: ~p ackNR:~p seqNR: ~p ReorderSize: ~p~n",
-            [Type,SeqNo,AckNR,SeqNR,RSize]),
+  if Type == st_data ->
+      io:format("seqNo: ~p ackNR: ~p seqNR: ~p lastSeqNR: ~p ReorderSize: ~p~n",
+            [SeqNo,AckNR,SeqNR,LastSeqNR,RSize]);
+     true -> ok
+  end,
   Net0 = process_incoming(Type,State,
-                          Net#utp_net{last_recv = ai_utp_util:millisecond() },
+                          Net#utp_net{last_recv = ai_utp_util:microsecond() },
                           Packet,Timing),
   Net1 =
     if Type == st_data -> send_ack(Net,Net0);
@@ -525,8 +528,8 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
-      {{Net#utp_net{state = ?CLOSED,error = econnaborted},
-        [],Now,Net#utp_net.reply_micro},Proc};
+      io:format("CLOSED on Tick~n"),
+      {Net#utp_net{state = ?CLOSED,error = econnaborted}, Proc};
      true ->
       RTO = rto(Net),
       {SendNew,Net0} = expire_resend(Net, Now, RTO),
