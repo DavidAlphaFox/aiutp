@@ -38,7 +38,6 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
 
 update(Estimate,#ai_utp_rtt { rtt = LastRTT, var = Var} ) ->
   Delta = LastRTT - Estimate,
-  io:format("Estimate: ~p LastRTT: ~p Var:~p ~n",[Estimate,LastRTT,Var]),
   #ai_utp_rtt {
      rtt = round(LastRTT - LastRTT/8 + Estimate/8),
      var = round(Var + (abs(Delta) - Var) / 4) };
@@ -54,7 +53,7 @@ update(Estimate,none)->
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
 rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
   RTO = erlang:max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  erlang:min(RTO,1000).
+  RTO.
 
 
 %% ACKnowledge an incoming packet
