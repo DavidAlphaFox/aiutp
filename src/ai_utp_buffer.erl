@@ -205,7 +205,7 @@ build_sack(_,_,0,_,Pos,Map)->
                   Bits = maps:get(BI,Map),
                   <<BAcc/binary,Bits/big-integer>>
               end, <<>>, lists:seq(0, Pos));
-build_sack(_,_,_,799,Pos,Map)->
+build_sack(_,_,_,63,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
                   <<BAcc/binary,Bits/big-integer>>

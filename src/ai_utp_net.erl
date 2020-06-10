@@ -510,7 +510,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      expire_resend(Net,Now,RTO,WindowStart,64);
+      expire_resend(Net,Now,RTO,WindowStart,?REORDER_BUFFER_MAX_SIZE);
      true -> {true,Net}
   end.
 force_state(State,#utp_net{last_send = LastSend } = Net,
