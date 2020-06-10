@@ -522,7 +522,8 @@ force_state(State,#utp_net{last_send = LastSend } = Net,
             Now,RTO)->
   Diff = Now - LastSend,
   if ((State == ?ESTABLISHED) orelse (State == ?CLOSING))
-     andalso (Diff > RTO)-> send_ack(Net);
+     andalso ((Diff > RTO) orelse (Diff > ?MAX_SEND_IDLE_TIME))->
+      send_ack(Net);
      true  -> Net
   end.
 
