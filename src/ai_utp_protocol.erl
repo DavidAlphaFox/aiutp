@@ -55,8 +55,8 @@ make_data_packet(SeqNo,AckNo)->
 decode(Packet,RecvTS) ->
   try
     case decode_packet(Packet,RecvTS) of
-      {ok, _} = R -> R;
-      Error -> Error
+      {error,_} = Error-> Error;
+       R -> {ok,R}
     end
   catch
     error:Reason -> {error, Reason}
