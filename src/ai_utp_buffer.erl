@@ -84,10 +84,10 @@ fast_resend(AckNo,SeqNR,OutBuf)->
       #utp_packet_wrap{ wanted = Wanted} = Wrap,
       if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
           array:set(SeqNo,Wrap#utp_packet_wrap{
-                            need_resend = true });
+                            need_resend = true },OutBuf);
          true ->
           array:set(SeqNo,Wrap#utp_packet_wrap{
-                            wanted = Wanted + 1})
+                            wanted = Wanted + 1},OutBuf)
       end;
      true -> OutBuf
   end.
