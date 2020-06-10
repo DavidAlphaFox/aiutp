@@ -83,7 +83,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   WindowFactor = erlang:min(MaxWindow,AckedBytes)/erlang:max(MaxWindow, AckedBytes),
   ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
   ScaledGain0 =
-    if (NowMS - LastMaxedOutWindow) > 1000 andalso ScaledGain > 0 -> 0;
+    if (NowMS - LastMaxedOutWindow) > 300 andalso ScaledGain > 0 -> 0;
        true -> ScaledGain
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
