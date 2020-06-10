@@ -530,7 +530,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
       {SendNew,Net0} = expire_resend(Net, Now, RTO),
       if SendNew == true ->
           {Net1,Proc0} = do_send(Net0,Proc,true),
-          Net2 = force_state(State, Net1, Now, RTO),
+          Net2 = force_state(State, Net1),
           {Net2,Proc0};
          true ->
           Net1 = force_state(State, Net, Now, RTO),
