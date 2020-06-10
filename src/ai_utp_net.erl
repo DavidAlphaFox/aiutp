@@ -27,12 +27,8 @@ ack_bytes(AckPackets,Now)->
     end, {?RTT_MAX,[],0}, AckPackets).
 
 window_size(#utp_net{opt_recvbuf = OptRecvBuf,
-                     recvbuf_size = RecvBufSize,
-                     inbuf_size = RSize}) ->
-  if RSize < ?REORDER_BUFFER_MAX_SIZE ->
-      if OptRecvBuf > RecvBufSize -> OptRecvBuf - RecvBufSize;
-         true -> 0
-      end;
+                     recvbuf_size = RecvBufSize}) ->
+  if OptRecvBuf > RecvBufSize -> OptRecvBuf - RecvBufSize;
      true -> 0
   end.
 
@@ -44,15 +40,10 @@ sndbuf_remain(#utp_net{opt_sndbuf = OptSndBuf,
   end.
 max_send_bytes(#utp_net{max_window = MaxWindow,
                         max_peer_window = MaxPeerWindow,
-                        cur_window_packets = CurWindowPackets,
                         cur_window = CurWindow})->
-  if CurWindowPackets >= ?REORDER_BUFFER_MAX_SIZE -> 0;
-     true->
-      AllowPacketSize = (?REORDER_BUFFER_MAX_SIZE - CurWindowPackets) * ?PACKET_SIZE,
-      SendBytes = erlang:min(MaxWindow - CurWindow,AllowPacketSize),
-      if SendBytes >= ?PACKET_SIZE -> erlang:min(MaxPeerWindow,SendBytes);
-         true -> 0
-      end
+  SendBytes = erlang:min(MaxWindow - CurWindow),
+  if SendBytes >= ?PACKET_SIZE -> erlang:min(MaxPeerWindow,SendBytes);
+     true -> 0
   end.
 
 %% 最后阶段计算并清理所有被Ack过的包
@@ -154,7 +145,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
   %% 快速重发前10个数据包
   Index = ai_utp_util:bit16(AckNo + 1),
-  fast_resend(Net, Index, SeqNR,5).
+  fast_resend(Net, Index, SeqNR,?OUTGOING_BUFFER_MAX_SIZE).
 
 process_incoming(#utp_net{state = State} = Net,
                  #utp_packet{type = Type,ack_no = AckNo} = Packet,
@@ -510,7 +501,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      expire_resend(Net,Now,RTO,WindowStart,?REORDER_BUFFER_MAX_SIZE);
+      expire_resend(Net,Now,RTO,WindowStart,?OUTGOING_BUFFER_MAX_SIZE);
      true -> {true,Net}
   end.
 force_state(State,Net)->

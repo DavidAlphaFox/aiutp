@@ -25,7 +25,8 @@ in(SeqNo,Payload,
   Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
   Diff = ai_utp_util:bit16(SeqNo - AckNR),
   if Less == true -> duplicate;
-     Diff > ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
+     Diff > ?HALF_CIRCLE -> {ok,Net};
+     RSize >= ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
       case array:get(SeqNo, InBuf) of
         undefined ->
