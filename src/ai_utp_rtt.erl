@@ -7,7 +7,7 @@
 
 -record(ai_utp_rtt, {
                      rtt = 200 :: integer(),
-                     var = 500 :: integer(),
+                     var = 800 :: integer(),
                      delay = 1.5
                     }).
 
@@ -52,7 +52,7 @@ update(Estimate,none)->
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
 rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
-  RTO = max(RTT + Var * 2, ?DEFAULT_RTT_TIMEOUT),
+  RTO = max(RTT + Var *, ?DEFAULT_RTT_TIMEOUT),
   RTO.
 
 
