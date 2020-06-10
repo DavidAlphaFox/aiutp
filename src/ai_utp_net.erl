@@ -73,26 +73,25 @@ ack(#utp_net{last_ack = LastAck} =Net,
 
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
                   reply_micro = ReplyMicro,
-                  peer_conn_id = PeerConnID} = Net)->
-  Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
+                  peer_conn_id = PeerConnID} = Net,Quick)->
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
-  Packet =
-    case Bits of
-      undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
-      _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
+  Packet0 =
+    if Quick == true ->
+        ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
+       true ->
+        Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
+        Packet =
+          case Bits of
+            undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
+            _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
+          end,
+        Packet#utp_packet{win_sz = window_size(Net),
+                          conn_id = PeerConnID}
     end,
-  Packet0 = Packet#utp_packet{win_sz = window_size(Net),
-                              conn_id = PeerConnID},
   case send(Net,Packet0,ReplyMicro) of
     {ok,SendTimeNow}-> Net#utp_net{last_send = SendTimeNow};
     true -> Net
-  end.
-send_ack(#utp_net{ack_nr = AckNR,inbuf_size = RSize},
-         #utp_net{ack_nr = AckNR0,inbuf_size = RSize0} = Net1)->
-  if (AckNR /= AckNR0) orelse
-     (RSize /= RSize0) -> send_ack(Net1);
-     true -> Net1
   end.
 
 fast_resend(Net,_, _,0)->{false,Net};
@@ -157,7 +156,7 @@ process_incoming(#utp_net{state = State} = Net,
                           Net#utp_net{last_recv = ai_utp_util:microsecond() },
                           Packet,Timing),
   Net1 =
-    if Type == st_data -> send_ack(Net,Net0);
+    if Type == st_data -> send_ack(Net0,false);
        true -> Net0
     end,
   {SendNew,Net2} = fast_resend(AckNo,Net1),
@@ -203,7 +202,7 @@ process_incoming(st_data,?ESTABLISHED,Net,
                  #utp_packet{seq_no = SeqNo,payload = Payload
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
-    duplicate -> send_ack(Net); %% 强制发送ACK
+    duplicate -> send_ack(Net,true); %% 强制发送ACK
     {_,Net1} -> ack(Net1,Packet,Timing)
   end;
 process_incoming(st_state,?ESTABLISHED,Net, Packet,Timing) ->
@@ -507,7 +506,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
   end.
 force_state(State,Net)->
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
-      send_ack(Net);
+      send_ack(Net,false);
      true  -> Net
   end.
 
