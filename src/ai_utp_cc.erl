@@ -92,25 +92,25 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
 
 
 ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS,TSDiff,Now) ->
-  {ok, _NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,TSDiff,Now),
-  Net#utp_net{rtt = NewRTT}.
+  {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,TSDiff,Now),
+  Net#utp_net{rtt = NewRTT,rto_timeout = Now + NewRTO}.
 
 
 update_decay_window(Net,0,_)->Net;
 update_decay_window(#utp_net{last_decay_win = LastDecay,
                             max_window = MaxWindow} = Net,
                     Lost,NowMS) when Lost > ?DUPLICATE_ACKS_BEFORE_RESEND->
-  if (NowMS - LastDecay) > ?MAX_WINDOW_DECAY ->
-      MaxWindow0 = ai_utp_util:clamp(erlang:floor(MaxWindow bsr 1),
-                                     ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
-      Net#utp_net{max_window = MaxWindow0, last_decay_win = NowMS};
-     true -> Net
-  end;
+    if (NowMS - LastDecay) > ?MAX_WINDOW_DECAY ->
+        MaxWindow0 = ai_utp_util:clamp(erlang:floor(MaxWindow bsr 1),
+                                       ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
+        Net#utp_net{max_window = MaxWindow0, last_decay_win = NowMS};
+       true -> Net
+    end;
 update_decay_window(Net,_,_) ->Net.
 
 
 
-cc(#utp_net{cur_window = CurWindow} = Net,
+cc(#utp_net{cur_window = CurWindow,rtt = RTT} = Net,
    {TS,TSDiff,Now},MinRTT,AckBytes,Lost,Times,WndSize)->
   TSDiff0 = ai_utp_util:bit32(TSDiff),
   ActualDelay =
@@ -141,6 +141,7 @@ cc(#utp_net{cur_window = CurWindow} = Net,
         Net3#utp_net{max_peer_window = WndSize,
                      cur_window = CurWindow1 }
     end,
+  Net5 = Net4#utp_net{rtt = ai_utp_rtt:lost(RTT, Lost)},
   lists:foldl(
     fun(_,Acc)-> ack_packet_rtt(Acc, TS,TSDiff, Now) end,
-    Net4, Times).
+    Net5, Times).
