@@ -80,14 +80,14 @@ ack(#utp_net{last_ack = LastAck} =Net,
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
                   reply_micro = ReplyMicro,
                   peer_conn_id = PeerConnID} = Net)->
-  Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
+  %Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
-  Packet =
-    case Bits of
-      undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
-      _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
-    end,
+  Packet = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
+  %  case Bits of
+  %    undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
+  %    _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
+  %  end,
   Packet0 = Packet#utp_packet{win_sz = window_size(Net),
                               conn_id = PeerConnID},
   case send(Net,Packet0,ReplyMicro) of
