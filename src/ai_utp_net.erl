@@ -59,7 +59,7 @@ ack(#utp_net{last_ack = LastAck} =Net,
     end,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder 或者收到重复包
-  if (Less == true) orelse (LastAck0 == AckNo) ->
+  if Less == true ->
 
       SAcks = proplists:get_value(sack, Ext,undefined),
       {Lost,AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
