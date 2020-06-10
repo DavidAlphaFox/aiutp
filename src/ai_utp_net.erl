@@ -101,60 +101,62 @@ send_ack(#utp_net{ack_nr = AckNR,inbuf_size = RSize},
      true -> Net1
   end.
 
-fast_resend(Net,0,OutBuf,Resend)->
-  {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}};
+fast_resend(Net,_, _,0,OutBuf)->{false,Net#utp_net{outbuf = OutBuf}};
 fast_resend(#utp_net{reply_micro = ReplyMicro,
                      cur_window_packets = CurWindowPackets,
                      cur_window = CurWindow} = Net,
-            ResendCount,OutBuf,Resend) ->
-  case queue:out(OutBuf) of
-    {empty,_} -> {true,Net#utp_net{outbuf = Resend}};
-    {{value,Wrap},OutBuf0}->
-      #utp_packet_wrap{
-         packet = Packet,
-         transmissions = Trans,
-         need_resend = Resend,
-         payload = Payload
-        } = Wrap,
-      if Resend == true ->
-          case send(Net,Packet,ReplyMicro) of
-            {ok,SendTimeNow} ->
-              Resend0 = queue:in(Wrap#utp_packet_wrap{
-                                   need_resend = false,
-                                   transmissions = Trans + 1,
-                                   send_time = SendTimeNow},Resend),
-              fast_resend(Net#utp_net{ last_send = SendTimeNow},
-                          ResendCount - 1,OutBuf0,Resend0);
-            _ -> {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
+            Index,Last,ResendCount,OutBuf) ->
+  Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
+  if (Less == true) orelse (Index == Last) ->
+      case array:get(Index,OutBuf) of
+        undefined ->
+          if Index == Last -> {false,Net#utp_net{outbuf = OutBuf}};
+             true -> fast_resend(Net,ai_utp_util:bit16(Index + 1),Last,
+                                 ResendCount,OutBuf)
           end;
-         true ->
-          %% 说明是新的包，继续传输直到队列满了
-          if Trans == 0 ->
+        Wrap ->
+          #utp_packet_wrap{packet = Packet,transmissions = Trans,
+                           need_resend = Resend, payload = Payload} = Wrap,
+          if Resend == true ->
               case send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow} ->
-                  Resend0 = queue:in(Wrap#utp_packet_wrap{
-                                       need_resend = false,
-                                       transmissions = Trans + 1,
-                                       send_time = SendTimeNow},Resend),
-                  fast_resend(Net#utp_net{
-                                last_send = SendTimeNow,
-                                cur_window = CurWindow + Payload,
-                                cur_window_packets = CurWindowPackets + 1},
-                              ResendCount - 1,OutBuf0,Resend0);
-                _ -> {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
+                  OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
+                                              need_resend = false,
+                                              transmissions = Trans + 1,
+                                              send_time = SendTimeNow},OutBuf),
+                  fast_resend(Net#utp_net{ last_send = SendTimeNow},
+                              ai_utp_util:bit16(Index + 1),Last,
+                              ResendCount - 1,OutBuf0);
+                _ -> {false,Net#utp_net{outbuf = OutBuf}}
               end;
-             true -> {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
+             (Trans == 0) andalso (Index == Last)->
+              %% 说明是新的包，继续传输直到队列满了
+              case send(Net,Packet,ReplyMicro) of
+                {ok,SendTimeNow} ->
+                  OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
+                                              need_resend = false,
+                                              transmissions = Trans + 1,
+                                              send_time = SendTimeNow},OutBuf),
+                  {true,Net#utp_net{last_send = SendTimeNow,
+                                    cur_window = CurWindow + Payload,
+                                    outbuf = OutBuf0,
+                                    cur_window_packets = CurWindowPackets + 1}};
+                _ -> {false,Net#utp_net{outbuf = OutBuf}}
+              end;
+             true -> {false,Net#utp_net{outbuf = outbuf}} %% 这种情况不应当发生
           end
       end
   end.
 
-fast_resend(#utp_net{outbuf = OutBuf} = Net)->
+fast_resend(AckNo,
+            #utp_net{outbuf = OutBuf,seq_nr = SeqNR} = Net)->
   %% 快速重发前10个数据包
-  fast_resend(Net, 10, OutBuf, queue:new()).
+  Index = ai_utp_util:bit16(AckNo + 1),
+  fast_resend(Net, Index, SeqNR,10, OutBuf).
 
 process_incoming(#utp_net{state = State,ack_nr = AckNR,
                           seq_nr = SeqNR,inbuf_size = RSize} = Net,
-                 #utp_packet{type = Type,seq_no= SeqNo} = Packet,
+                 #utp_packet{type = Type,seq_no= SeqNo,ack_no = AckNo} = Packet,
                  Timing,Proc) ->
   io:format("Type: ~p seqNo: ~p ackNR:~p seqNR: ~p ReorderSize: ~p~n",
             [Type,SeqNo,AckNR,SeqNR,RSize]),
@@ -165,7 +167,7 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,
     if Type == st_data -> send_ack(Net,Net0);
        true -> Net0
     end,
-  {SendNew,Net2} = fast_resend(Net1),
+  {SendNew,Net2} = fast_resend(AckNo,Net1),
   if SendNew == false -> {Net2,Proc};
      true -> do_send(Net2, Proc)
   end.
