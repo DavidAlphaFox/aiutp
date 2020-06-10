@@ -479,7 +479,7 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
           #utp_packet_wrap{packet = Packet,
                            transmissions = Trans,
                            send_time = SendTime } = Wrap,
-          Diff = (Now - SendTime) / 1000 * Trans,
+          Diff = (Now - SendTime) / 1000,
           if
             (Diff > RTO) andalso (Trans > 0) ->
               case send(Net,Packet,ReplyMicro) of
