@@ -112,9 +112,8 @@ init([Parent,Socket]) ->
           parent = Parent,
           socket = Socket,
           parent_monitor = ParentMonitor,
-          net = #utp_net{},
-          process = ai_utp_process:new()
-         }}.
+          net = #utp_net{socket = Socket},
+          process = ai_utp_process:new()}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -132,11 +131,10 @@ init([Parent,Socket]) ->
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
 handle_call({connect,Control,Remote},From,
-            #state{net = Net,socket = Socket} = State)->
+            #state{net = Net} = State)->
   case register_conn(Remote) of
     {ok,ConnID} ->
-      {Net0,Packet} = ai_utp_net:connect(Net,ConnID),
-      ai_utp_util:send(Socket, Remote, Packet, 0),
+      Net0 = ai_utp_net:connect(Net#utp_net{remote = Remote},ConnID),
       {noreply,State#state{
                  remote = Remote,
                  controller = Control,
@@ -144,27 +142,23 @@ handle_call({connect,Control,Remote},From,
                  connector = From,
                  net = Net0,
                  conn_id = ConnID,
-                 tick_timer = start_tick_timer(?SYN_TIMEOUT, undefined)
-                }};
+                 tick_timer = start_tick_timer(?SYN_TIMEOUT, undefined)}};
     _ -> {reply,{error,eagain},0}
   end;
 handle_call({accept,Control, Remote, Packet,Timing},From,
-           #state{net = Net,socket = Socket} = State)->
-  {Net0,SynPacket,ConnID,TSDiff} = ai_utp_net:accept(Net,Packet,Timing),
+           #state{net = Net} = State)->
+  {Net0,ConnID} = ai_utp_net:accept(Net#utp_net{remote = Remote},Packet,Timing),
   case ai_utp_conn:alloc(Remote, ConnID) of
-    ok ->
-      ai_utp_util:send(Socket,Remote,SynPacket,TSDiff),
-      {reply,ok,State#state{
-                  remote = Remote,
-                  net = Net0,controller = Control,
-                  controller_monitor = erlang:monitor(process,Control),
-                  conn_id = ConnID,
-                  tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)
-                 }};
+    ok -> {reply,ok,State#state{
+                      remote = Remote,
+                      net = Net0,controller = Control,
+                      controller_monitor = erlang:monitor(process,Control),
+                      conn_id = ConnID,
+                      tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)
+                     }};
     Error ->
       gen_server:reply(From, Error),
-      handle_info(timeout, State#state{net = Net0,
-                                       controller = undefined})
+      handle_info(timeout, State#state{net = Net0,controller = undefined})
   end;
 handle_call({controlling_process,OldControl,NewControl,Active},_From,
            #state{controller = OldControl,controller_monitor = CMonitor} = State)->
@@ -174,8 +168,7 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
                                     active = Active,
                                     controller_monitor = CMonitor0})};
 handle_call({send,Data},From,
-            #state{socket = Socket,remote = Remote,
-                   process = Proc,net = Net} = State)->
+            #state{process = Proc,net = Net} = State)->
   case ai_utp_net:state(Net) of
     ?CLOSED ->
       Reason = ai_utp_net:net_error(Net),
@@ -183,8 +176,7 @@ handle_call({send,Data},From,
       {reply,{error,Reason},State};
     _ ->
       Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
-      {{Net0,Packets,TS,TSDiff},Proc1} = ai_utp_net:do_send(Net, Proc0),
-      send(Socket,Remote,Packets,TS,TSDiff),
+      {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
       {noreply,active_read(State#state{net = Net0,process = Proc1})}
   end;
 handle_call({active,true},_From,State) ->
@@ -210,19 +202,17 @@ handle_call(active,_From,#state{active = Active}=State) ->
 
 %% 已经链接了
 handle_cast({packet,Packet,Timing},
-            #state{net = Net,socket = Socket,
-                   remote = Remote, connector = undefined,
+            #state{net = Net, connector = undefined,
                    process = Proc,
                    tick_timer = Timer} = State)->
 
-  {{Net0,Packets,TS,TSDiff},Proc0} =
-    ai_utp_net:process_incoming(Net,Packet,Timing,Proc),
-  NetState = ai_utp_net:state(Net0),
-  send(Socket,Remote,Packets,TS,TSDiff),
-  if NetState == ?CLOSED ->
+  {Net0,Proc0} = ai_utp_net:process_incoming(Net,Packet,Timing,Proc),
+  case ai_utp_net:state(Net0) of
+     ?CLOSED ->
       cancle_tick_timer(Timer),
-      {noreply,active_read(State#state{net = Net0,tick_timer = undefined})};
-     true ->
+      {noreply,active_read(State#state{net = Net0,tick_timer = undefined,
+                                       process = Proc0})};
+    _ ->
       {noreply,active_read(State#state{process = Proc0,net = Net0})}
   end;
 %% 正在进行链接
@@ -230,7 +220,7 @@ handle_cast({packet,Packet,Timing},
             #state{net = Net,connector = Connector,
                    tick_timer = Timer,process = Proc} = State)->
   cancle_tick_timer(Timer),
-  {{Net0,_,_,_},Proc0} = ai_utp_net:process_incoming(Net,Packet, Timing,Proc),
+  {Net0,Proc0} = ai_utp_net:process_incoming(Net,Packet, Timing,Proc),
   case ai_utp_net:state(Net0) of
     ?CLOSED ->
       gen_server:reply(Connector,
@@ -238,7 +228,9 @@ handle_cast({packet,Packet,Timing},
       handle_info(timeout,
                   State#state{connector = undefined,
                               controller = undefined,
-                              tick_timer = undefined});
+                              tick_timer = undefined,
+                              net = Net0,
+                              process = Proc0});
     ?ESTABLISHED ->
       gen_server:reply(Connector, ok),
       {noreply,State#state{net = Net0,connector = undefined,process = Proc0,
@@ -247,7 +239,8 @@ handle_cast({packet,Packet,Timing},
       gen_server:reply(Connector, {error,econnaborted}),
       handle_info(timeout,State#state{connector = undefined,
                                       controller = undefined,
-                                      tick_timer = undefined})
+                                      tick_timer = undefined,
+                                      net = Net0,process = Proc0})
   end.
 
 %%--------------------------------------------------------------------
@@ -321,14 +314,16 @@ handle_info(_Info, State) ->
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
 terminate(_Reason, #state{controller = undefined})-> ok;
-terminate(_Reason, #state{controller = Control,
+terminate(_Reason, #state{controller = Control,active = Active,
                           parent = Parent,net = Net}) ->
-  Self = self(),
-  UTPSocket = {utp,Parent,Self},
-  case ai_utp_net:state(Net) of
-    ?CLOSED -> Control ! {utp_close,UTPSocket,
-                          ai_utp_net:net_error(Net)};
-    _ -> Control ! {utp_close,UTPSocket,econnaborted}
+  if Active == true ->
+      Self = self(),
+      UTPSocket = {utp,Parent,Self},
+      case ai_utp_net:state(Net) of
+        ?CLOSED -> Control ! {utp_close, UTPSocket, ai_utp_net:net_error(Net)};
+        _ -> Control ! {utp_close,UTPSocket,econnaborted}
+      end;
+     true -> ok
   end,
   ok.
 
@@ -392,9 +387,7 @@ cancle_tick_timer({set,Ref}) ->
   undefined.
 
 on_tick(?SYN_SEND,N,
-          #state{ socket = Socket,
-                  remote = Remote,
-                  conn_id = ConnID,
+          #state{ conn_id = ConnID,
                   net = Net,
                   connector = Connector,
                   controller_monitor = CMonitor
@@ -409,20 +402,16 @@ on_tick(?SYN_SEND,N,
                  tick_timer = undefined
                 },0};
      true ->
-      {Net0,Packet} = ai_utp_net:connect(Net,ConnID),
-      ok = ai_utp_util:send(Socket, Remote, Packet, 0),
+      Net0= ai_utp_net:connect(Net,ConnID),
       {noreply,State#state{
                  net = Net0,
                  tick_timer = start_tick_timer(N *2, undefined)
                 }}
   end;
-on_tick(NetState,_,#state{socket = Socket,
-                          remote = Remote,
-                          net = Net,process = Proc} = State) ->
+on_tick(NetState,_,#state{net = Net,process = Proc} = State) ->
   
-  {{Net0,Packets,TS,TSDiff},Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
+  {Net0,Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
   NetState0 = ai_utp_net:state(Net0),
-  send(Socket,Remote,Packets,TS,TSDiff),
   Timer =
     if NetState0 == ?CLOSED -> undefined;
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
@@ -431,11 +420,6 @@ on_tick(NetState,_,#state{socket = Socket,
    active_read(State#state{tick_timer = Timer,net = Net0,process = Proc0})
   }.
 
-send(Socket,Remote,Packets,TS,TSDiff)->
-  lists:foreach(
-    fun(Packet)-> ai_utp_util:send(Socket, Remote,
-                                   Packet, TS,TSDiff) end,
-    Packets).
 active_read(#state{parent = Parent,
                    net = Net,
                    controller = Control,
