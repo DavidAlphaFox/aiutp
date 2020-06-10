@@ -197,22 +197,33 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
 %% 生成SACK
 %% AckNo +2 =< SACK =< AckNo + 801
 sack(_,#utp_net{inbuf_size = 0})-> undefined;
-sack(Base,#utp_net{inbuf = InBuf}) ->
-  {_,_,Acc} =
-    lists:foldl(fun(Index,{Pos,Bit,Acc})->
-                    Pos0 = Index bsr 3,
-                    Mask = 1 bsl (Index band 7),
-                    SeqNo = ai_utp_util:bit16(Base + Index),
-                    {Bit0,Acc0} =
-                      if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
-                         true ->{Bit,Acc}
-                      end,
-                    case array:get(SeqNo, InBuf) of
-                      undefined -> {Pos0,Bit0,Acc0};
-                      _ -> {Pos0,Bit0 bor Mask,Acc0}
-                    end
-                end,{0,0,<<>>},lists:seq(0, 64)),
-  if erlang:byte_size(Acc) > 0 -> Acc;
-     true -> undefined
+sack(Base,#utp_net{inbuf = InBuf,inbuf_size = RSize}) ->
+  build_sack(Base,InBuf,RSize,0,0,#{0 => 0}).
+build_sack(_,_,_,_,0,#{0 := 0}) -> undefined;
+build_sack(_,_,0,_,Pos,Map)->
+  lists:foldl(fun(BI,BAcc)->
+                  Bits = maps:get(BI,Map),
+                  <<BAcc/binary,Bits/big-integer>>
+              end, <<>>, lists:seq(0, Pos));
+build_sack(_,_,_,799,Pos,Map)->
+  lists:foldl(fun(BI,BAcc)->
+                  Bits = maps:get(BI,Map),
+                  <<BAcc/binary,Bits/big-integer>>
+              end, <<>>, lists:seq(0, Pos));
+build_sack(Base,InBuf,RSize,Index,Pos,Map)->
+  SeqNo = ai_utp_util:bit16(Base + Index),
+  Pos0 = Index bsr 3,
+  Mask = 1 bsl (Index band 7),
+  Map0 =
+    if Pos0 > Pos ->
+        lists:foldl(fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
+                    Map,lists:seq(Pos +1 ,Pos0));
+       true -> Map
+    end,
+  case array:get(SeqNo,InBuf) of
+    undefined -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
+    {SeqNo,_} ->
+      Bits = maps:get(Pos0,Map0),
+      Bits0 = Mask bor Bits,
+      build_sack(Base,InBuf,RSize - 1,Index + 1, Pos0,maps:put(Pos,Bits0,Map0))
   end.
-
