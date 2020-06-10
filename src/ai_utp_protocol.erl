@@ -1,7 +1,7 @@
 -module(ai_utp_protocol).
 -include("ai_utp.hrl").
 
--export([decode/1,encode/2,encode/3]).
+-export([decode/2,encode/2,encode/3]).
 -export([make_syn_packet/1,make_ack_packet/2,
          make_ack_packet/3,make_reset_packet/2,
          make_data_packet/2]).
@@ -49,20 +49,22 @@ make_data_packet(SeqNo,AckNo)->
              ack_no = AckNo,
              extension = []}.
 
--spec decode(binary()) ->
+-spec decode(binary(),integer()) ->
         {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
         {error, term()}.
-decode(Packet) ->
+decode(Packet,RecvTS) ->
   try
-    P = decode_packet(Packet),
-    {ok, P}
+    case decode_packet(Packet,RecvTS) of
+      {ok, _} = R -> R;
+      Error -> Error
+    end
   catch
     error:Reason -> {error, Reason}
   end.
 
--spec decode_packet(binary()) ->
+-spec decode_packet(binary(),integer()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
-decode_packet(Packet) ->
+decode_packet(Packet,RecvTS) ->
 
   <<CRC:32/big-integer,Body/binary>> = Packet,
   CRCSum = erlang:crc32(Body),
@@ -82,7 +84,6 @@ decode_packet(Packet) ->
       Verified = validate_packet_type(Ty, Payload),
       if Verified /= ok -> {error,drop};
          true ->
-          RecvTS = ai_utp_util:microsecond(),
           {#utp_packet{type = Ty,
                        conn_id = ConnectionId,
                        win_sz = WindowSize,

@@ -170,7 +170,8 @@ handle_info({'EXIT',Acceptor,Reason},
   {stop,Reason,State};
 handle_info({udp, Socket, IP, InPortNo, Packet},
             #state{socket = Socket,dispatch = Dispatch} = State)->
-  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
+  Now = ai_utp_util:microsecond(),
+  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet,Now),
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
 handle_info(_Info, State) ->

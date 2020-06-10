@@ -17,15 +17,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
 
--export([dispatch/3]).
+-export([dispatch/4]).
 
 -record(state, { parent }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-dispatch(Dispatch,Remote,Payload)->
-  gen_server:cast(Dispatch,{dispatch,Remote,Payload}).
+dispatch(Dispatch,Remote,Payload,RecvTime)->
+  gen_server:cast(Dispatch,{dispatch,Remote,Payload,RecvTime}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -88,9 +88,9 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({dispatch,Remote,Payload},
+handle_cast({dispatch,Remote,Payload,RecvTime},
             #state{parent = Parent} = State)->
-  case ai_utp_protocol:decode(Payload) of
+  case ai_utp_protocol:decode(Payload,RecvTime) of
     {ok,{Packet,Timing}} ->
       dispatch_packet(Remote,Packet,Timing,Parent);
     {error,Reason}->
