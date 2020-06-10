@@ -477,14 +477,16 @@ do_read(#utp_net{
 
 expire_resend(#utp_net{reply_micro = ReplyMicro,
                        seq_nr = Last,
+                       outbuf = OutBuf,
                        last_ack = LastAck} = Net,
-              Now,RTO,Index,OutBuf) ->
+              Now,RTO,Index) ->
+  io:format("expire resend: ~p ~p~n",[Index,Last]),
   Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
   if Less == true  ->
       case array:get(Index,OutBuf) of
         undefined ->
           expire_resend(Net,Now,RTO,
-                        ai_utp_util:bit16(Index + 1),OutBuf);
+                        ai_utp_util:bit16(Index + 1));
         Wrap ->
           #utp_packet_wrap{packet = Packet,
                            transmissions = Trans,
@@ -500,21 +502,24 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
                                               transmissions =  Trans + 1,
                                               send_time = SendTimeNow },OutBuf),
-                  expire_resend(Net,Now,RTO,ai_utp_util:bit16(Index + 1),OutBuf0);
-                _ -> {false,Net#utp_net{outbuf = OutBuf}}
+                  expire_resend(Net#utp_net{outbuf = OutBuf0},Now,
+                                RTO,ai_utp_util:bit16(Index + 1));
+                _ -> {false,Net}
               end;
             true ->
               %% 默认是可以发送的，最终是否能发送，根据滑动窗口发送
-              {true,Net#utp_net{outbuf = OutBuf}}
+              {true,Net}
           end
       end;
-     true -> {true,Net#utp_net{outbuf = OutBuf}}
+     true -> {true,Net}
   end.
-expire_resend(#utp_net{outbuf = OutBuf,seq_nr = SeqNR,
-                      cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
-  WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-  expire_resend(Net,Now,RTO,WindowStart,OutBuf).
-
+expire_resend(#utp_net{seq_nr = SeqNR,
+                       cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
+  if CurWindowPackets > 0 ->
+      WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+      expire_resend(Net,Now,RTO,WindowStart);
+     true -> {true,Net}
+  end.
 force_state(State,#utp_net{last_send = LastSend } = Net,
             Now,RTO)->
   Diff = Now - LastSend,
