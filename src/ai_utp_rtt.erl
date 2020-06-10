@@ -53,8 +53,8 @@ update(Estimate,none)->
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
 rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
-  RTO = max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+  RTO = erlang:max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
+  erlang:min(RTO,1000).
 
 
 %% ACKnowledge an incoming packet
