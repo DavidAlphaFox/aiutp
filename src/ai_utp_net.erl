@@ -482,8 +482,7 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
                        last_ack = LastAck} = Net,
               Now,RTO,Index) ->
   Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
-  if Less == true  ->
-      io:format("expire resend: ~p ~p~n",[Index,Last]),
+  if Less == true ->
       case array:get(Index,OutBuf) of
         undefined ->
           expire_resend(Net,Now,RTO,
@@ -495,10 +494,10 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
           #utp_packet{seq_no = SeqNo} = Packet,
           Diff = (Now - SendTime) / 1000,
           Distance = ai_utp_util:bit16(SeqNo - LastAck),
-          io:format("expire resend: ~p diff: ~p RTO: ~p~n",[Index,Diff,RTO]),
           if
             (Diff > RTO) andalso (Trans > 0)
             andalso (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
+              io:format("expire resend: ~p diff: ~p RTO: ~p~n",[Index,Diff,RTO]),
               case send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow}->
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
