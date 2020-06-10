@@ -145,7 +145,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
   %% 快速重发前10个数据包
   Index = ai_utp_util:bit16(AckNo + 1),
-  fast_resend(Net, Index, SeqNR,?OUTGOING_BUFFER_MAX_SIZE).
+  fast_resend(Net, Index, SeqNR,4).
 
 process_incoming(#utp_net{state = State} = Net,
                  #utp_packet{type = Type,ack_no = AckNo} = Packet,
