@@ -492,7 +492,7 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
                            transmissions = Trans,
                            send_time = SendTime } = Wrap,
           #utp_packet{seq_no = SeqNo} = Packet,
-          Diff = (Now - SendTime) / 1000,
+          Diff = (Now - SendTime) / 1000 * Trans,
           Distance = ai_utp_util:bit16(SeqNo - LastAck),
           if
             (Diff > RTO) andalso (Trans > 0)
