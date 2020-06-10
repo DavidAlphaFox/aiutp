@@ -329,7 +329,7 @@ fill_tx_queue(#utp_net{
       {LastSend,WrapPacket} = send_packet(Net, ToFill, Packet0,ReplyMicro),
       if LastSend == undefined ->
           Net#utp_net{last_seq_nr = ai_utp_util:bit16(SeqNo + 1),
-                      outbuf = queue:in(WrapPacket,OutBuf),
+                      outbuf = array:set(SeqNo,WrapPacket,OutBuf),
                       sndbuf_size = SndBufSize - ToFill,
                       sndbuf = SndBuf0};
         true ->
@@ -339,7 +339,7 @@ fill_tx_queue(#utp_net{
                              last_seq_nr = NextSeqNo,
                              cur_window = CurWindow + ToFill,
                              cur_window_packets = CurWindowPackets + 1,
-                             outbuf = queue:in(WrapPacket,OutBuf),
+                             outbuf = array:set(SeqNo,WrapPacket,OutBuf),
                              sndbuf_size = SndBufSize - ToFill,
                              sndbuf = SndBuf0},
           fill_tx_queue(Net0,Bytes - ToFill)
@@ -353,7 +353,7 @@ fill_tx_queue(#utp_net{
       if LastSend == undefined ->
           Net#utp_net{
             last_seq_nr = ai_utp_util:bit16(SeqNo + 1),
-            outbuf = queue:in(WrapPacket,OutBuf),
+            outbuf = array:set(SeqNo,WrapPacket,OutBuf),
             sndbuf_size = SndBufSize - Filled,
             sndbuf = SndBuf0};
          true ->
@@ -364,17 +364,63 @@ fill_tx_queue(#utp_net{
             last_seq_nr = NextSeqNo,
             cur_window = CurWindow + Filled,
             cur_window_packets = CurWindowPackets + 1,
-            outbuf = queue:in(WrapPacket,OutBuf),
+            outbuf = array:set(SeqNo,WrapPacket,OutBuf),
             sndbuf_size = SndBufSize - Filled,
             sndbuf = SndBuf0}
       end;
     zero -> Net
-  end.
+  end;
 %% quick send SeqNR =< SeqNO < LastSeqNR
 %% and total payload less or equal Bytes
-%fill_tx_queue(#utp_packet{outbuf = OutBuf,
-%                          seq_nr = SeqNR,
-%                          last_seq_nr = LastSeqNR} = Net,Byets) ->
+fill_tx_queue(#utp_net{
+                 seq_nr = SeqNR,
+                 last_seq_nr = LastSeqNR} = Net,Bytes) ->
+  case fast_send(Net,SeqNR,LastSeqNR,Bytes) of
+    {false,Net0}-> Net0;
+    {true,Net0} ->
+      MaxSendBytes = max_send_bytes(Net0),
+      fill_tx_queue(Net0,MaxSendBytes)
+  end.
+
+
+
+fast_send(Net,NextSeqNR,_,0)->
+  {false,Net#utp_net{seq_nr = NextSeqNR}};
+%% 稍后重新计算发送窗口
+fast_send(Net,Last,Last,_) ->
+  {true,Net#utp_net{seq_nr = Last}};
+fast_send(#utp_net{
+             reply_micro = ReplyMicro,
+             ack_nr = AckNR,
+             cur_window_packets = CurWindowPackets,
+             cur_window = CurWindow,
+             outbuf = OutBuf} = Net,Index,Last,Bytes) ->
+
+  Wrap = array:get(Index,OutBuf),
+  AckNo = ai_utp_util:bit16(AckNR - 1),
+  WindowSize = window_size(Net),
+  #utp_packet_wrap{
+     packet = Packet,
+     payload = Payload
+    } = Wrap,
+  if Payload > Bytes ->
+      {false,Net#utp_net{seq_nr = Index}};
+     true ->
+      Packet0 = Packet#utp_packet{ack_no = AckNo,win_sz = WindowSize},
+      case send(Net,Packet0,ReplyMicro) of
+        {ok,SendTimeNow} ->
+          Net0 = Net#utp_net{cur_window_packets = CurWindowPackets + 1,
+                             cur_window = CurWindow + Payload,
+                             last_send = SendTimeNow,
+                             outbuf = array:set(Index,
+                                                #utp_packet_wrap{
+                                                   send_time = SendTimeNow,
+                                                   transmissions = 1,
+                                                   packet = Packet0},OutBuf)},
+          fast_send(Net0,ai_utp_util:bit16(Index + 1),Last,Bytes - Payload);
+        true -> {false,Net#utp_net{seq_nr = Index}}
+      end
+  end.
 
 
 fill_from_buffer(_,_,0) -> zero;
@@ -425,52 +471,46 @@ do_read(#utp_net{
      true -> Net
   end.
 
+
 expire_resend(#utp_net{reply_micro = ReplyMicro,
-                       cur_window = CurWindow,
-                       cur_window_packets = CurWindowPackets,
+                       seq_nr = Last,
                        last_ack = LastAck} = Net,
-              Now,RTO,OutBuf,Resend) ->
-  case queue:out(OutBuf) of
-    {empty,_} -> {true,Net#utp_net{outbuf = Resend}};
-    {{value,WrapPacket},OutBuf0} ->
-      #utp_packet_wrap{packet = Packet,
-                       transmissions = Trans,
-                       payload = Payload,
-                       send_time = SendTime } = WrapPacket,
-      #utp_packet{seq_no = SeqNo} = Packet,
-      Diff =
-        if SendTime == undefined -> undefined;
-           true -> (Now - SendTime) / 1000
-        end,
-      Distance = ai_utp_util:bit16(SeqNo - LastAck),
-      if Diff == undefined ->
-          case send(Net,Packet,ReplyMicro) of
-            {ok,SendTimeNow}->
-              Resend0 = queue:in(WrapPacket#utp_packet_wrap{
-                                   transmissions =  1,
-                                   send_time = SendTimeNow},Resend),
-              expire_resend(Net#utp_net{
-                              cur_window =  CurWindow + Payload,
-                              cur_window_packets = CurWindowPackets + 1
-                             },Now,RTO,OutBuf0,Resend0);
-            _ -> {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
-          end;
-         (Diff > RTO) andalso (Trans > 0)
-         andalso (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
-          case send(Net,Packet,ReplyMicro) of
-            {ok,SendTimeNow}->
-              Resend0 = queue:in(WrapPacket#utp_packet_wrap{
-                                   transmissions =  Trans + 1,
-                                   send_time = SendTimeNow },Resend),
-              expire_resend(Net,Now,RTO,OutBuf0,Resend0);
-            _ -> {false,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
-          end;
-         true ->
-          %% 默认是可以发送的，最终是否能发送，根据滑动窗口发送
-          {true,Net#utp_net{outbuf = queue:join(Resend,OutBuf)}}
-      end
+              Now,RTO,Index,OutBuf) ->
+  Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
+  if Less == true  ->
+      case array:get(Index,OutBuf) of
+        undefined ->
+          expire_resend(Net,Now,RTO,
+                        ai_utp_util:bit16(Index + 1),OutBuf);
+        Wrap ->
+          #utp_packet_wrap{packet = Packet,
+                           transmissions = Trans,
+                           send_time = SendTime } = Wrap,
+          #utp_packet{seq_no = SeqNo} = Packet,
+          Diff = (Now - SendTime) / 1000,
+          Distance = ai_utp_util:bit16(SeqNo - LastAck),
+          if
+            (Diff > RTO) andalso (Trans > 0)
+            andalso (Distance < ?OUTGOING_BUFFER_MAX_SIZE)->
+              case send(Net,Packet,ReplyMicro) of
+                {ok,SendTimeNow}->
+                  OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
+                                              transmissions =  Trans + 1,
+                                              send_time = SendTimeNow },OutBuf),
+                  expire_resend(Net,Now,RTO,ai_utp_util:bit16(Index + 1),OutBuf0);
+                _ -> {false,Net#utp_net{outbuf = OutBuf}}
+              end;
+            true ->
+              %% 默认是可以发送的，最终是否能发送，根据滑动窗口发送
+              {true,Net#utp_net{outbuf = OutBuf}}
+          end
+      end;
+     true -> {true,Net#utp_net{outbuf = OutBuf}}
   end.
-              
+expire_resend(#utp_net{outbuf = OutBuf,seq_nr = SeqNR,
+                      cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
+  WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
+  expire_resend(Net,Now,RTO,WindowStart,OutBuf).
 
 force_state(State,#utp_net{last_send = LastSend } = Net,
             Now,RTO)->
@@ -481,7 +521,7 @@ force_state(State,#utp_net{last_send = LastSend } = Net,
   end.
 
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
-on_tick(State,#utp_net{last_recv = LastReceived,outbuf = OutBuf} =  Net,Proc)->
+on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
@@ -489,7 +529,7 @@ on_tick(State,#utp_net{last_recv = LastReceived,outbuf = OutBuf} =  Net,Proc)->
         [],Now,Net#utp_net.reply_micro},Proc};
      true ->
       RTO = rto(Net),
-      {SendNew,Net0} = expire_resend(Net, Now, RTO, OutBuf, queue:new()),
+      {SendNew,Net0} = expire_resend(Net, Now, RTO),
       if SendNew == true ->
           {Net1,Proc0} = do_send(Net0,Proc,true),
           Net2 = force_state(State, Net1, Now, RTO),
