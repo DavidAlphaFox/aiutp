@@ -533,7 +533,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
           Net2 = force_state(State, Net1),
           {Net2,Proc0};
          true ->
-          Net1 = force_state(State, Net, Now, RTO),
+          Net1 = force_state(State, Net),
           {Net1,Proc}
       end
   end.
