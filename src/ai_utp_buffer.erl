@@ -175,7 +175,7 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
   Base0 = ai_utp_util:bit16(AckNo + 1),
   Base = ai_utp_util:bit16(AckNo + 2),
   Last = ai_utp_util:bit16(Base + Max - 1),
-  SeqNo = ai_utp_util:bit16(SeqNR -1),
+  SeqNo = ai_utp_util:bit16(SeqNR - 1),
   Less = ai_utp_util:wrapping_compare_less(Last,SeqNo,?ACK_NO_MASK),
   if Less /= true -> {0,[],OutBuf};
      true ->
