@@ -60,13 +60,12 @@ ack(#utp_net{last_ack = LastAck} =Net,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder 或者收到重复包
   if Less == true ->
-
       SAcks = proplists:get_value(sack, Ext,undefined),
       {Lost,AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
       {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
-      ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
-                   AckBytes,Lost,lists:reverse(Times),WndSize);
-     true -> Net
+      {Lost,ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
+                   AckBytes,Lost,lists:reverse(Times),WndSize)};
+     true -> {0,Net}
   end.
         
 
@@ -142,13 +141,16 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
       end
   end.
 
-fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
-  %% 快速重发前10个数据包
-  Index = ai_utp_util:bit16(AckNo + 1),
-  fast_resend(Net, Index, SeqNR,4).
+fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
+  %% 快速重发前4个数据包
+  if Lost > 0 ->
+      Index = ai_utp_util:bit16(AckNo + 1),
+      fast_resend(Net, Index, SeqNR,4);
+     true  -> {true,Net}
+  end.
 
 process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
-                 #utp_packet{type = Type,ack_no = AckNo,seq_no = SeqNo} = Packet,
+                 #utp_packet{type = Type,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
   Quick =
     if AckNR == undefined -> false;
@@ -160,16 +162,14 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
       Net0 = send_ack(Net,true),
       {Net0,Proc};
      true ->
-      Net0 = process_incoming(Type,State,
+      case process_incoming(Type,State,
                               Net#utp_net{last_recv = ai_utp_util:microsecond() },
-                              Packet,Timing),
-      Net1 =
-        if Type == st_data -> send_ack(Net0,false);
-           true -> Net0
-        end,
-      {SendNew,Net2} = fast_resend(AckNo,Net1),
-      if SendNew == false -> {Net2,Proc};
-         true -> do_send(Net2, Proc)
+                              Packet,Timing) of
+        {SendNew,Net0} ->
+          if SendNew == false -> {Net0,Proc};
+             true -> do_send(Net0, Proc)
+          end;
+        Net0 -> {Net0,Proc}
       end
   end.
   
@@ -177,7 +177,9 @@ process_incoming(st_state, ?SYN_RECEIVE,
                  #utp_net{seq_nr = SeqNR} = Net,
                  #utp_packet{ack_no = AckNo} = Packet,Timing) ->
   Diff = ai_utp_util:bit16(SeqNR - AckNo),
-  if Diff == 1 -> ack(Net#utp_net{state = ?ESTABLISHED},Packet,Timing);
+  if Diff == 1 ->
+      {_,Net0} = ack(Net#utp_net{state = ?ESTABLISHED},Packet,Timing),
+      Net0;
      true -> Net
   end;
 process_incoming(st_syn, ?SYN_RECEIVE,
@@ -208,14 +210,21 @@ process_incoming(st_data,?SYN_RECEIVE,
      true -> Net
   end;
 process_incoming(st_data,?ESTABLISHED,Net,
-                 #utp_packet{seq_no = SeqNo,payload = Payload
+                 #utp_packet{seq_no = SeqNo,payload = Payload,
+                             ack_no = AckNo
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
     duplicate -> send_ack(Net,true); %% 强制发送ACK
-    {_,Net1} -> ack(Net1,Packet,Timing)
+    {_,Net0} ->
+      {Lost,Net1} = ack(Net0,Packet,Timing),
+      Net2 = send_ack(Net1,false),
+      fast_resend(Net2,AckNo,Lost)
   end;
-process_incoming(st_state,?ESTABLISHED,Net, Packet,Timing) ->
-  ack(Net,Packet,Timing);
+
+process_incoming(st_state,?ESTABLISHED,Net,
+                 #utp_packet{ack_no = AckNo} = Packet,Timing) ->
+  {Lost,Net0} = ack(Net,Packet,Timing),
+  fast_resend(Net0,AckNo,Lost);
 process_incoming(st_state,?SYN_SEND,
                  #utp_net{seq_nr = SeqNR} = Net,
                  #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,
@@ -224,7 +233,8 @@ process_incoming(st_state,?SYN_SEND,
   if Diff == 1 ->
       Net1 = Net#utp_net{state = ?ESTABLISHED,
                          ack_nr = ai_utp_util:bit16(SeqNo + 1)},
-      ack(Net1,Packet,Timing);
+      {_,Net2} = ack(Net1,Packet,Timing),
+      Net2;
      true -> Net
   end;
 process_incoming(st_reset,_,Net,_,_) ->
