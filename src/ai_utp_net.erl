@@ -143,7 +143,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 
 fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   %% 快速重发前4个数据包
-  if Lost > 0 ->
+  if Lost > ?DUPLICATE_ACKS_BEFORE_RESEND ->
       Index = ai_utp_util:bit16(AckNo + 1),
       fast_resend(Net, Index, SeqNR,4);
      true  -> {true,Net}
@@ -210,13 +210,15 @@ process_incoming(st_data,?SYN_RECEIVE,
      true -> Net
   end;
 process_incoming(st_data,?ESTABLISHED,Net,
-                 #utp_packet{seq_no = SeqNo,payload = Payload
+                 #utp_packet{seq_no = SeqNo,payload = Payload,
+                             ack_no = AckNo
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
     duplicate -> send_ack(Net,true); %% 强制发送ACK
     {_,Net0} ->
-      {_,Net1} = ack(Net0,Packet,Timing),
-      send_ack(Net1,false)
+      {Lost,Net1} = ack(Net0,Packet,Timing),
+      Net2 = send_ack(Net1,false),
+      fast_resend(Net2,AckNo,Lost)
   end;
 
 process_incoming(st_state,?ESTABLISHED,Net,
