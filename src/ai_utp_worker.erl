@@ -448,7 +448,7 @@ on_tick(NetState,_,#state{net = Net,process = Proc,closer = Closer} = State) ->
     if NetState0 == ?CLOSED -> undefined;
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
-  if (NetState0 == ?CLOSED) and (closer /= undefined)->
+  if (NetState0 == ?CLOSED) and (Closer /= undefined)->
       self() ! timeout,
       gen_server:reply(Closer,ok);
      true -> ok
