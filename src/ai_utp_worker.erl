@@ -326,7 +326,7 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
     ?CLOSED -> ok;
     _ ->
       %%其它状态
-      ai_utp_util:close(Net)
+      ai_utp_net:close(Net)
   end,
   {noreply,State#state{controller = undefined,
                        process = ai_utp_process:new(),
