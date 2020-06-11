@@ -507,7 +507,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
       expire_resend(Net,WindowStart,Now);
-     true -> {false,Net}
+     true -> {true,Net}
   end.
 force_state(State,Net)->
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
