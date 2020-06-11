@@ -150,9 +150,13 @@ fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
 process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
                  #utp_packet{type = Type,ack_no = AckNo,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
-  Wanted = ai_utp_util:bit16(AckNR - 1),
-  Less = ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK),
-  if Less == true -> {Net,Proc};
+  Quick =
+    if AckNR == undefined -> false;
+       true ->
+        Wanted = ai_utp_util:bit16(AckNR - 1),
+        ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
+    end,
+  if Quick == true -> {Net,Proc};
      true ->
       Net0 = process_incoming(Type,State,
                               Net#utp_net{last_recv = ai_utp_util:microsecond() },
