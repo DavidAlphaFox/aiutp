@@ -29,9 +29,9 @@ lost(none,_) -> #ai_utp_rtt{};
 lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
   Delay0 =
     if LostCount > 0 -> Delay * 1.5;
-       true  -> Delay / 1.5
+       true  -> Delay * 0.75
     end,
-  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8};
+  if Delay0 > 12 -> RTT#ai_utp_rtt{delay = 12};
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
