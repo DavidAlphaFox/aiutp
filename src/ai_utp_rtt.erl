@@ -31,7 +31,7 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
     if LostCount > 0 -> Delay * 1.5;
        true  -> Delay / 1.5
     end,
-  if Delay0 > 20 -> RTT#ai_utp_rtt{delay = 8};
+  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8};
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
@@ -51,9 +51,9 @@ update(Estimate,none)->
 %% The default timeout for packets associated with the socket is also
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
-rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
+rto(#ai_utp_rtt { rtt = RTT, var = Var,delay = Delay}) ->
   RTO = erlang:max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+  RTO * Delay.
 
 
 %% ACKnowledge an incoming packet

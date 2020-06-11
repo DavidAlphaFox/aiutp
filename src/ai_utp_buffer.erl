@@ -81,7 +81,6 @@ fast_resend(AckNo,SeqNR,OutBuf)->
   SeqNo = ai_utp_util:bit16(AckNo + 1),
   Diff = ai_utp_util:bit16(SeqNR - SeqNo),
   if Diff >= 1 ->
-      try
       Wrap = array:get(SeqNo,OutBuf),
       #utp_packet_wrap{ wanted = Wanted} = Wrap,
       if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
@@ -90,13 +89,8 @@ fast_resend(AckNo,SeqNR,OutBuf)->
          true ->
           array:set(SeqNo,Wrap#utp_packet_wrap{
                             wanted = Wanted + 1},OutBuf)
-      end
-      catch
-        _:Reason:Stack ->
-          io:format("Reason:~p AckNo:~p,SeqNR:~p~n ~p~n",
-                    [Reason,AckNo,SeqNR,Stack]),
-          exit(Reason)
       end;
+
      true -> OutBuf
   end.
 
