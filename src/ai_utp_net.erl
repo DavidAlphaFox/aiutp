@@ -488,7 +488,6 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
           if (Trans > 0) andalso (Diff > RTO) ->
               case send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow}->
-                  io:format("RTO is: ~p resend: ~p ~n",[RTO,Index]),
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
                                               transmissions =  Trans + 1,
                                               send_time = SendTimeNow },OutBuf),
@@ -508,7 +507,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      ResendCount = erlang:min(CurWindowPackets,?REORDER_BUFFER_MAX_SIZE),
+      ResendCount = erlang:min(CurWindowPackets,?OUTGOING_BUFFER_MAX_SIZE),
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
