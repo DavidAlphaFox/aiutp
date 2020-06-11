@@ -148,7 +148,7 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
       fast_resend(Net, Index, SeqNR,4);
      true  -> {true,Net}
   end.
-
+process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
 process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
                  #utp_packet{type = Type,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
