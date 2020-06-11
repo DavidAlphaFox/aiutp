@@ -447,7 +447,7 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 
 
 %% try to full fill one package
-do_send(Net,Proc)-> do_send(Net,Proc,true).
+do_send(Net,Proc)-> do_send(Net,Proc,false).
 
 do_send(Net,Proc,Quick)->
   MaxBufSize = sndbuf_remain(Net),
