@@ -19,7 +19,7 @@
          terminate/2, code_change/3, format_status/2]).
 
 -export([connect/4,accept/5,incoming/3,
-         send/2,recv/2,active/2,
+         send/2,recv/2,active/2,close/2,
          controlling_process/2]).
 
 -define(SERVER, ?MODULE).
@@ -37,6 +37,7 @@
                 net,
                 tick_timer :: reference(),
                 connector,
+                closer,
                 conn_id,
                 process,
                 active = false
@@ -55,7 +56,8 @@ recv(Pid,Len)->
   gen_server:call(Pid,{recv,Len},infinity).
 active(Pid,V)->
   gen_server:call(Pid,{active,V},infinity).
-
+close(Pid,Caller)->
+  gen_server:call(Pid,{close,Caller},infinity).
 controlling_process(Pid,Proc)->
   Caller = self(),
   {ok,Control} = gen_server:call(Pid,controller),
@@ -174,6 +176,8 @@ handle_call({send,Data},From,
       Reason = ai_utp_net:net_error(Net),
       self() ! timeout,
       {reply,{error,Reason},State};
+    ?CLOSING ->
+      {reply,{error,eshutdown},State};
     _ ->
       Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
       {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
@@ -184,7 +188,22 @@ handle_call({active,true},_From,State) ->
 handle_call(controller,_From,#state{controller = Controller} = State)->
   {reply,{ok,Controller},State};
 handle_call(active,_From,#state{active = Active}=State) ->
-  {reply,{ok,Active},State}.
+  {reply,{ok,Active},State};
+handle_call({close,Controll},From,#state{controller = Controll,
+                                         process = Proc,
+                                         net = Net} = State) ->
+  Net0 = ai_utp_net:close(Net,Proc),
+  case ai_utp_util:net_state(Net0) of
+    ?CLOSED ->
+      self() ! timeout,
+      {reply,ok,State#state{active = false,net = Net0,
+                            process = ai_utp_process:new()}};
+    _ ->
+      {noreply,State#state{net = Net0,closer = From,active = false,
+                           process = ai_utp_process:new()}}
+  end;
+handle_call({close,_},_From,State) ->
+  {reply,{error,not_owner},State}.
 
 
 %%--------------------------------------------------------------------
@@ -203,13 +222,16 @@ handle_call(active,_From,#state{active = Active}=State) ->
 %% 已经链接了
 handle_cast({packet,Packet,Timing},
             #state{net = Net, connector = undefined,
-                   process = Proc,
+                   process = Proc,closer = Closer,
                    tick_timer = Timer} = State)->
 
   {Net0,Proc0} = ai_utp_net:process_incoming(Net,Packet,Timing,Proc),
   case ai_utp_net:state(Net0) of
      ?CLOSED ->
       cancle_tick_timer(Timer),
+      if Closer /= undefined -> gen_server:reply(Closer, ok);
+         true -> ok
+      end,
       {noreply,active_read(State#state{net = Net0,tick_timer = undefined,
                                        process = Proc0})};
     _ ->
@@ -276,6 +298,7 @@ handle_info({timeout,TRef,{rto,N}},
   NetState = ai_utp_net:state(Net),
   on_tick(NetState,N,State);
 
+%% 端口崩溃了，就什么好说的了
 handle_info({'DOWN', MRef, process, Parent, _Reason},
             #state{parent = Parent,
                    parent_monitor = MRef,
@@ -293,11 +316,20 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
     end,
   {noreply,State0#state{parent_monitor = undefined,
                         controller_monitor = undefined},0};
+%% 控制进程崩溃了，那么快速失败吧
 handle_info({'DOWN', MRef, process, Control, _Reason},
             #state{controller = Control,
-                   controller_monitor = MRef
+                   controller_monitor = MRef,
+                   net = Net
                   } = State)->
+  case ai_utp_util:net_state(Net) of
+    ?CLOSED -> ok;
+    _ ->
+      %%其它状态
+      ai_utp_util:close(Net)
+  end,
   {noreply,State#state{controller = undefined,
+                       process = ai_utp_process:new(),
                        controller_monitor = undefined},0};
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -408,7 +440,7 @@ on_tick(?SYN_SEND,N,
                  tick_timer = start_tick_timer(N *2, undefined)
                 }}
   end;
-on_tick(NetState,_,#state{net = Net,process = Proc} = State) ->
+on_tick(NetState,_,#state{net = Net,process = Proc,closer = Closer} = State) ->
   
   {Net0,Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
   NetState0 = ai_utp_net:state(Net0),
@@ -416,6 +448,11 @@ on_tick(NetState,_,#state{net = Net,process = Proc} = State) ->
     if NetState0 == ?CLOSED -> undefined;
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
+  if (NetState0 == ?CLOSED) and (closer /= undefined)->
+      self() ! timeout,
+      gen_server:reply(Closer,ok);
+     true -> ok
+  end,
   {noreply,
    active_read(State#state{tick_timer = Timer,net = Net0,process = Proc0})
   }.
