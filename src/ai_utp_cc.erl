@@ -91,8 +91,8 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
-ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS,TSDiff,Now) ->
-  {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,TSDiff,Now),
+ack_packet_rtt(#utp_net{rtt = RTT} = Net,SendTime,TS,TSDiff,Now) ->
+  {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,SendTime,TS,TSDiff,Now),
   Net#utp_net{rtt = NewRTT,rto =  NewRTO}.
 
 
@@ -120,7 +120,7 @@ cc(#utp_net{cur_window = CurWindow,rtt = RTT} = Net,
   Net0 = update_reply_micro(Net, Now, TS),
   Net1 = update_our_ledbat(Net0, ActualDelay),
   Net2 = update_estimate_exceed(Net1, MinRTT),
-  NowMS = Now / 1000,
+  NowMS = Now div 1000,
   Net2a = update_decay_window(Net2,Lost,NowMS),
   Net3 =
     if ActualDelay > 0 andalso AckBytes > 0 ->
@@ -143,5 +143,5 @@ cc(#utp_net{cur_window = CurWindow,rtt = RTT} = Net,
     end,
   Net5 = Net4#utp_net{rtt = ai_utp_rtt:lost(RTT, Lost)},
   lists:foldl(
-    fun(SendTime,Acc)-> ack_packet_rtt(Acc, SendTime,TSDiff, Now) end,
+    fun(SendTime,Acc)-> ack_packet_rtt(Acc, SendTime,TS,TSDiff, Now) end,
     Net5, Times).

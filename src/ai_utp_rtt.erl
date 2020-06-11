@@ -1,6 +1,6 @@
 -module(ai_utp_rtt).
 
--export([rto/1,ack/4,lost/2]).
+-export([rto/1,ack/5,lost/2]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
 -define(DEFAULT_RTT_TIMEOUT, 500).
@@ -57,10 +57,10 @@ rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
 
 
 %% ACKnowledge an incoming packet
-ack(RTT, TimeSent, _, TimeAcked) ->
+ack(RTT, TimeSent,TS,TSDiff, TimeAcked) ->
   if
     TimeAcked >= TimeSent->
-      Estimate = ai_utp_util:bit32(TimeAcked - TimeSent ) div 1000,
+      Estimate = ai_utp_util:bit32(TimeAcked - TS + TSDiff ) div 1000,
       NewRTT = update(Estimate, RTT),
       NewRTO = rto(NewRTT),
       {ok, NewRTO, NewRTT};
