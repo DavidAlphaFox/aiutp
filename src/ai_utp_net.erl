@@ -210,15 +210,13 @@ process_incoming(st_data,?SYN_RECEIVE,
      true -> Net
   end;
 process_incoming(st_data,?ESTABLISHED,Net,
-                 #utp_packet{seq_no = SeqNo,payload = Payload,
-                             ack_no = AckNo
+                 #utp_packet{seq_no = SeqNo,payload = Payload
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
     duplicate -> send_ack(Net,true); %% 强制发送ACK
     {_,Net0} ->
-      {Lost,Net1} = ack(Net0,Packet,Timing),
-      Net2 = send_ack(Net1,false),
-      fast_resend(Net2,AckNo,Lost)
+      {_,Net1} = ack(Net0,Packet,Timing),
+      send_ack(Net1,false)
   end;
 
 process_incoming(st_state,?ESTABLISHED,Net,
