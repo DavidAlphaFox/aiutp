@@ -72,29 +72,31 @@ decode(Packet,RecvTS) ->
 -spec decode_packet(binary(),integer()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet,RecvTS) ->
-
-  %% Decode packet
-  <<1:4/big-integer,Type:4/big-integer,
-    Extension:8/big-integer, ConnectionId:16/big-integer,
-    TS:32/big-integer,TSDiff:32/big-integer,
-    WindowSize:32/big-integer,
-    SeqNo:16/big-integer,AckNo:16/big-integer,
-    ExtPayload/binary>> = Packet,
-  {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
-
-  %% Validate packet contents
-  Ty = decode_type(Type),
-  Verified = validate_packet_type(Ty, Payload),
-  if Verified /= ok -> {error,drop};
+  <<Header:20/binary,CheckSum:32/big-integer,ExtPayload/binary>> = Packet,
+  CRC = erlang:crc32(Header),
+  if CRC /= CheckSum -> {error,drop};
      true ->
-      {#utp_packet{type = Ty,
-                   conn_id = ConnectionId,
-                   win_sz = WindowSize,
-                   seq_no = SeqNo,
-                   ack_no = AckNo,
-                   extension = Extensions,
-                   payload = Payload},
-       {TS,TSDiff,RecvTS}}
+      <<1:4/big-integer,Type:4/big-integer,
+        Extension:8/big-integer, ConnectionId:16/big-integer,
+        TS:32/big-integer,TSDiff:32/big-integer,
+        WindowSize:32/big-integer,SeqNo:16/big-integer,
+        AckNo:16/big-integer>> = Header,
+      {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
+
+      %% Validate packet contents
+      Ty = decode_type(Type),
+      Verified = validate_packet_type(Ty, Payload),
+      if Verified /= ok -> {error,drop};
+         true ->
+          {#utp_packet{type = Ty,
+                       conn_id = ConnectionId,
+                       win_sz = WindowSize,
+                       seq_no = SeqNo,
+                       ack_no = AckNo,
+                       extension = Extensions,
+                       payload = Payload},
+           {TS,TSDiff,RecvTS}}
+      end
   end.
 
 
@@ -136,12 +138,14 @@ encode(#utp_packet {type = Type,
                 payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  <<1:4/big-integer,EncTy:4/big-integer,
-    Extension:8/big-integer, ConnID:16/big-integer,
-    TS:32/big-integer,TSDiff:32/big-integer,
-    WSize:32/big-integer,
-    SeqNo:16/big-integer, AckNo:16/big-integer,
-    ExtBin/binary,Payload/binary>>.
+  Header = <<1:4/big-integer,EncTy:4/big-integer,
+             Extension:8/big-integer, ConnID:16/big-integer,
+             TS:32/big-integer,TSDiff:32/big-integer,
+             WSize:32/big-integer,
+             SeqNo:16/big-integer, AckNo:16/big-integer>>,
+  CheckSum = erlang:crc32(Header),
+  <<Header/binary,CheckSum:32/big-integer,ExtBin/binary,
+    Payload/binary>>.
 
 
 encode_extensions([]) -> {0, <<>>};
