@@ -470,16 +470,16 @@ do_read(#utp_net{
       {Net#utp_net{recvbuf_size = 0, recvbuf = queue:new()},InBuf};
      true -> Net
   end.
-
+expire_resend(Net,_,0,_) -> {false,Net};
 expire_resend(#utp_net{reply_micro = ReplyMicro,
                        seq_nr = Last,
                        rto = RTO,
-                       outbuf = OutBuf} = Net,Index,Now) ->
+                       outbuf = OutBuf} = Net,Index,ResendCount,Now) ->
   Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
   if Less == true ->
       case array:get(Index,OutBuf) of
         undefined ->
-          expire_resend(Net,ai_utp_util:bit16(Index + 1));
+          expire_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount,Now);
         Wrap ->
           #utp_packet_wrap{packet = Packet,
                            send_time = SendTime,
@@ -493,7 +493,7 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
                                               transmissions =  Trans + 1,
                                               send_time = SendTimeNow },OutBuf),
                   expire_resend(Net#utp_net{outbuf = OutBuf0},
-                                ai_utp_util:bit16(Index + 1));
+                                ai_utp_util:bit16(Index + 1),ResendCount - 1,Now);
                 _ -> {false,Net}
               end;
             true ->
@@ -508,12 +508,13 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      expire_resend(Net,WindowStart,Now);
+      ResendCount = erlang:min(CurWindowPackets,?REORDER_BUFFER_MAX_SIZE),
+      expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
 force_state(State,Net)->
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
-      send_ack(Net,false);
+      send_ack(Net,true);
      true  -> Net
   end.
 
