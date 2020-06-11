@@ -193,7 +193,7 @@ handle_call({close,Controll},From,#state{controller = Controll,
                                          process = Proc,
                                          net = Net} = State) ->
   Net0 = ai_utp_net:close(Net,Proc),
-  case ai_utp_util:net_state(Net0) of
+  case ai_utp_net:net_state(Net0) of
     ?CLOSED ->
       self() ! timeout,
       {reply,ok,State#state{active = false,net = Net0,
