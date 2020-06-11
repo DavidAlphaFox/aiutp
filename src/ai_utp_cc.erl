@@ -143,5 +143,5 @@ cc(#utp_net{cur_window = CurWindow,rtt = RTT} = Net,
     end,
   Net5 = Net4#utp_net{rtt = ai_utp_rtt:lost(RTT, Lost)},
   lists:foldl(
-    fun(_,Acc)-> ack_packet_rtt(Acc, TS,TSDiff, Now) end,
+    fun(SendTime,Acc)-> ack_packet_rtt(Acc, SendTime,TSDiff, Now) end,
     Net5, Times).

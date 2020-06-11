@@ -147,20 +147,24 @@ fast_resend(AckNo,#utp_net{seq_nr = SeqNR} = Net)->
   Index = ai_utp_util:bit16(AckNo + 1),
   fast_resend(Net, Index, SeqNR,4).
 
-process_incoming(#utp_net{state = State} = Net,
-                 #utp_packet{type = Type,ack_no = AckNo} = Packet,
+process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
+                 #utp_packet{type = Type,ack_no = AckNo,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
-  
-  Net0 = process_incoming(Type,State,
-                          Net#utp_net{last_recv = ai_utp_util:microsecond() },
-                          Packet,Timing),
-  Net1 =
-    if Type == st_data -> send_ack(Net0,false);
-       true -> Net0
-    end,
-  {SendNew,Net2} = fast_resend(AckNo,Net1),
-  if SendNew == false -> {Net2,Proc};
-     true -> do_send(Net2, Proc)
+  Wanted = ai_utp_util:bit16(AckNR - 1),
+  Less = ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK),
+  if Less == true -> {Net,Proc};
+     true ->
+      Net0 = process_incoming(Type,State,
+                              Net#utp_net{last_recv = ai_utp_util:microsecond() },
+                              Packet,Timing),
+      Net1 =
+        if Type == st_data -> send_ack(Net0,false);
+           true -> Net0
+        end,
+      {SendNew,Net2} = fast_resend(AckNo,Net1),
+      if SendNew == false -> {Net2,Proc};
+         true -> do_send(Net2, Proc)
+      end
   end.
   
 process_incoming(st_state, ?SYN_RECEIVE,
