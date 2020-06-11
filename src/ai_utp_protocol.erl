@@ -53,46 +53,38 @@ make_data_packet(SeqNo,AckNo)->
         {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
         {error, term()}.
 decode(Packet,RecvTS) ->
-  try
-    case decode_packet(Packet,RecvTS) of
-      {error,_} = Error-> Error;
-       R -> {ok,R}
-    end
-  catch
-    error:Reason -> {error, Reason}
+  case decode_packet(Packet,RecvTS) of
+    {error,_} = Error-> Error;
+    R -> {ok,R}
   end.
+
 
 -spec decode_packet(binary(),integer()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet,RecvTS) ->
 
-  <<CRC:32/big-integer,Body/binary>> = Packet,
-  CRCSum = erlang:crc32(Body),
-  if CRC /= CRCSum -> {error,drop};
-     true ->
-      %% Decode packet
-      <<Type:8/big-integer,
-        Extension:8/big-integer, ConnectionId:16/big-integer,
-        SeqNo:16/big-integer,AckNo:16/big-integer,
-        WindowSize:32/big-integer,
-        TS:32/big-integer,TSDiff:32/big-integer,
-        ExtPayload/binary>> = Body,
-      {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
+  %% Decode packet
+  <<1:4/big-integer,Type:4/big-integer,
+    Extension:8/big-integer, ConnectionId:16/big-integer,
+    TS:32/big-integer,TSDiff:32/big-integer,
+    WindowSize:32/big-integer,
+    SeqNo:16/big-integer,AckNo:16/big-integer,
+    ExtPayload/binary>> = Packet,
+  {Extensions, Payload} = decode_extensions(Extension, ExtPayload, []),
 
-      %% Validate packet contents
-      Ty = decode_type(Type),
-      Verified = validate_packet_type(Ty, Payload),
-      if Verified /= ok -> {error,drop};
-         true ->
-          {#utp_packet{type = Ty,
-                       conn_id = ConnectionId,
-                       win_sz = WindowSize,
-                       seq_no = SeqNo,
-                       ack_no = AckNo,
-                       extension = Extensions,
-                       payload = Payload},
-           {TS,TSDiff,RecvTS}}
-      end
+  %% Validate packet contents
+  Ty = decode_type(Type),
+  Verified = validate_packet_type(Ty, Payload),
+  if Verified /= ok -> {error,drop};
+     true ->
+      {#utp_packet{type = Ty,
+                   conn_id = ConnectionId,
+                   win_sz = WindowSize,
+                   seq_no = SeqNo,
+                   ack_no = AckNo,
+                   extension = Extensions,
+                   payload = Payload},
+       {TS,TSDiff,RecvTS}}
   end.
 
 
@@ -134,15 +126,13 @@ encode(#utp_packet {type = Type,
                 payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  Body =
-    <<EncTy:8/big-integer,
-      Extension:8/big-integer, ConnID:16/big-integer,
-      SeqNo:16/big-integer, AckNo:16/big-integer,
-      WSize:32/big-integer,
-      TS:32/big-integer,TSDiff:32/big-integer,
-      ExtBin/binary,Payload/binary>>,
-  CRCSum = erlang:crc32(Body),
-  <<CRCSum:32/big-integer,Body/binary>>.
+  <<1:4/big-integer,EncTy:4/big-integer,
+    Extension:8/big-integer, ConnID:16/big-integer,
+    TS:32/big-integer,TSDiff:32/big-integer,
+    WSize:32/big-integer,
+    SeqNo:16/big-integer, AckNo:16/big-integer,
+    ExtBin/binary,Payload/binary>>.
+
 
 encode_extensions([]) -> {0, <<>>};
 encode_extensions([{sack, Bits} | R]) ->
