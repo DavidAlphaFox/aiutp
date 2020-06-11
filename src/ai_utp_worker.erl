@@ -322,7 +322,7 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
                    controller_monitor = MRef,
                    net = Net
                   } = State)->
-  case ai_utp_util:net_state(Net) of
+  case ai_utp_util:state(Net) of
     ?CLOSED -> ok;
     _ ->
       %%其它状态
