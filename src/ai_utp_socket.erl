@@ -84,8 +84,8 @@ init([Port,Options]) ->
       false -> [binary|Options];
       true -> Options
     end,
-  case gen_udp:open(Port,Options0 ++ [{sndbuf,?OPT_SEND_BUF},
-                                      {recbuf,?OPT_RECV_BUF}]) of
+  case gen_udp:open(Port,Options0 ++ [{sndbuf,?OPT_SEND_BUF * 4},
+                                      {recbuf,?OPT_RECV_BUF * 4}]) of
     {ok,Socket} ->
       {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
       ok = inet:setopts(Socket, [{active,once}]),
