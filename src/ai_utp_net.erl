@@ -237,7 +237,6 @@ connect(#utp_net{max_window = MaxWindow,seq_nr = SeqNR} = Net,ConnID)->
            seq_nr = SeqNR0,
            last_seq_nr = SeqNR0,
            last_decay_win = Now /1000,
-           rto_timeout = Now / 1000 + 3000,
            state = ?SYN_SEND},
   send(Net0,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0),
   Net0.
@@ -263,14 +262,12 @@ accept(#utp_net{max_window = MaxWindow} = Net,
            seq_nr = SeqNR,
            last_seq_nr = SeqNR,
            last_decay_win = Now /1000,
-           rto_timeout = Now / 1000 + 3000,
            reply_micro = ReplyMicro,
            state  = ?SYN_RECEIVE},
   send(Net0,Res#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},ReplyMicro),
   {Net0,ConnID}.
 
 state(#utp_net{state = State})-> State.
-rto(#utp_net{rtt = RTT})-> ai_utp_rtt:rto(RTT).
 
 fill_buffer(Net,0,Proc)-> {Net,Proc};
 fill_buffer(#utp_net{sndbuf = SndBuf,
@@ -465,8 +462,9 @@ do_read(#utp_net{
   end.
 
 expire_resend(#utp_net{reply_micro = ReplyMicro,
-                        seq_nr = Last,
-                        outbuf = OutBuf} = Net,Index) ->
+                       seq_nr = Last,
+                       rto = RTO,
+                       outbuf = OutBuf} = Net,Index,Now) ->
   Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
   if Less == true ->
       case array:get(Index,OutBuf) of
@@ -474,10 +472,13 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
           expire_resend(Net,ai_utp_util:bit16(Index + 1));
         Wrap ->
           #utp_packet_wrap{packet = Packet,
+                           send_time = SendTime,
                            transmissions = Trans} = Wrap,
-          if Trans > 0 ->
+          Diff = (Now - SendTime) div 1000,
+          if (Trans > 0) andalso (Diff > RTO) ->
               case send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow}->
+                  io:format("RTO is: ~p resend: ~p ~n",[RTO,Index]),
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
                                               transmissions =  Trans + 1,
                                               send_time = SendTimeNow },OutBuf),
@@ -492,20 +493,13 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
       end;
      true -> {true,Net}
   end.
-expire_resend(#utp_net{seq_nr = SeqNR,rto_timeout = TimeOut,
-                       cur_window_packets = CurWindowPackets} = Net, Now, RTO)->
-  NowMS = Now / 1000,
-  Diff = NowMS - TimeOut,
-  io:format("RTOTime: ~p and NowMS: ~p Diff is: ~p ~n",[TimeOut,NowMS,Diff]),
-  if (CurWindowPackets > 0) and (Diff >= 0)->
-      io:format("resend on time out"),
+
+expire_resend(#utp_net{seq_nr = SeqNR,
+                       cur_window_packets = CurWindowPackets} = Net, Now)->
+  if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      {Active,Net0} = expire_resend(Net,WindowStart),
-      {Active,Net0#utp_net{rto_timeout = Now + RTO}};
-     true ->
-      if Diff > 0 -> {true,Net#utp_net{rto_timeout = Now + RTO}};
-         true -> {false,Net}
-      end
+      expire_resend(Net,WindowStart,Now);
+     true -> {false,Net}
   end.
 force_state(State,Net)->
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
@@ -520,8 +514,7 @@ on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   if Diff >= ?MAX_RECV_IDLE_TIME ->
       {Net#utp_net{state = ?CLOSED,error = econnaborted}, Proc};
      true ->
-      RTO = rto(Net),
-      {SendNew,Net0} = expire_resend(Net, Now, RTO),
+      {SendNew,Net0} = expire_resend(Net, Now),
       if SendNew == true ->
           {Net1,Proc0} = do_send(Net0,Proc,true),
           Net2 = force_state(State, Net1),

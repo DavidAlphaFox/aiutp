@@ -93,7 +93,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
 
 ack_packet_rtt(#utp_net{rtt = RTT} = Net,TS,TSDiff,Now) ->
   {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,TS,TSDiff,Now),
-  Net#utp_net{rtt = NewRTT,rto_timeout = Now + NewRTO}.
+  Net#utp_net{rtt = NewRTT,rto =  NewRTO}.
 
 
 update_decay_window(Net,0,_)->Net;

@@ -116,5 +116,5 @@
                  last_send = 0 :: integer(),
                  last_recv = 0:: integer(),
                  last_ack = undefined,
-                 rto_timeout = 0
+                 rto = 500
                 }).
