@@ -53,10 +53,15 @@ make_data_packet(SeqNo,AckNo)->
         {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
         {error, term()}.
 decode(Packet,RecvTS) ->
-  case decode_packet(Packet,RecvTS) of
-    {error,_} = Error-> Error;
-    R -> {ok,R}
+  try
+    case decode_packet(Packet,RecvTS) of
+      {error,_} = Error-> Error;
+      R -> {ok,R}
+    end
+  catch
+    _:_ -> {error,drop}
   end.
+
 
 
 -spec decode_packet(binary(),integer()) ->
