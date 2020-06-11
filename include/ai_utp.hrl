@@ -109,6 +109,7 @@
                  last_maxed_out_window :: integer(),
                  last_decay_win :: integer(),
                  fin_sent = false,
+                 fin_seq_no = -1,
                  fin_acked = false,
                  got_fin = false,
                  eof_seq_no = -1,

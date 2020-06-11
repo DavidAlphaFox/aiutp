@@ -4,7 +4,7 @@
 -export([decode/2,encode/2,encode/3]).
 -export([make_syn_packet/1,make_ack_packet/2,
          make_ack_packet/3,make_reset_packet/2,
-         make_data_packet/2]).
+         make_data_packet/2,make_fin_packet/2]).
 
 -define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
 
@@ -33,6 +33,11 @@ make_syn_packet(SeqNo) ->
             seq_no = SeqNo,
             ack_no = 0,
             extension = ?SYN_EXTS}.
+make_fin_packet(SeqNo,AckNo)->
+  #utp_packet{ type = st_fin,
+               seq_no = SeqNo,
+               ack_no = AckNo,
+               extension = []}.
 make_ack_packet(SeqNo,AckNo,Ext)->
   #utp_packet {type = st_state,
            seq_no = SeqNo,

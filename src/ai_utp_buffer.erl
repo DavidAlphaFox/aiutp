@@ -37,7 +37,6 @@ in(SeqNo,Payload,
         _ -> duplicate
       end
   end.
-
 recv(?ESTABLISHED,<<>>,Net) -> Net;
 recv(?ESTABLISHED,Payload,
      #utp_net{recvbuf = RecvBuf,
@@ -47,8 +46,27 @@ recv(?ESTABLISHED,Payload,
     recvbuf = queue:in({Size,Payload},RecvBuf),
     recvbuf_size = RecvBufSize + Size};
 
-recv(_,_,Net) -> Net.
-
+recv(?CLOSING,<<>>,Net) -> Net;
+recv(?CLOSING,Payload,
+     #utp_net{recvbuf = RecvBuf,
+              recvbuf_size = RecvBufSize} = Net) ->
+  Size = erlang:byte_size(Payload),
+  Net#utp_net{
+    recvbuf = queue:in({Size,Payload},RecvBuf),
+    recvbuf_size = RecvBufSize + Size}.
+recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
+                      state = State,
+                      ack_nr = SeqNo,inbuf = InBuf,inbuf_size = RSize
+                     } = Net) ->
+  case array:get(SeqNo,InBuf) of
+    undefined -> {ok,Net};
+    Payload ->
+      Net0 = recv(State, Payload, Net),
+      {fin,Net0#utp_net{
+             inbuf = array:set(SeqNo,undefined,InBuf),
+             inbuf_size = RSize -1,
+             ack_nr = ai_utp_util:bit16(SeqNo + 1)}}
+  end;
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
                       inbuf = InBuf,inbuf_size = RSize} = Net) ->
   case array:get(SeqNo,InBuf) of

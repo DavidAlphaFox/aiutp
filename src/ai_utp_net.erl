@@ -237,8 +237,105 @@ process_incoming(st_state,?SYN_SEND,
       Net2;
      true -> Net
   end;
+
+%%主动关闭, 发送出Fin，对面还没有回复Fin
+process_incoming(st_state,?CLOSING,
+                 #utp_net{fin_sent = true,
+                          got_fin = false,
+                          fin_seq_no = SeqNo} = Net,
+                 #utp_packet{ack_no = AckNo} = Packet,Timing)->
+  if AckNo == SeqNo ->
+      %% 对面数据已经接收完整了，安心关闭
+      Net#utp_net{fin_acked = true};
+     true ->
+      %% 对面还没有完全接收完成，继续发包
+      {Lost,Net0} = ack(Net,Packet,Timing),
+      fast_resend(Net0,AckNo,Lost)
+  end;
+%%被动关闭方，发送出Fin
+process_incoming(st_state,?CLOSING,
+                 #utp_net{fin_sent = true,
+                          got_fin = true,
+                          fin_seq_no = SeqNo} = Net,
+                 #utp_packet{ack_no = SeqNo},_)->
+  {false,Net#utp_net{state = ?CLOSED}};
+process_incoming(st_data,?CLOSING,
+                 #utp_net{fin_sent = FinSent} = Net,
+                 #utp_packet{seq_no = SeqNo,
+                             payload = Payload} = Packet,
+                 Timing)->
+  if FinSent == true -> Net; %% 主动关闭方，不再接收数据了
+     true ->
+      %% 被动关闭方，需要等数据收完全
+      case ai_utp_buffer:in(SeqNo,Payload,Net) of
+        duplicate -> send_ack(Net,true); %% 强制发送ACK
+        {ok,Net0} ->
+          {_,Net1} = ack(Net0,Packet,Timing),
+          %% 此处不应该发送新数据的，对面不会再接收了
+          Net2 = send_ack(Net1,false),
+          {false,Net2};
+        {fin,Net0} ->
+          %% 先发送st_state,来说明收到最后的数据包
+          {_,Net1} = ack(Net0,Packet,Timing),
+          Net2 = send_ack(Net1,false),
+          
+          #utp_net{ack_nr = AckNR,seq_nr = SeqNR,
+                   reply_micro = ReplyMicro,
+                   peer_conn_id = ConnID} = Net2,
+          AckNo = ai_utp_util:bit16(AckNR - 1),
+          FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
+          %% 最后发送Fin包，告诉对方关闭
+          Fin = ai_utp_protocol:make_fin_packet(FinSeqNo,AckNo),
+          Net3 = Net2#utp_net{fin_sent = true,
+                              fin_seq_no = FinSeqNo},
+          MaxWindow = window_size(Net3),
+          send(Net3,
+               Fin#utp_packet{conn_id = ConnID,win_sz = MaxWindow},
+               ReplyMicro),
+          {false,Net3}
+      end
+  end;
+%% 主动关闭方，已经收到了Fin
+process_incoming(st_fin,?CLOSING,
+                 #utp_net{fin_sent = true,
+                          fin_acked = true,
+                          fin_seq_no = SeqNo,
+                          got_fin = false} = Net,
+                 #utp_packet{ack_no = SeqNo},_)->
+  Net0 = send_ack(Net, true),
+  {false,Net0#utp_net{state = ?CLOSED}};
+%% 被动关闭方，收到了Fin包
+process_incoming(st_fin, _,Net,
+                 #utp_packet{seq_no = SeqNo} = Packet,
+                 Timing)->
+  %% 处理ack包
+  {_,Net1} = ack(Net#utp_net{
+                   state = ?CLOSING,
+                   got_fin = true,
+                   fin_seq_no = SeqNo
+                  },Packet,Timing),
+  Net2 = send_ack(Net1,false),
+  #utp_net{ack_nr = AckNR,seq_nr = SeqNR,
+           peer_conn_id = ConnID,
+           reply_micro = ReplyMicro} = Net2,
+  Diff = ai_utp_util:bit16(AckNR - SeqNo),
+  if Diff == 1->
+      %%所有的数据包已经收全了
+      FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
+      %% 最后发送Fin包，告诉对方关闭
+      Fin = ai_utp_protocol:make_fin_packet(FinSeqNo,SeqNo),
+      Net3 = Net2#utp_net{fin_sent = true,
+                          fin_seq_no = FinSeqNo},
+      MaxWindow = window_size(Net3),
+      send(Net3,
+           Fin#utp_packet{conn_id = ConnID,win_sz = MaxWindow},
+           ReplyMicro),
+      {false,Net3};
+     true -> {false,Net2}
+  end;
+
 process_incoming(st_reset,_,Net,_,_) ->
-  Net#utp_net{state = ?CLOSED,error=econnrefused}.
+  Net#utp_net{state = ?CLOSED,error=econnreset}.
 
 connect(#utp_net{max_window = MaxWindow,seq_nr = SeqNR} = Net,ConnID)->
   SeqNR0 =
