@@ -33,7 +33,7 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
        true  -> Delay * 0.75
     end,
   %% 使用Delay是尽量减少重传，如果不使用会出现暴力发包的情况
-  if Delay0 > 15 -> RTT#ai_utp_rtt{delay = 15 }; %% 相当于4.5s了
+  if Delay0 > 10 -> RTT#ai_utp_rtt{delay = 10 }; %% 相当于3s了
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
@@ -53,9 +53,9 @@ update(Estimate,none)->
 %% The default timeout for packets associated with the socket is also
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
-rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
-  RTO = erlang:max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+rto(#ai_utp_rtt { rtt = RTT, var = Var ,delay = Delay}) ->
+  RTO = (RTT + Var * 4) * Delay,
+  erlang:max(RTO, ?DEFAULT_RTT_TIMEOUT).
 
 
 %% ACKnowledge an incoming packet
