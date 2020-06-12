@@ -212,7 +212,7 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
 sack(_,#utp_net{inbuf_size = 0})-> undefined;
 sack(Base,#utp_net{inbuf = InBuf,inbuf_size = RSize}) ->
   build_sack(Base,InBuf,RSize,0,0,#{0 => 0}).
-build_sack(_,_,_,_,0,#{0 := 0}) -> undefined;
+
 build_sack(_,_,0,_,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
@@ -238,5 +238,6 @@ build_sack(Base,InBuf,RSize,Index,Pos,Map)->
     {SeqNo,_} ->
       Bits = maps:get(Pos0,Map0),
       Bits0 = Mask bor Bits,
-      build_sack(Base,InBuf,RSize - 1,Index + 1, Pos0,maps:put(Pos,Bits0,Map0))
+      build_sack(Base,InBuf,RSize - 1,Index + 1,
+                 Pos0,maps:put(Pos0,Bits0,Map0))
   end.

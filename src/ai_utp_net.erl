@@ -176,10 +176,11 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
         ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
     end,
   if Quick == true ->
+      Net0 = send_ack(Net, false),
       if (Lost == 0) andalso
          (CurWindowPackets < ?OUTGOING_BUFFER_MAX_SIZE) ->
-          do_send(Net,Proc,true);
-         true -> {Net,Proc}
+          do_send(Net0,Proc,true);
+         true -> {Net0,Proc}
       end;
      true ->
       case process_incoming(Type,State,
