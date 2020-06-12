@@ -117,7 +117,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
         undefined ->
           if Index == Last -> {false,Net};
              true -> fast_resend(Net,ai_utp_util:bit16(Index + 1),
-                                 Last,ResendCount)
+                                 Last,ResendCount - 1)
           end;
         Wrap ->
           #utp_packet_wrap{packet = Packet,transmissions = Trans,
@@ -706,7 +706,7 @@ expire_resend(#utp_net{reply_micro = ReplyMicro,
   if Less == true ->
       case array:get(Index,OutBuf) of
         undefined ->
-          expire_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount,Now);
+          expire_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount-1,Now);
         Wrap ->
           #utp_packet_wrap{packet = Packet,
                            send_time = SendTime,
