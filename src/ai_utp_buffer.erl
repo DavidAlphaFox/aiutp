@@ -235,7 +235,7 @@ build_sack(Base,InBuf,RSize,Index,Pos,Map)->
     end,
   case array:get(SeqNo,InBuf) of
     undefined -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
-    {SeqNo,_} ->
+    _ ->
       Bits = maps:get(Pos0,Map0),
       Bits0 = Mask bor Bits,
       build_sack(Base,InBuf,RSize - 1,Index + 1,
