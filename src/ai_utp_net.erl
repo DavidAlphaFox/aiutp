@@ -779,13 +779,13 @@ on_tick(?CLOSING,
                  state = State
           } = Net,Proc)->
   Now = ai_utp_util:microsecond(),
-  Diff = Now - LastReceived,
-  if Diff >= ?MAX_CLOSING_WAIT ->
+  Diff = (Now - LastReceived) div 1000,
+  if Diff >= RTO * 2 ->
       {Net#utp_net{state = ?CLOSED}, Proc};
      true ->
       if FinAcked == true -> ok;
          true ->
-          SendDiff = Now - LastSend,
+          SendDiff = (Now - LastSend) div 1000,
           if SendDiff < RTO -> ok;
              true ->
               AckNo = ai_utp_util:bit16(AckNR -1 ),
@@ -809,11 +809,12 @@ on_tick(?CLOSING,
            got_fin = true,
            state = State,
            fin_sent = FinSent,
+           rto = RTO,
            last_recv = LastReceived
           } = Net,Proc)->
   Now = ai_utp_util:microsecond(),
-  Diff = Now - LastReceived,
-  if Diff >= ?MAX_CLOSING_WAIT ->
+  Diff = (Now - LastReceived) div 1000,
+  if Diff >= 2 * RTO ->
       {Net#utp_net{state = ?CLOSED}, Proc};
      true ->
       if FinSent == true ->
