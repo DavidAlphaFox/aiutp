@@ -33,7 +33,7 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
        true  -> Delay * 0.75
     end,
   %% 使用Delay是尽量减少重传，如果不使用会出现暴力发包的情况
-  if Delay0 > 10 -> RTT#ai_utp_rtt{delay = 10 }; %% 相当于3s了
+  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8 }; %% 2.4s
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
