@@ -71,12 +71,12 @@ ack(#utp_net{last_ack = LastAck} =Net,
 
 
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
-                  reply_micro = ReplyMicro,
+                  reply_micro = ReplyMicro,inbuf_size = RSize,
                   peer_conn_id = PeerConnID} = Net,Quick)->
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
   Packet =
-    if Quick == true ->
+    if (Quick == true) orelse (Rsize == 0 ) ->
         ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
        true ->
         Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
