@@ -157,10 +157,11 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   Index = ai_utp_util:bit16(AckNo + 1),
   NeedSend = erlang:min(?OUTGOING_BUFFER_MAX_SIZE,Lost),
-  fast_resend(Net, Index, SeqNR,NeedSend).
+  fast_resend(Net#utp_net{last_lost = Lost}, Index, SeqNR,NeedSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
-process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
+process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
+                          cur_window_packets = CurWindowPackets } = Net,
                  #utp_packet{type = Type,seq_no = SeqNo} = Packet,
                  Timing,Proc) ->
   Quick =
@@ -169,7 +170,12 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
         Wanted = ai_utp_util:bit16(AckNR - 1),
         ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
     end,
-  if Quick == true -> do_send(Net,Proc,true);
+  if Quick == true ->
+      if (Lost == 0) andalso
+         (CurWindowPackets < ?OUTGOING_BUFFER_MAX_SIZE) ->
+          do_send(Net,Proc,true);
+         true -> {Net,Proc}
+      end;
      true ->
       case process_incoming(Type,State,
                               Net#utp_net{last_recv = ai_utp_util:microsecond() },
