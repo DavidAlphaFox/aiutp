@@ -820,7 +820,8 @@ on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
         {ok,SendTimeNow} -> {Net#utp_net{last_send = SendTimeNow,
                                          syn_sent_count = SynSentCount + 1},Proc};
         _ -> {Net,Proc}
-      end
+      end;
+     true -> {Net,Proc}
   end;
 
 on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
