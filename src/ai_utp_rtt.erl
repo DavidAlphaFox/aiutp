@@ -4,7 +4,7 @@
 
 -define(MAX_WINDOW_INCREASE, 3000).
 %% 增大重传
--define(DEFAULT_RTT_TIMEOUT, 300).
+-define(DEFAULT_RTT_TIMEOUT, 500).
 
 -record(ai_utp_rtt, {
                      rtt = 500 :: integer(),
