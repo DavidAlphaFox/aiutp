@@ -117,7 +117,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
         undefined ->
           if Index == Last -> {false,Net};
              true -> fast_resend(Net,ai_utp_util:bit16(Index + 1),
-                                 Last,ResendCount - 1)
+                                 Last,ResendCount)
           end;
         Wrap ->
           #utp_packet_wrap{packet = Packet,transmissions = Trans,
@@ -169,14 +169,14 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
         Wanted = ai_utp_util:bit16(AckNR - 1),
         ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
     end,
-  if Quick == true -> {Net,Proc};
+  if Quick == true -> do_send(Net,Proc,true);
      true ->
       case process_incoming(Type,State,
                               Net#utp_net{last_recv = ai_utp_util:microsecond() },
                               Packet,Timing) of
         {SendNew,Net0} ->
           if SendNew == false -> {Net0,Proc};
-             true -> do_send(Net0, Proc)
+             true -> do_send(Net0, Proc,true)
           end;
         Net0 -> {Net0,Proc}
       end
