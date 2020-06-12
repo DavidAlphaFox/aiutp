@@ -186,8 +186,8 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
       {Lost,_,Packets,OutBuf0} = sack_packet(Last,Base,Base0,Map, OutBuf,[],0,0),
       case array:get(Base0,OutBuf0) of
         undefined ->
-          logger:error("SACK AckNo: ~p Base: ~p, Last:~p Max:~p~n",
-                       [AckNo,Base,Last,Max]),
+          logger:error("SACK AckNo: ~p SeqNR: ~p Base: ~p, Last:~p Max:~p~n",
+                       [AckNo, SeqNR,Base,Last,Max]),
           {Lost,Packets,OutBuf0}; %% 此种情况不应该发生
         Wrap ->
           #utp_packet_wrap{ wanted = Wanted} = Wrap,
