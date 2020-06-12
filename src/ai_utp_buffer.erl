@@ -54,6 +54,8 @@ recv(?CLOSING,Payload,
   Net#utp_net{
     recvbuf = queue:in({Size,Payload},RecvBuf),
     recvbuf_size = RecvBufSize + Size}.
+
+recv_reorder(#utp_net{inbuf_size = 0} = Net)-> {ok,Net};
 recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
                       state = State,
                       ack_nr = SeqNo,inbuf = InBuf,inbuf_size = RSize
