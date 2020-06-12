@@ -72,7 +72,9 @@ decode(Packet,RecvTS) ->
 -spec decode_packet(binary(),integer()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet,RecvTS) ->
-  <<Header:20/binary,CheckSum:32/big-integer,ExtPayload/binary>> = Packet,
+  PayloadSize = erlang:byte_size(Packet) - 24,
+  <<Header:20/binary,ExtPayload:PayloadSize/binary,
+    CheckSum:32/big-integer>> = Packet,
   CRC = erlang:crc32(Header),
   if CRC /= CheckSum -> {error,drop};
      true ->
@@ -144,8 +146,8 @@ encode(#utp_packet {type = Type,
              WSize:32/big-integer,
              SeqNo:16/big-integer, AckNo:16/big-integer>>,
   CheckSum = erlang:crc32(Header),
-  <<Header/binary,CheckSum:32/big-integer,ExtBin/binary,
-    Payload/binary>>.
+  <<Header/binary,ExtBin/binary,
+    Payload/binary,CheckSum:32/big-integer>>.
 
 
 encode_extensions([]) -> {0, <<>>};
