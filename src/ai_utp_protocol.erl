@@ -32,7 +32,7 @@ make_syn_packet(SeqNo) ->
   #utp_packet { type = st_syn,
             seq_no = SeqNo,
             ack_no = 0,
-            extension = ?SYN_EXTS}.
+            extension = []}.
 make_fin_packet(SeqNo,AckNo)->
   #utp_packet{ type = st_fin,
                seq_no = SeqNo,
@@ -78,7 +78,7 @@ decode_packet(Packet,RecvTS) ->
   CRC = erlang:crc32(Header),
   if CRC /= CheckSum -> {error,drop};
      true ->
-      <<1:4/big-integer,Type:4/big-integer,
+      <<Type:4/big-integer,1:4/big-integer,
         Extension:8/big-integer, ConnectionId:16/big-integer,
         TS:32/big-integer,TSDiff:32/big-integer,
         WindowSize:32/big-integer,SeqNo:16/big-integer,
@@ -140,7 +140,7 @@ encode(#utp_packet {type = Type,
                 payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  Header = <<1:4/big-integer,EncTy:4/big-integer,
+  Header = <<EncTy:4/big-integer,1:4/big-integer,
              Extension:8/big-integer, ConnID:16/big-integer,
              TS:32/big-integer,TSDiff:32/big-integer,
              WSize:32/big-integer,
