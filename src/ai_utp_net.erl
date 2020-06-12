@@ -155,13 +155,10 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
   end.
 
 fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
-  %% 快速重发前4个数据包
-  if Lost > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-      Index = ai_utp_util:bit16(AckNo + 1),
-      NeedSend = erlang:min(?OUTGOING_BUFFER_MAX_SIZE,Lost),
-      fast_resend(Net, Index, SeqNR,NeedSend);
-     true  -> {true,Net}
-  end.
+  Index = ai_utp_util:bit16(AckNo + 1),
+  NeedSend = erlang:min(?OUTGOING_BUFFER_MAX_SIZE,Lost),
+  fast_resend(Net, Index, SeqNR,NeedSend).
+
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
 process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
                  #utp_packet{type = Type,seq_no = SeqNo} = Packet,
