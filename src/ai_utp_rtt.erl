@@ -59,10 +59,10 @@ rto(#ai_utp_rtt { rtt = RTT, var = Var ,delay = Delay}) ->
 
 
 %% ACKnowledge an incoming packet
-ack(RTT, TimeSent,TS,TSDiff, TimeAcked) ->
+ack(RTT, TimeSent,_TS,_TSDiff, TimeAcked) ->
   if
     TimeAcked >= TimeSent->
-      Estimate = ai_utp_util:bit32(TimeAcked - TS + TSDiff ) div 1000,
+      Estimate = ai_utp_util:bit32(TimeAcked - TimeSent ) div 1000,
       NewRTT = update(Estimate, RTT),
       NewRTO = rto(NewRTT),
       {ok, NewRTO, NewRTT};
