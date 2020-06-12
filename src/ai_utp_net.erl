@@ -212,7 +212,7 @@ process_incoming(st_data,?ESTABLISHED,Net,
                              ack_no = AckNo
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
-    duplicate -> Net;
+    duplicate -> send_ack(Net, true);
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
       Net2 = send_ack(Net1,false),
@@ -732,7 +732,7 @@ force_state(State,#utp_net{last_send = LastSend,
       if (Diff >= ?MAX_SEND_IDLE_TIME andalso State == ?ESTABLISHED) orelse
          (Diff >= (?MAX_CLOSING_WAIT - RTO) andalso State == ?MAX_CLOSING_WAIT)->
           send_ack(Net,true);
-         (Diff div 1000 > RTO * 1.5) -> send_ack(Net, true);
+         (Diff div 1000 > RTO * 1.5) -> send_ack(Net, false);
          true-> Net
       end;
      true  -> Net
