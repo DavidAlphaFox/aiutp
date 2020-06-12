@@ -158,7 +158,8 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   %% 快速重发前4个数据包
   if Lost > ?DUPLICATE_ACKS_BEFORE_RESEND ->
       Index = ai_utp_util:bit16(AckNo + 1),
-      fast_resend(Net, Index, SeqNR,3);
+      NeedSend = erlang:min(?OUTGOING_BUFFER_MAX_SIZE,Lost),
+      fast_resend(Net, Index, SeqNR,NeedSend);
      true  -> {true,Net}
   end.
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
