@@ -3,7 +3,8 @@
 -export([rto/1,ack/5,lost/2]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
--define(DEFAULT_RTT_TIMEOUT, 500).
+%% 增大重传
+-define(DEFAULT_RTT_TIMEOUT, 300).
 
 -record(ai_utp_rtt, {
                      rtt = 500 :: integer(),
@@ -31,7 +32,8 @@ lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
     if LostCount > 0 -> Delay * 1.5;
        true  -> Delay * 0.75
     end,
-  if Delay0 > 12 -> RTT#ai_utp_rtt{delay = 12};
+  %% 使用Delay是尽量减少重传，如果不使用会出现暴力发包的情况
+  if Delay0 > 15 -> RTT#ai_utp_rtt{delay = 15 }; %% 相当于4.5s了
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
