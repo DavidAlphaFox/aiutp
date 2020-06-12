@@ -173,8 +173,6 @@ handle_call({send,Data},From,
       Reason = ai_utp_net:net_error(Net),
       self() ! timeout,
       {reply,{error,Reason},State};
-    ?CLOSING ->
-      {reply,{error,eshutdown},State};
     _ ->
       Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
       {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),

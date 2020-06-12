@@ -682,7 +682,10 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 %% try to full fill one package
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
   do_send(Net,Proc,false);
-do_send(Net,Proc) -> {Net,Proc}.
+do_send(#utp_net{state = ?CLOSING,fin_sent = true} = Net,Proc)->
+  Proc0 = ai_utp_process:error_all(Proc, {error,eshutdown}),
+  {Net,Proc0};
+do_send(Net,Proc) ->{Net,Proc}.
 
 
 do_send(Net,Proc,Quick)->
