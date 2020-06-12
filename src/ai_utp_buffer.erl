@@ -92,27 +92,9 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
        true -> ack_packet(WindowStart,AckNo,OutBuf,[])
     end,
   {Lost,Packets0,OutBuf1} = sack_packet(AckNo,SeqNR, SAcks, OutBuf0),
-  OutBuf2 = fast_resend(AckNo,SeqNR,OutBuf1),
   {Lost,Packets ++ Packets0,
-   Net#utp_net{outbuf = OutBuf2,
+   Net#utp_net{outbuf = OutBuf1,
                cur_window_packets = CurWindowPackets - AckDistance}}.
-
-fast_resend(AckNo,SeqNR,OutBuf)->
-  SeqNo = ai_utp_util:bit16(AckNo + 1),
-  Diff = ai_utp_util:bit16(SeqNR - SeqNo),
-  if Diff >= 1 ->
-      Wrap = array:get(SeqNo,OutBuf),
-      #utp_packet_wrap{ wanted = Wanted} = Wrap,
-      if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
-          array:set(SeqNo,Wrap#utp_packet_wrap{
-                            need_resend = true },OutBuf);
-         true ->
-          array:set(SeqNo,Wrap#utp_packet_wrap{
-                            wanted = Wanted + 1},OutBuf)
-      end;
-
-     true -> OutBuf
-  end.
 
 
 
@@ -203,10 +185,21 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
      true ->
       {Lost,_,Packets,OutBuf0} = sack_packet(Last,Base,Base0,Map, OutBuf,[],0,0),
       case array:get(Base0,OutBuf0) of
-        undefined -> {Lost,Packets,OutBuf}; %% 此种情况不应该发生
+        undefined ->
+          logger:error("SACK AckNo: ~p Base: ~p, Last:~p Max:~p~n",
+                       [AckNo,Base,Last,Max]),
+          {Lost,Packets,OutBuf0}; %% 此种情况不应该发生
         Wrap ->
-          {Lost,Packets,
-           array:set(Base0,Wrap#utp_packet_wrap{need_resend = true},OutBuf0)}
+          #utp_packet_wrap{ wanted = Wanted} = Wrap,
+          OutBuf1 =
+            if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
+                array:set(SeqNo,Wrap#utp_packet_wrap{
+                                  need_resend = true },OutBuf0);
+               true ->
+                array:set(SeqNo,Wrap#utp_packet_wrap{
+                                  wanted = Wanted + 1},OutBuf0)
+            end,
+          {Lost,Packets,OutBuf1}
       end
   end.
 %% 生成SACK
