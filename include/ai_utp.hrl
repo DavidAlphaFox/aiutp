@@ -28,6 +28,7 @@
 -define(MAX_CLOSING_WAIT,   6000000). %% 6s 2 * MAX RTO
 
 -define(SYN_TIMEOUT, 3000).
+-define(SYN_RECEIVE_TIMEOUT, 1000000).
 -define(SYN_TIMEOUT_THRESHOLD, ?SYN_TIMEOUT*4).
 -define(TIMER_TIMEOUT,100).
 
@@ -125,5 +126,5 @@
                  last_recv = 0:: integer(),
                  last_ack = undefined,
                  rto = 500,
-                 syn_sent_count = 0
+                 syn_sent_count = 1
                 }).

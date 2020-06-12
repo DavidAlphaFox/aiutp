@@ -811,7 +811,7 @@ on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
                               last_send = LastSend} = Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now -LastSend,
-  if Diff >= ?SYN_TIMEOUT ->
+  if Diff >= (?SYN_RECEIVE_TIMEOUT * SynSentCount) ->
       AckNo = ai_utp_util:bit16(AckNR - 1),
       Packet = ai_utp_protocol:make_ack_packet(ai_utp_util:bit16(SeqNR -1),
                                                AckNo),
