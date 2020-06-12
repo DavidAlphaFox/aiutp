@@ -23,9 +23,6 @@
          controlling_process/2]).
 
 -define(SERVER, ?MODULE).
--define(SYN_TIMEOUT, 3000).
--define(SYN_TIMEOUT_THRESHOLD, ?SYN_TIMEOUT*4).
--define(TIMER_TIMEOUT,100).
 
 -record(state, {
                 parent :: pid(),

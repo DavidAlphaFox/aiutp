@@ -659,7 +659,10 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 
 
 %% try to full fill one package
-do_send(Net,Proc)-> do_send(Net,Proc,false).
+do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
+  do_send(Net,Proc,false);
+do_send(Net,Proc) -> {Net,Proc}.
+
 
 do_send(Net,Proc,Quick)->
   MaxBufSize = sndbuf_remain(Net),
@@ -795,6 +798,31 @@ on_tick(?CLOSING,
       end
   end;
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
+on_tick(?SYN_RECEIVE,
+        #utp_net{syn_sent_count = SynSentCount} = Net
+       ,Proc) when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  {Net#utp_net{state = ?CLOSED, error = econnaborted},Proc};
+on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
+                              seq_nr = SeqNR,
+                              ack_nr = AckNR,
+                              max_window = MaxWindow,
+                              peer_conn_id = PeerConnID,
+                              reply_micro = ReplyMicro,
+                              last_send = LastSend} = Net,Proc)->
+  Now = ai_utp_util:microsecond(),
+  Diff = Now -LastSend,
+  if Diff >= ?SYN_TIMEOUT ->
+      AckNo = ai_utp_util:bit16(AckNR - 1),
+      Packet = ai_utp_protocol:make_ack_packet(ai_utp_util:bit16(SeqNR -1),
+                                               AckNo),
+      Packet0 = Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
+      case send(Net,Packet0,ReplyMicro) of
+        {ok,SendTimeNow} -> {Net#utp_net{last_send = SendTimeNow,
+                                         syn_sent_count = SynSentCount + 1},Proc};
+        _ -> {Net,Proc}
+      end
+  end;
+
 on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,

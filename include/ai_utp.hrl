@@ -26,6 +26,11 @@
 -define(MAX_RECV_IDLE_TIME,30000000).
 -define(MAX_SEND_IDLE_TIME, 6000000).
 -define(MAX_CLOSING_WAIT,   6000000). %% 6s 2 * MAX RTO
+
+-define(SYN_TIMEOUT, 3000).
+-define(SYN_TIMEOUT_THRESHOLD, ?SYN_TIMEOUT*4).
+-define(TIMER_TIMEOUT,100).
+
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
 %% ms窗口劣化
@@ -119,5 +124,6 @@
                  last_send = 0 :: integer(),
                  last_recv = 0:: integer(),
                  last_ack = undefined,
-                 rto = 500
+                 rto = 500,
+                 syn_sent_count = 0
                 }).
