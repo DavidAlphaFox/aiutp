@@ -723,12 +723,12 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
-force_state(State,#utp_net{last_recv = LastSend,
+force_state(State,#utp_net{last_send = LastSend,
                           rto = RTO } = Net)->
   Now = ai_utp_util:microsecond(),
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
       Diff = Now - LastSend,
-      if (Diff > RTO * 2) orelse (Diff >= ?MAX_SEND_IDLE_TIME) ->
+      if (Diff div 1000 > RTO * 2) orelse (Diff >= ?MAX_SEND_IDLE_TIME) ->
           send_ack(Net,true);
          true-> Net
       end;
