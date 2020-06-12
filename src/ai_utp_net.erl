@@ -728,7 +728,9 @@ force_state(State,#utp_net{last_send = LastSend,
   Now = ai_utp_util:microsecond(),
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
       Diff = Now - LastSend,
-      if (Diff div 1000 > RTO * 1.5) orelse (Diff >= ?MAX_SEND_IDLE_TIME) ->
+      if (Diff div 1000 > RTO * 1.5) orelse
+         (Diff >= ?MAX_SEND_IDLE_TIME andalso State == ?ESTABLISHED) orelse
+         (Diff >= (?MAX_CLOSING_WAIT - RTO) andalso State == ?MAX_CLOSING_WAIT)->
           send_ack(Net,true);
          true-> Net
       end;
@@ -750,7 +752,7 @@ on_tick(?CLOSING,
           } = Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
-  if Diff >= ?MAX_RECV_IDLE_TIME ->
+  if Diff >= ?MAX_CLOSING_WAIT ->
       {Net#utp_net{state = ?CLOSED}, Proc};
      true ->
       if FinAcked == true -> ok;
@@ -783,12 +785,14 @@ on_tick(?CLOSING,
           } = Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
-  if Diff >= ?MAX_RECV_IDLE_TIME ->
+  if Diff >= ?MAX_CLOSING_WAIT ->
       {Net#utp_net{state = ?CLOSED}, Proc};
-     FinSent == false ->
-      Net1 = force_state(State, Net),
-      {Net1,Proc};
-     true ->{Net,Proc}
+     true ->
+      if FinSent == true ->
+          Net1 = force_state(State, Net),
+          {Net1,Proc};
+         true  -> {Net,Proc}
+      end
   end;
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
 on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
