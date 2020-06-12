@@ -141,7 +141,7 @@ handle_call({connect,Control,Remote},From,
                  connector = From,
                  net = Net0,
                  conn_id = ConnID,
-                 tick_timer = start_tick_timer(?SYN_TIMEOUT, undefined)}};
+                 tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)}};
     _ -> {reply,{error,eagain},0}
   end;
 handle_call({accept,Control, Remote, Packet,Timing},From,
@@ -415,43 +415,35 @@ cancle_tick_timer({set,Ref}) ->
   erlang:cancel_timer(Ref),
   undefined.
 
-on_tick(?SYN_SEND,N,
-          #state{ conn_id = ConnID,
-                  net = Net,
-                  connector = Connector,
-                  controller_monitor = CMonitor
-            } = State)->
-  if N > ?SYN_TIMEOUT_THRESHOLD ->
-      erlang:demonitor(CMonitor,[flush]),
-      gen_server:reply(Connector, {error,etimeout}),
-      {noreply,State#state{
-                 controller_monitor = undefined,
-                 controller = undefined,
-                 connector = undefined,
-                 tick_timer = undefined
-                },0};
-     true ->
-      Net0= ai_utp_net:connect(Net,ConnID),
-      {noreply,State#state{
-                 net = Net0,
-                 tick_timer = start_tick_timer(N *2, undefined)
-                }}
-  end;
-on_tick(NetState,_,#state{net = Net,process = Proc,closer = Closer} = State) ->
+on_tick(NetState,_,#state{net = Net,
+                          process = Proc,
+                          closer = Closer,
+                          connector = Connector,
+                          controller_monitor = CMonitor
+                         } = State) ->
   
   {Net0,Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
   NetState0 = ai_utp_net:state(Net0),
+  State0 =
+    if (NetState0 == ?CLOSED) and (Closer /= undefined)->
+        self() ! timeout,
+        gen_server:reply(Closer,ok),
+        State;
+       (NetState0 == ?CLOSED) and (Connector /= undefined)->
+        erlang:demonitor(CMonitor,[flush]),
+        self() ! timeout,
+        gen_server:reply(Connector, {error,etimeout}),
+        State#state{controller_monitor = undefined,
+                    controller = undefined,
+                    connector = undefined};
+        true -> State
+    end,
   Timer =
     if NetState0 == ?CLOSED -> undefined;
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
-  if (NetState0 == ?CLOSED) and (Closer /= undefined)->
-      self() ! timeout,
-      gen_server:reply(Closer,ok);
-     true -> ok
-  end,
   {noreply,
-   active_read(State#state{tick_timer = Timer,net = Net0,process = Proc0})
+   active_read(State0#state{tick_timer = Timer,net = Net0,process = Proc0})
   }.
 
 active_read(#state{parent = Parent,

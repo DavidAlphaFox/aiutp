@@ -823,6 +823,31 @@ on_tick(?CLOSING,
       end
   end;
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
+on_tick(?SYN_SEND,
+        #utp_net{syn_sent_count = SynSentCount} = Net
+       ,Proc) when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  {Net#utp_net{state = ?CLOSED, error = econnaborted},Proc};
+on_tick(?SYN_SEND,#utp_net{max_window = MaxWindow,
+                           syn_sent_count = SynSentCount,
+                           seq_nr = SeqNR,
+                           last_send = LastSend,
+                           rto = RTO,
+                           conn_id = ConnID} = Net,Proc)->
+  Now =  ai_utp_util:microsecond(),
+  Diff = (Now - LastSend) div 1000,
+  if Diff >= (RTO * SynSentCount) ->
+      SeqNo = ai_utp_util:bit16(SeqNR - 1),
+      Packet = ai_utp_protocol:make_syn_packet(SeqNo),
+      Net0 = Net#utp_net{
+               last_send = Now,
+               last_recv = Now,
+               last_decay_win = Now /1000,
+               syn_sent_count = SynSentCount + 1},
+      send(Net0,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0),
+      {Net0,Proc};
+     true -> {Net,Proc}
+  end;
+
 on_tick(?SYN_RECEIVE,
         #utp_net{syn_sent_count = SynSentCount} = Net
        ,Proc) when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
@@ -833,10 +858,11 @@ on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
                               max_window = MaxWindow,
                               peer_conn_id = PeerConnID,
                               reply_micro = ReplyMicro,
+                              rto = RTO,
                               last_send = LastSend} = Net,Proc)->
   Now = ai_utp_util:microsecond(),
-  Diff = Now -LastSend,
-  if Diff >= (?SYN_RECEIVE_TIMEOUT * SynSentCount) ->
+  Diff = (Now -LastSend) div 1000,
+  if Diff >= (RTO * SynSentCount) ->
       AckNo = ai_utp_util:bit16(AckNR - 1),
       Packet = ai_utp_protocol:make_ack_packet(ai_utp_util:bit16(SeqNR -1),
                                                AckNo),
