@@ -677,10 +677,14 @@ do_send(Net,Proc,Quick)->
   MaxBufSize = sndbuf_remain(Net),
   MaxSendBytes = max_send_bytes(Net),
   {Net0,Proc0} = fill_buffer(Net,MaxBufSize + MaxSendBytes,Proc),
-  if (Quick == true) orelse
-     (Net0#utp_net.sndbuf_size >= ?PACKET_SIZE)->
-      Net1 = fill_tx_queue(Net0,MaxSendBytes),
-      {Net1,Proc0};
+  #utp_net{sndbuf_size = SndBufSize } = Net0,
+  if SndBufSize > 0 ->
+      if (Quick == true) orelse
+         (Net0#utp_net.sndbuf_size >= ?MIN_PACKET_SIZE)->
+          Net1 = fill_tx_queue(Net0,MaxSendBytes),
+          {Net1,Proc0};
+         true -> {Net0,Proc0}
+      end;
      true -> {Net0,Proc0}
   end.
 
