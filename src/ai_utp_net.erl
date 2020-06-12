@@ -76,7 +76,7 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
   Packet =
-    if (Quick == true) orelse (Rsize == 0 ) ->
+    if (Quick == true) orelse (RSize == 0 ) ->
         ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
        true ->
         Bits = ai_utp_buffer:sack(ai_utp_util:bit16(AckNR + 1),Net),
