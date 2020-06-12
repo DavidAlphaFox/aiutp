@@ -660,7 +660,7 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 
 %% try to full fill one package
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
-  do_send(Net,Proc,false);
+  do_send(Net,Proc,true);
 do_send(Net,Proc) -> {Net,Proc}.
 
 
