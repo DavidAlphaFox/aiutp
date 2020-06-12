@@ -154,9 +154,14 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
       end
   end.
 
-fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
+fast_resend(#utp_net{seq_nr = SeqNR,cur_window_packets = CurWindowPackets
+                    } = Net,AckNo,Lost)->
   Index = ai_utp_util:bit16(AckNo + 1),
-  NeedSend = erlang:min(?OUTGOING_BUFFER_MAX_SIZE,Lost),
+  MaxSend = if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
+                ?OUTGOING_BUFFER_MAX_SIZE - CurWindowPackets;
+               true -> 1
+            end,
+  NeedSend = erlang:min(MaxSend,Lost),
   fast_resend(Net#utp_net{last_lost = Lost}, Index, SeqNR,NeedSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
