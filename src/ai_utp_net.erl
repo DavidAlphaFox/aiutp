@@ -158,9 +158,7 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR } = Net,
         Wanted = ai_utp_util:bit16(AckNR - 1),
         ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
     end,
-  if Quick == true ->
-      Net0 = send_ack(Net,true),
-      {Net0,Proc};
+  if Quick == true -> {Net,Proc};
      true ->
       case process_incoming(Type,State,
                               Net#utp_net{last_recv = ai_utp_util:microsecond() },
@@ -214,7 +212,7 @@ process_incoming(st_data,?ESTABLISHED,Net,
                              ack_no = AckNo
                             }=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
-    duplicate -> send_ack(Net,true); %% 强制发送ACK
+    duplicate -> Net;
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
       Net2 = send_ack(Net1,false),
@@ -731,10 +729,10 @@ force_state(State,#utp_net{last_send = LastSend,
   Now = ai_utp_util:microsecond(),
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
       Diff = Now - LastSend,
-      if (Diff div 1000 > RTO * 1.5) orelse
-         (Diff >= ?MAX_SEND_IDLE_TIME andalso State == ?ESTABLISHED) orelse
+      if (Diff >= ?MAX_SEND_IDLE_TIME andalso State == ?ESTABLISHED) orelse
          (Diff >= (?MAX_CLOSING_WAIT - RTO) andalso State == ?MAX_CLOSING_WAIT)->
           send_ack(Net,true);
+         (Diff div 1000 > RTO * 1.5) -> send_ack(Net, true);
          true-> Net
       end;
      true  -> Net
