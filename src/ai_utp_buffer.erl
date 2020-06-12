@@ -139,37 +139,30 @@ need_resend(Index,Acked,Wrap,OutBuf)->
      true -> OutBuf
   end.
 
-sack_packet(Last,_,Last,_,OutBuf,Packets,Acked,Lost)->
-  {Lost,Acked,lists:reverse(Packets),OutBuf};
-sack_packet(Index,Base, Last,Map, OutBuf, Packets,Acked,Lost)->
+sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
+  when Index >=0 ->
+  SeqNo = ai_utp_util:bit16(Base + Index),
   case array:get(Index,OutBuf) of
-    undefined ->
-      %% 之前的包被Ack了
-      sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                  Map,OutBuf, Packets,Acked + 1,Lost);
-    Packet ->
-      BitIndex = ai_utp_util:bit16(Index - Base),
-      Pos = BitIndex bsr 3,
+    undefined -> sack_packet(Base,Map,Index - 1, Packets,OutBuf,Acked,Lost);
+    Wrap ->
+      Pos = Index bsr 3,
       case maps:get(Pos,Map) of
         0 ->
-          OutBuf0 = need_resend(Index,Acked,Packet,OutBuf),
-          sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                      Map,OutBuf0, Packets,Acked,Lost + 1);
+          OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
+          sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
         Bit ->
           Mask = 1 bsl (Index band 7),
           Set = Bit band Mask,
           if Set == 0 ->
-              OutBuf0 = need_resend(Index,Acked,Packet,OutBuf),
-              sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                          Map,OutBuf0, Packets,Acked,Lost + 1);
+              OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
+              sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
              true ->
-              sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                          Map,array:set(Index,undefined,OutBuf),
-                          [Packet|Packets],Acked + 1,Lost)
+              sack_packet(Base,Map,Index-1,[Wrap|Packets],OutBuf,Acked + 1,Lost)
           end
       end
-  end.
-
+  end;
+sack_packet(_,_,_,Packets,OutBuf,Acked,Lost) ->
+  {Lost,Acked,lists:reverse(Packets),OutBuf}.
 
 %% AckNo+2 =< SACK < SeqNR - 1
 sack_packet(_, _, undefined, OutBuf)-> {0,[],OutBuf};
@@ -178,12 +171,12 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
   Map = sack_map(Bits,0,#{}),
   Base0 = ai_utp_util:bit16(AckNo + 1),
   Base = ai_utp_util:bit16(AckNo + 2),
-  Last = ai_utp_util:bit16(Base + Max - 1),
   SeqNo = ai_utp_util:bit16(SeqNR - 1),
+  Last = ai_utp_util:bit16(Base + Max -1),
   Less = ai_utp_util:wrapping_compare_less(Last,SeqNo,?ACK_NO_MASK),
   if Less /= true -> {0,[],OutBuf};
      true ->
-      {Lost,_,Packets,OutBuf0} = sack_packet(Last,Base,Base0,Map, OutBuf,[],0,0),
+      {Lost,_,Packets,OutBuf0} = sack_packet(Base,Map,Max-1,[],OutBuf,0,0),
       case array:get(Base0,OutBuf0) of
         undefined ->
           logger:error("SACK AckNo: ~p SeqNR: ~p Base: ~p, Last:~p Max:~p~n",
