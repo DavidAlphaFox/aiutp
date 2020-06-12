@@ -723,9 +723,15 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
-force_state(State,Net)->
+force_state(State,#utp_net{last_recv = LastSend,
+                          rto = RTO } = Net)->
+  Now = ai_utp_util:microsecond(),
   if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
-      send_ack(Net,true);
+      Diff = Now - LastSend,
+      if (Diff > RTO * 2) orelse (Diff >= ?MAX_SEND_IDLE_TIME) ->
+          send_ack(Net,true);
+         true-> Net
+      end;
      true  -> Net
   end.
 %% 主动关闭的一方
