@@ -92,7 +92,20 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
     true -> Net
   end.
 
-fast_resend(Net,_, _,0)->{false,Net};
+fast_resend(#utp_net{
+               outbuf = OutBuf
+              } = Net,Index, Last,0)->
+  Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
+  case array:get(Index,OutBuf) of
+    undefined ->
+      if Less == true -> {false,Net};
+         true -> {true,Net}
+      end;
+    #utp_packet_wrap{need_resend = Resend} ->
+      if Resend == true -> {false,Net};
+         true -> {true,Net}
+      end
+  end;
 fast_resend(#utp_net{reply_micro = ReplyMicro,
                      outbuf = OutBuf,
                      cur_window_packets = CurWindowPackets,
@@ -145,7 +158,7 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   %% 快速重发前4个数据包
   if Lost > ?DUPLICATE_ACKS_BEFORE_RESEND ->
       Index = ai_utp_util:bit16(AckNo + 1),
-      fast_resend(Net, Index, SeqNR,4);
+      fast_resend(Net, Index, SeqNR,3);
      true  -> {true,Net}
   end.
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
@@ -658,7 +671,7 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 
 %% try to full fill one package
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
-  do_send(Net,Proc,true);
+  do_send(Net,Proc,false);
 do_send(Net,Proc) -> {Net,Proc}.
 
 
