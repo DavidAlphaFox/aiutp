@@ -46,8 +46,8 @@ recv(?ESTABLISHED,Payload,
     recvbuf = queue:in({Size,Payload},RecvBuf),
     recvbuf_size = RecvBufSize + Size};
 
-recv(?CLOSING,<<>>,Net) -> Net;
-recv(?CLOSING,Payload,
+recv(?CLOSE_WAIT,<<>>,Net) -> Net;
+recv(?CLOSE_WAIT,Payload,
      #utp_net{recvbuf = RecvBuf,
               recvbuf_size = RecvBufSize} = Net) ->
   Size = erlang:byte_size(Payload),

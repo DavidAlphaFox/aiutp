@@ -300,28 +300,29 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
                    controller_monitor = CMonitor,
                    connector = Connector
                   } = State)->
-  if CMonitor == undefined -> State;
-     true -> erlang:demonitor(CMonitor,[flush])
-  end,
   State0 =
     if Connector == undefined -> State;
        true ->
         gen_server:reply(Connector, {error,eagain}),
-        State#state{connector = undefined,controller = undefined}
+        if CMonitor == undefined -> State;
+           true -> erlang:demonitor(CMonitor,[flush])
+        end,
+        State#state{connector = undefined,controller = undefined,
+                    controller_monitor = undefined}
     end,
-  {noreply,State0#state{parent_monitor = undefined,
-                        controller_monitor = undefined},0};
+  handle_info(timeout,State0#state{parent = undefined,
+                                  parent_monitor = undefined});
 %% 控制进程崩溃了，那么快速失败吧
 handle_info({'DOWN', MRef, process, Control, _Reason},
             #state{controller = Control,
                    controller_monitor = MRef,
-                   net = Net
+                   net = Net,process = Proc
                   } = State)->
   case ai_utp_net:state(Net) of
     ?CLOSED -> ok;
     _ ->
       %%其它状态
-      ai_utp_net:close(Net)
+      ai_utp_net:close(Net,Proc)
   end,
   {noreply,State#state{controller = undefined,
                        process = ai_utp_process:new(),
