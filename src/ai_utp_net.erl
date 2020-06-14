@@ -606,7 +606,7 @@ on_tick(?SYN_SEND,#utp_net{rto = RTO,
   Diff = (Now - LastSend) div 1000,
   if Diff >= (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
       {ai_utp_net_util:change_state(Net, ?CLOSED, etimeout),Proc};
-     true -> Net
+     true -> {Net,Proc}
   end;
 
 on_tick(?SYN_SEND,#utp_net{syn_sent_count = SynSentCount,
