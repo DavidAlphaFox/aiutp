@@ -164,11 +164,11 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
           st_reset -> st_reset(State,Net0,Packet,Timing)
         end,
       case Result of
-        {SendNew,Net0} ->
-          if SendNew == false -> {Net0,Proc};
-             true -> do_send(Net0, Proc,true)
+        {SendNew,Net1} ->
+          if SendNew == false -> {Net1,Proc};
+             true -> do_send(Net1, Proc,true)
           end;
-        Net0 -> {Net0,Proc}
+        Net1 -> {Net1,Proc}
       end
   end.
 
