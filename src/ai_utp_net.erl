@@ -217,22 +217,18 @@ st_state(?CLOSING,Net,#utp_packet{ack_no = AckNo} = Packet,Timing) ->
   {Lost,Net0} = ack(Net,Packet,Timing),
   fast_resend(Net0,AckNo,Lost);
 st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
-        #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,Timing)->
+        #utp_packet{ack_no = AckNo,seq_no = SeqNo},_)->
   Diff = ai_utp_util:bit16(SeqNR - AckNo),
   if Diff == 1 ->
-      Net1 = ai_utp_net_util:change_state(
-               Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
-               ?ESTABLISHED),
-      {_,Net2} = ack(Net1,Packet,Timing),
-      Net2;
+      ai_utp_net_util:change_state(
+        Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
+        ?ESTABLISHED);
      true -> Net
   end;
 st_state(?SYN_RECEIVE,#utp_net{ack_nr = AckNR} = Net,
-         #utp_packet{seq_no = AckNo} = Packet,Timing)->
+         #utp_packet{seq_no = AckNo},_)->
   Diff = ai_utp_util:bit16(AckNR - AckNo),
-  if Diff == 1 ->
-      Net0 = ai_utp_net_util:change_state(Net,?ESTABLISHED),
-      st_state(?ESTABLISHED,Net0,Packet,Timing);
+  if Diff == 1 -> ai_utp_net_util:change_state(Net,?ESTABLISHED);
      true -> Net
   end;
 st_state(?CLOSE_WAIT,Net,_,_) -> Net.
