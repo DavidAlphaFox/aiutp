@@ -423,27 +423,14 @@ close(#utp_net{sndbuf = SndBuf,
               }.
 
 
+connect(Net,ConnID)->
+  send_syn(change_state(
+             Net#utp_net{
+               conn_id = ConnID,
+               peer_conn_id = ai_utp_util:bit16(ConnID + 1),
+               seq_nr = ai_utp_util:bit16_random()
+              },?SYN_SEND)).
 
-connect(#utp_net{max_window = MaxWindow,seq_nr = SeqNR} = Net,ConnID)->
-  SeqNR0 =
-    case SeqNR of
-      undefined -> ai_utp_util:bit16_random();
-      _ -> SeqNR
-    end,
-  SeqNo = ai_utp_util:bit16(SeqNR0 - 1),
-  Packet = ai_utp_protocol:make_syn_packet(SeqNo),
-  Now =  ai_utp_util:microsecond(),
-  Net0 = Net#utp_net{
-           last_send = Now,
-           last_recv = Now,
-           conn_id = ConnID,
-           peer_conn_id = ai_utp_util:bit16(ConnID + 1),
-           seq_nr = SeqNR0,
-           last_seq_nr = SeqNR0,
-           last_decay_win = Now /1000,
-           state = ?SYN_SEND},
-  send(Net0,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0),
-  Net0.
 
 accept(#utp_net{max_window = MaxWindow} = Net,
        #utp_packet{
@@ -829,35 +816,40 @@ on_tick(?CLOSING,
       end
   end;
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
-on_tick(?SYN_SEND,
-        #utp_net{syn_sent_count = SynSentCount} = Net
-       ,Proc) when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-  {Net#utp_net{state = ?CLOSED, error = econnaborted},Proc};
-on_tick(?SYN_SEND,#utp_net{max_window = MaxWindow,
-                           syn_sent_count = SynSentCount,
-                           seq_nr = SeqNR,
+on_tick(?SYN_SEND,#utp_net{rto = RTO,
                            last_send = LastSend,
-                           rto = RTO,
-                           conn_id = ConnID} = Net,Proc)->
+                           syn_sent_count = SynSentCount
+                          } = Net,Proc)
+  when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  Now = ai_utp_util:microsecond(),
+  Diff = (Now - LastSend) div 1000,
+  if Diff >= (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
+      {change_state(Net, ?CLOSED, etimeout),Proc};
+     true -> Net
+  end;
+
+on_tick(?SYN_SEND,#utp_net{syn_sent_count = SynSentCount,
+                           last_send = LastSend,
+                           rto = RTO} = Net,Proc)->
   Now =  ai_utp_util:microsecond(),
   Diff = (Now - LastSend) div 1000,
-  if Diff >= (RTO * SynSentCount) ->
-      SeqNo = ai_utp_util:bit16(SeqNR - 1),
-      Packet = ai_utp_protocol:make_syn_packet(SeqNo),
-      Net0 = Net#utp_net{
-               last_send = Now,
-               last_recv = Now,
-               last_decay_win = Now /1000,
-               syn_sent_count = SynSentCount + 1},
-      send(Net0,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0),
-      {Net0,Proc};
+  if Diff >(RTO * SynSentCount) ->{send_syn(Net),Proc};
      true -> {Net,Proc}
   end;
 
-on_tick(?SYN_RECEIVE,
-        #utp_net{syn_sent_count = SynSentCount} = Net
-       ,Proc) when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-  {Net#utp_net{state = ?CLOSED, error = econnaborted},Proc};
+
+on_tick(?SYN_RECEIVE,#utp_net{rto = RTO,
+                           last_send = LastSend,
+                           syn_sent_count = SynSentCount
+                          } = Net,Proc)
+  when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  Now = ai_utp_util:microsecond(),
+  Diff = (Now - LastSend) div 1000,
+  if Diff > (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
+      {change_state(Net, ?CLOSED, etimeout),Proc};
+     true -> Net
+  end;
+
 on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
                               seq_nr = SeqNR,
                               ack_nr = AckNR,
@@ -902,3 +894,36 @@ net_error(#utp_net{error = Error})-> Error.
 
 send(#utp_net{socket = Socket,remote = Remote},Packet,TSDiff)->
   ai_utp_util:send(Socket, Remote, Packet, TSDiff).
+
+
+send_syn(#utp_net{max_window = MaxWindow,seq_nr = SeqNR,
+                  conn_id = ConnID,syn_sent_count = SynSentCount} = Net) ->
+  SeqNo = ai_utp_util:bit16(SeqNR - 1),
+  Packet = ai_utp_protocol:make_syn_packet(SeqNo),
+  case send(Net,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0) of
+    {ok,SendTimeNow} ->
+      Net#utp_net{
+        last_send = SendTimeNow,
+        last_recv = SendTimeNow,
+        last_decay_win = SendTimeNow /1000,
+        syn_sent_count = SynSentCount + 1};
+    _ ->
+      Now = ai_utp_util:microsecond(),
+      Net#utp_net{
+        last_send = Now,
+        last_recv = Now,
+        last_decay_win = Now /1000,
+        syn_sent_count = SynSentCount + 1}
+  end.
+change_state(Net,State,Error)->
+  Net#utp_net{
+    state = State,
+    error = Error,
+    last_state_changed = ai_utp_util:microsecond()
+   }.
+  
+change_state(Net,State)->
+  Net#utp_net{
+    state = State,
+    last_state_changed = ai_utp_util:microsecond()
+   }.
