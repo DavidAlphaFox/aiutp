@@ -26,7 +26,8 @@
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
 -define(MAX_SEND_IDLE_TIME, 6000000).
--define(MAX_CLOSING_WAIT,   6000000). %% 6s 2 * MAX RTO
+-define(MAX_CLOSE_WAIT,     5000000). %% 5s 2 * MAX RTO
+-define(ACK_INTERVAL,        100000).
 
 -define(TIMER_TIMEOUT,100).
 
@@ -117,7 +118,6 @@
                  last_decay_win :: integer(),
                  fin_sent = false,
                  fin_seq_no = -1,
-                 fin_acked = false,
                  got_fin = false,
                  eof_seq_no = -1,
                  conn_id,
