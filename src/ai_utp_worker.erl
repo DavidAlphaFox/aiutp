@@ -298,10 +298,12 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
             #state{parent = Parent,
                    parent_monitor = MRef,
                    controller_monitor = CMonitor,
-                   connector = Connector
+                   connector = Connector,
+                   net = Net
                   } = State)->
   State0 =
-    if Connector == undefined -> State;
+    if Connector == undefined ->
+        State#state{net = ai_utp_net:close(Net)};
        true ->
         gen_server:reply(Connector, {error,eagain}),
         if CMonitor == undefined -> State;
