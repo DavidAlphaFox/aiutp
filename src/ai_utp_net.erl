@@ -164,11 +164,11 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
           st_reset -> st_reset(State,Net0,Packet,Timing)
         end,
       case Result of
-        {SendNew,Net0} ->
-          if SendNew == false -> {Net0,Proc};
-             true -> do_send(Net0, Proc,true)
+        {SendNew,Net1} ->
+          if SendNew == false -> {Net1,Proc};
+             true -> do_send(Net1, Proc,true)
           end;
-        Net0 -> {Net0,Proc}
+        Net1 -> {Net1,Proc}
       end
   end.
 
@@ -208,22 +208,32 @@ st_data(_,Net,_,_) -> Net.
 
 
 %% 处理链接
-st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
-        #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,Timing)->
-  Diff = ai_utp_util:bit16(SeqNR - AckNo),
-  if Diff == 1 ->
-      Net1 = ai_utp_net_util:change_state(
-               Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
-               ?ESTABLISHED),
-      {_,Net2} = ack(Net1,Packet,Timing),
-      Net2;
-     true -> Net
-  end;
 %% 数据收到响应
 st_state(?ESTABLISHED,Net,
          #utp_packet{ack_no = AckNo} = Packet,Timing) ->
   {Lost,Net0} = ack(Net,Packet,Timing),
-  fast_resend(Net0,AckNo,Lost).
+  fast_resend(Net0,AckNo,Lost);
+st_state(?CLOSING,Net,#utp_packet{ack_no = AckNo} = Packet,Timing) ->
+  {Lost,Net0} = ack(Net,Packet,Timing),
+  fast_resend(Net0,AckNo,Lost);
+st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
+        #utp_packet{ack_no = AckNo,seq_no = SeqNo},_)->
+  Diff = ai_utp_util:bit16(SeqNR - AckNo),
+  if Diff == 1 ->
+      Net0 = ai_utp_net_util:change_state(
+               Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
+               ?ESTABLISHED),
+      ai_utp_net_util:send_ack(Net0, true);
+     true -> Net
+  end;
+st_state(?SYN_RECEIVE,#utp_net{ack_nr = AckNR} = Net,
+         #utp_packet{seq_no = AckNo},_)->
+  Diff = ai_utp_util:bit16(AckNR - AckNo),
+  if Diff == 1 -> ai_utp_net_util:change_state(Net,?ESTABLISHED);
+     true -> Net
+  end;
+st_state(?CLOSE_WAIT,Net,_,_) -> Net.
+
 
 %% 主动关闭方是CLOSING
 %% 被动关闭方是CLOSE_WAIT
@@ -271,11 +281,13 @@ close(#utp_net{sndbuf = SndBuf,
   end.
   
 connect(Net,ConnID)->
+  SeqNR = ai_utp_util:bit16_random(),
   Net0 =
     ai_utp_net_util:change_state(Net#utp_net{
                                    conn_id = ConnID,
                                    peer_conn_id = ai_utp_util:bit16(ConnID + 1),
-                                   seq_nr = ai_utp_util:bit16_random()
+                                   seq_nr = SeqNR,
+                                   last_seq_nr = SeqNR
                                   },?SYN_SEND),
   ai_utp_net_util:send_syn(Net0).
 
@@ -295,7 +307,7 @@ accept(Net,#utp_packet{
                                      max_peer_window = PeerWinSize,
                                      conn_id = ConnID,
                                      peer_conn_id = PeerConnID,
-                                     ack_nr = ai_utp_net_util:bit16(AckNo + 1),
+                                     ack_nr = ai_utp_util:bit16(AckNo + 1),
                                      seq_nr = SeqNR,
                                      last_seq_nr = SeqNR,
                                      reply_micro = ReplyMicro},?SYN_RECEIVE)),
@@ -606,7 +618,7 @@ on_tick(?SYN_SEND,#utp_net{rto = RTO,
   Diff = (Now - LastSend) div 1000,
   if Diff >= (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
       {ai_utp_net_util:change_state(Net, ?CLOSED, etimeout),Proc};
-     true -> Net
+     true -> {Net,Proc}
   end;
 
 on_tick(?SYN_SEND,#utp_net{syn_sent_count = SynSentCount,
@@ -629,7 +641,7 @@ on_tick(?SYN_RECEIVE,#utp_net{rto = RTO,
   Diff = (Now - LastSend) div 1000,
   if Diff > (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
       {ai_utp_net_util:change_state(Net, ?CLOSED, etimeout),Proc};
-     true -> Net
+     true -> {Net,Proc}
   end;
 
 on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,

@@ -54,7 +54,7 @@ send_syn(#utp_net{max_window = MaxWindow,seq_nr = SeqNR,
 send_syn_state(#utp_net{seq_nr = SeqNR,
                         ack_nr = AckNR,
                         max_window = MaxWindow,
-                        conn_id = PeerConnID,
+                        peer_conn_id = PeerConnID,
                         syn_sent_count = SynSentCount,
                         reply_micro = ReplyMicro} = Net)->
   SeqNo = ai_utp_util:bit16(SeqNR - 1),
