@@ -1,4 +1,4 @@
--module(ai_utp_buffer).
+-module(ai_utp_rx).
 -include("ai_utp.hrl").
 
 -export([in/3,ack_packet/3,sack/2]).
@@ -97,7 +97,7 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
                cur_window_packets = CurWindowPackets - AckDistance}}.
 
 
-
+%% AckNo < SeqNR
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
   %% ack的序列号需要小于SeqNo
   Less = ai_utp_util:wrapping_compare_less(AckNo, SeqNR, ?ACK_NO_MASK),
@@ -142,8 +142,9 @@ need_resend(Index,Acked,Wrap,OutBuf)->
 sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
   when Index >=0 ->
   SeqNo = ai_utp_util:bit16(Base + Index),
-  case array:get(Index,OutBuf) of
-    undefined -> sack_packet(Base,Map,Index - 1, Packets,OutBuf,Acked,Lost);
+  case array:get(SeqNo,OutBuf) of
+    undefined -> sack_packet(Base,Map,Index - 1,
+                             Packets,OutBuf,Acked,Lost);
     Wrap ->
       Pos = Index bsr 3,
       case maps:get(Pos,Map) of
@@ -186,10 +187,10 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
           #utp_packet_wrap{ wanted = Wanted} = Wrap,
           OutBuf1 =
             if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
-                array:set(SeqNo,Wrap#utp_packet_wrap{
+                array:set(Base0,Wrap#utp_packet_wrap{
                                   need_resend = true },OutBuf0);
                true ->
-                array:set(SeqNo,Wrap#utp_packet_wrap{
+                array:set(Base0,Wrap#utp_packet_wrap{
                                   wanted = Wanted + 1},OutBuf0)
             end,
           {Lost,Packets,OutBuf1}
