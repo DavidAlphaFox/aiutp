@@ -28,7 +28,8 @@ ack_bytes(AckPackets,Now)->
 
 
 %% 最后阶段计算并清理所有被Ack过的包
-ack(#utp_net{last_ack = LastAck} =Net,
+ack(#utp_net{last_ack = LastAck,
+             state = State,seq_nr = SeqNR} =Net,
     #utp_packet{ack_no = AckNo,
                 win_sz = WndSize,extension = Ext},
     {_,_,Now} = Timing)->
@@ -38,14 +39,27 @@ ack(#utp_net{last_ack = LastAck} =Net,
     end,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder 或者收到重复包
-  if Less == true ->
-      SAcks = proplists:get_value(sack, Ext,undefined),
-      {Lost,AckPackets,Net1} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
-      {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
-      {Lost,ai_utp_cc:cc(Net1#utp_net{last_ack = AckNo},Timing, MinRTT,
-                   AckBytes,Lost,lists:reverse(Times),WndSize)};
-     true -> {0,Net}
+  Result =
+    if Less == true ->
+        SAcks = proplists:get_value(sack, Ext,undefined),
+        {Lost,AckPackets,Net0} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
+        {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
+        {Lost,ai_utp_cc:cc(Net0#utp_net{last_ack = AckNo},Timing, MinRTT,
+                           AckBytes,Lost,lists:reverse(Times),WndSize)};
+       true -> {0,Net}
+    end,
+  case State of
+    ?CLOSING ->
+      Diff = ai_utp_util:bit16(SeqNR - AckNo),
+      if Diff == 1 ->
+          {Lost0,Net1} = Result,
+          {Lost0,ai_utp_net_util:send_fin(
+               ai_utp_net_util:change_state(Net1, ?CLOSED))};
+         true -> Result
+      end;
+    _ -> Result
   end.
+
         
 
 
@@ -140,9 +154,16 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
          true -> {Net0,Proc}
       end;
      true ->
-      case process_incoming(Type,State,
-                              Net#utp_net{last_recv = ai_utp_util:microsecond() },
-                              Packet,Timing) of
+      Net0 = Net#utp_net{last_recv = ai_utp_util:microsecond() },
+      Result =
+        case Type of
+          st_syn -> st_syn(State,Net0,Packet,Timing);
+          st_data -> st_data(State,Net0,Packet,Timing);
+          st_state -> st_state(State,Net0,Packet,Timing);
+          st_fin -> st_fin(State,Net0,Packet,Timing);
+          st_reset -> st_reset(State,Net0,Packet,Timing)
+        end,
+      case Result of
         {SendNew,Net0} ->
           if SendNew == false -> {Net0,Proc};
              true -> do_send(Net0, Proc,true)
@@ -155,13 +176,16 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
 st_syn(?SYN_RECEIVE,
        #utp_net{ack_nr = AckNR,peer_conn_id = PeerConnID} = Net,
        #utp_packet{seq_no = AckNo,conn_id = PeerConnID},_) ->
-  Diff = ai_utp_util:bit16(AckNR - 1),
+  Diff = ai_utp_util:bit16(AckNR - AckNo),
   if Diff == 1 ->
       ai_utp_net_util:send_syn_state(Net);
      true -> Net
   end;
 st_syn(_,Net,_,_) ->Net.
 
+%% 被链接方，收到第二个包，必须是数据包？
+%% 这就存在一个问题，被链接方不能在SYN阶段主动广播数据
+%% 上层协议设计时，就需要让链接方，发出第一个请求
 st_data(?SYN_RECEIVE,
         #utp_net{ack_nr = PeerSeqNo} = Net,
         #utp_packet{seq_no = PeerSeqNo,win_sz = WndSize} =  Packet,
@@ -201,147 +225,25 @@ st_state(?ESTABLISHED,Net,
   {Lost,Net0} = ack(Net,Packet,Timing),
   fast_resend(Net0,AckNo,Lost).
 
+%% 主动关闭方是CLOSING
+%% 被动关闭方是CLOSE_WAIT
+st_fin(?CLOSING,Net,_,_)->
+  ai_utp_net_util:change_state(Net, ?CLOSED);
+st_fin(?CLOSE_WAIT,Net,_,_) ->
+  ai_utp_net_util:send_fin(Net);
+st_fin(_,Net,#utp_packet{seq_no = SeqNo},_) ->
+  ai_utp_net_util:change_state(
+    Net#utp_net{got_fin = true,eof_seq_no = SeqNo},
+    ?CLOSE_WAIT).
+
+
+
 %% 链接被重置
 st_reset(?CLOSED,Net,_,_) -> Net;
 st_reset(_,Net,_,_) ->
-  ai_utp_net_util:change_state(Net, ?RESET, econnreset).
-%%主动关闭, 发送出Fin，对面还没有回复Fin
-process_incoming(st_state,?CLOSING,
-                 #utp_net{fin_sent = true,
-                          got_fin = false,
-                          fin_seq_no = SeqNo} = Net,
-                 #utp_packet{ack_no = AckNo} = Packet,Timing)->
-  if AckNo == SeqNo ->
-      %% 对面数据已经接收完整了，安心关闭
-      Net#utp_net{fin_acked = true};
-     true ->
-      %% 对面还没有完全接收完成，继续发包
-      {Lost,Net0} = ack(Net,Packet,Timing),
-      fast_resend(Net0,AckNo,Lost)
-  end;
-%%被动关闭方，发送出Fin
-process_incoming(st_state,?CLOSING,
-                 #utp_net{fin_sent = true,
-                          got_fin = true,
-                          fin_seq_no = SeqNo} = Net,
-                 #utp_packet{ack_no = AckNo},_)->
-  if AckNo == SeqNo ->
-      {false,Net#utp_net{state = ?CLOSED}};
-     true -> {false,Net} %% 网络上延迟的包
-  end;
-process_incoming(st_data,?CLOSING,
-                 #utp_net{fin_sent = FinSent} = Net,
-                 #utp_packet{seq_no = SeqNo,
-                             payload = Payload} = Packet,
-                 Timing)->
-  if FinSent == true -> Net; %% 主动关闭方，不再接收数据了
-     true ->
-      %% 被动关闭方，需要等数据收完全
-      case ai_utp_buffer:in(SeqNo,Payload,Net) of
-        duplicate -> ai_utp_net_util:send_ack(Net,true); %% 强制发送ACK
-        {ok,Net0} ->
-          {_,Net1} = ack(Net0,Packet,Timing),
-          %% 此处不应该发送新数据的，对面不会再接收了
-          Net2 = ai_utp_net_util:send_ack(Net1,false),
-          {false,Net2};
-        {fin,Net0} ->
-          %% 先发送st_state,来说明收到最后的数据包
-          {_,Net1} = ack(Net0,Packet,Timing),
-          Net2 = ai_utp_net_util:send_ack(Net1,false),
-          
-          #utp_net{ack_nr = AckNR,seq_nr = SeqNR,
-                   reply_micro = ReplyMicro,
-                   peer_conn_id = ConnID} = Net2,
-          AckNo = ai_utp_util:bit16(AckNR - 1),
-          FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
-          %% 最后发送Fin包，告诉对方关闭
-          Fin = ai_utp_protocol:make_fin_packet(FinSeqNo,AckNo),
-          Net3 = Net2#utp_net{fin_sent = true,
-                              fin_seq_no = FinSeqNo},
-          MaxWindow = ai_utp_net_util:window_size(Net3),
-          ai_utp_net_util:send(Net3,
-               Fin#utp_packet{conn_id = ConnID,win_sz = MaxWindow},
-               ReplyMicro),
-          {false,Net3}
-      end
-  end;
-%% 主动关闭方，已经收到了Fin
-process_incoming(st_fin,?CLOSING,
-                 #utp_net{fin_sent = true,
-                          fin_acked = true,
-                          fin_seq_no = SeqNo,
-                          peer_conn_id = ConnID,
-                          reply_micro = ReplyMicro,
-                          got_fin = false} = Net,
-                 #utp_packet{ack_no = SeqNo, seq_no = AckNo},_)->
-  Packet = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
-  MaxWindow = ai_utp_net_util:window_size(Net),
-  ai_utp_net_util:send(Net,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},ReplyMicro),
-  {false,Net#utp_net{state = ?CLOSED}};
-%% 被动关闭方，收到了Fin包
-process_incoming(st_fin,?CLOSING,
-                 #utp_net{got_fin = true,
-                          seq_nr = SeqNR,
-                          peer_conn_id = ConnID,
-                          reply_micro = ReplyMicro,
-                          eof_seq_no = SeqNo} = Net,
-                 #utp_packet{seq_no = SeqNo},_)->
-  %% 对面的fin acked 丢失了
-  ResSeqNo = ai_utp_util:bit16(SeqNR -1 ),
-  Packet = ai_utp_protocol:make_ack_packet(ResSeqNo, SeqNo),
-  MaxWindow = ai_utp_net_util:window_size(Net),
-  ai_utp_net_util:send(Net,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},ReplyMicro),
-  {false,Net};
-process_incoming(st_fin, _,Net,
-                 #utp_packet{seq_no = SeqNo} = Packet,
-                 Timing)->
-  %% 处理ack包
-  {_,Net1} = ack(Net#utp_net{
-                   state = ?CLOSING,
-                   got_fin = true,
-                   fin_seq_no = SeqNo
-                  },Packet,Timing),
-  Net2 = ai_utp_net_util:send_ack(Net1,false),
-  #utp_net{ack_nr = AckNR,seq_nr = SeqNR,
-           peer_conn_id = ConnID,
-           reply_micro = ReplyMicro} = Net2,
-  Diff = ai_utp_util:bit16(AckNR - SeqNo),
-  if Diff == 1->
-      %%所有的数据包已经收全了
-      FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
-      %% 最后发送Fin包，告诉对方关闭
-      Fin = ai_utp_protocol:make_fin_packet(FinSeqNo,SeqNo),
-      Net3 = Net2#utp_net{fin_sent = true,
-                          fin_seq_no = FinSeqNo},
-      MaxWindow = ai_utp_net_util:window_size(Net3),
-      ai_utp_net_util:send(Net3,
-           Fin#utp_packet{conn_id = ConnID,win_sz = MaxWindow},
-           ReplyMicro),
-      {false,Net3};
-     true -> {false,Net2}
-  end;
-process_incoming(st_reset,_,Net,_,_) ->
-  Net#utp_net{state = ?CLOSED,error=econnreset};
-process_incoming(_,_,Net,_,_) -> Net.
-
-
-
-close(#utp_net{seq_nr = SeqNR,peer_conn_id = PeerConnID,
-               reply_micro = ReplyMicro,
-               ack_nr = AckNR} = Net)->
-  MaxWindow = ai_utp_net_util:window_size(Net),
-  FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
-  AckNo = ai_utp_util:bit16(AckNR - 1),
-  Fin = ai_utp_protocol:make_fin_packet(FinSeqNo, AckNo),
-  Fin0 = Fin#utp_packet{conn_id = PeerConnID,win_sz = MaxWindow},
-  ai_utp_net_util:send(Net,Fin0,ReplyMicro),
-  Net#utp_net{state = ?CLOSING,
-              fin_sent = true,
-              fin_seq_no = FinSeqNo,
-              sndbuf_size = 0,
-              sndbuf = [],
-              last_seq_nr = SeqNR}.
-
+  ai_utp_net_util:change_state(Net, ?CLOSED, econnreset).
+close(Net)->
+  ai_utp_net_util:change_state(Net, ?CLOSED, econnaborted).
 close(#utp_net{sndbuf = SndBuf,
                sndbuf_size = SndBufSize
          } = Net,Proc)->
@@ -355,20 +257,19 @@ close(#utp_net{sndbuf = SndBuf,
        true -> Net
     end,
   Net1 = flush(Net0),
-  #utp_net{last_seq_nr = SeqNR,peer_conn_id = PeerConnID,
-           reply_micro = ReplyMicro,ack_nr = AckNR } = Net1,
-  MaxWindow = ai_utp_net_util:window_size(Net1),
-  FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
-  AckNo = ai_utp_util:bit16(AckNR - 1),
-  Fin = ai_utp_protocol:make_fin_packet(FinSeqNo, AckNo),
-  Fin0 = Fin#utp_packet{conn_id = PeerConnID,win_sz = MaxWindow},
-  ai_utp_net_util:send(Net1,Fin0,ReplyMicro),
-  Net1#utp_net{state = ?CLOSING,
-              fin_sent = true,
-              fin_seq_no = FinSeqNo
-              }.
-
-
+  #utp_net{last_ack = LastAck,last_seq_nr = SeqNR,
+           cur_window_packets = CurWindowPackets} = Net1,
+  Diff = ai_utp_util:bit16(SeqNR - LastAck),
+  %% 最后一个ACK和下一个包号相差1，说明已经都响应了
+  if Diff == 1 ->
+      0 = CurWindowPackets, %% 断言，如果不等一定会崩溃
+      ai_utp_net_util:send_fin(
+        ai_utp_net_util:change_state(Net1, ?CLOSING));
+     true ->
+      %% 变状态,但是不发送fin包
+      ai_utp_net_util:change_state(Net1, ?CLOSING)
+  end.
+  
 connect(Net,ConnID)->
   Net0 =
     ai_utp_net_util:change_state(Net#utp_net{
@@ -686,78 +587,15 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
-force_state(State,#utp_net{last_send = LastSend,
-                          rto = RTO } = Net)->
+force_state(State,#utp_net{last_send = LastSend} = Net)->
   Now = ai_utp_util:microsecond(),
-  if (State == ?ESTABLISHED) orelse (State == ?CLOSING)->
-      Diff = Now - LastSend,
-      if (Diff >= ?MAX_SEND_IDLE_TIME andalso State == ?ESTABLISHED) orelse
-         (Diff >= (?MAX_CLOSING_WAIT - RTO) andalso State == ?MAX_CLOSING_WAIT)->
-          ai_utp_net_util:send_ack(Net,true);
-         (Diff div 1000 > RTO * 1.5) -> ai_utp_net_util:send_ack(Net, false);
-         true-> Net
-      end;
-     true  -> Net
+  Diff = Now - LastSend,
+  if (State == ?ESTABLISHED orelse State == ?CLOSING) andalso
+     Diff > ?ACK_INTERVAL ->
+      ai_utp_net_util:send_ack(Net,true);
+     true-> Net
   end.
-%% 主动关闭的一方
-on_tick(?CLOSING,
-        #utp_net{fin_sent = true,
-                 fin_seq_no = FinSeqNo,
-                 fin_acked = FinAcked,
-                 got_fin = false,
-                 last_recv = LastReceived,
-                 last_send = LastSend,
-                 peer_conn_id = ConnID,
-                 rto = RTO,
-                 ack_nr = AckNR,
-                 reply_micro = ReplyMicro,
-                 state = State
-          } = Net,Proc)->
-  Now = ai_utp_util:microsecond(),
-  Diff = (Now - LastReceived) div 1000,
-  if Diff >= RTO * 2 ->
-      {Net#utp_net{state = ?CLOSED}, Proc};
-     true ->
-      if FinAcked == true -> ok;
-         true ->
-          SendDiff = (Now - LastSend) div 1000,
-          if SendDiff < RTO -> ok;
-             true ->
-              AckNo = ai_utp_util:bit16(AckNR -1 ),
-              Fin = ai_utp_protocol:make_fin_packet(FinSeqNo, AckNo),
-              ai_utp_net_util:send(Net,Fin#utp_packet{win_sz = 0,conn_id = ConnID},ReplyMicro)
-          end
-      end,
-      {SendNew,Net0} = expire_resend(Net, Now),
-      if SendNew == true ->
-          {Net1,Proc0} = do_send(Net0,Proc,true),
-          Net2 = force_state(State, Net1),
-          {Net2,Proc0};
-         true ->
-          Net1 = force_state(State, Net),
-          {Net1,Proc}
-      end
-  end;
-%%
-on_tick(?CLOSING,
-        #utp_net{
-           got_fin = true,
-           state = State,
-           fin_sent = FinSent,
-           rto = RTO,
-           last_recv = LastReceived
-          } = Net,Proc)->
-  Now = ai_utp_util:microsecond(),
-  Diff = (Now - LastReceived) div 1000,
-  if Diff >= 2 * RTO ->
-      {Net#utp_net{state = ?CLOSED}, Proc};
-     true ->
-      if FinSent == true ->
-          Net1 = force_state(State, Net),
-          {Net1,Proc};
-         true  -> {Net,Proc}
-      end
-  end;
+
 on_tick(?CLOSED,Net,Proc)-> {Net,Proc};
 on_tick(?SYN_SEND,#utp_net{rto = RTO,
                            last_send = LastSend,
@@ -803,7 +641,25 @@ on_tick(?SYN_RECEIVE,#utp_net{syn_sent_count = SynSentCount,
       {ai_utp_net_util:send_syn_state(Net),Proc};
      true -> {Net,Proc}
   end;
-
+on_tick(?CLOSE_WAIT,#utp_net{last_state_changed = LastStateChanged} = Net,
+        Proc)->
+  Now = ai_utp_util:microsecond(),
+  Diff = Now - LastStateChanged,
+  if Diff > ?MAX_CLOSE_WAIT ->
+      {ai_utp_net_util:change_state(Net, ?CLOSED),Proc};
+     true -> {Net,Proc}
+  end;
+%% 发送fin包，并且等待时间超过5s了
+on_tick(?CLOSING,
+        #utp_net{fin_sent = true,
+                 last_state_changed = LastStateChanged } = Net,
+        Proc)->
+  Now = ai_utp_util:microsecond(),
+  Diff = Now - LastStateChanged,
+  if Diff > ?MAX_CLOSE_WAIT ->
+      {ai_utp_net_util:change_state(Net, ?CLOSED),Proc};
+     true -> {Net,Proc}
+  end;
 on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,

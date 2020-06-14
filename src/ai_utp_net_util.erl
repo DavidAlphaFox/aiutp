@@ -1,7 +1,7 @@
 -module(ai_utp_net_util).
 -include("ai_utp.hrl").
 
--export([send_syn/1,send_ack/2,
+-export([send_syn/1,send_ack/2,send_fin/1,
          send_syn_state/1,send/3]).
 -export([window_size/1,max_send_bytes/1,sndbuf_remain/1]).
 -export([change_state/3,change_state/2]).
@@ -72,7 +72,24 @@ send_syn_state(#utp_net{seq_nr = SeqNR,
                   last_send = Now,
                   last_decay_win = Now / 1000}
   end.
-
+send_fin(#utp_net{last_seq_nr = SeqNR,
+                  peer_conn_id = PeerConnID,
+                  reply_micro = ReplyMicro,
+                  ack_nr = AckNR} = Net)->
+  FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
+  AckNo = ai_utp_util:bit16(AckNR - 1),
+  Fin = ai_utp_protocol:make_fin_packet(FinSeqNo, AckNo),
+  Fin0 = Fin#utp_packet{conn_id = PeerConnID,win_sz = 0},
+  case send(Net,Fin0,ReplyMicro) of
+    {ok,SendTimeNow}->
+      Net#utp_net{fin_sent = true,
+                  fin_seq_no = FinSeqNo,
+                  last_send = SendTimeNow};
+    _ ->
+      Net#utp_net{fin_sent = true,
+                  fin_seq_no = FinSeqNo,
+                  last_send = ai_utp_util:microsecond()}
+  end.
 
 
 window_size(#utp_net{opt_recvbuf = OptRecvBuf,
