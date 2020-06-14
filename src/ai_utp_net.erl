@@ -271,11 +271,13 @@ close(#utp_net{sndbuf = SndBuf,
   end.
   
 connect(Net,ConnID)->
+  SeqNR = ai_utp_util:bit16_random()
   Net0 =
     ai_utp_net_util:change_state(Net#utp_net{
                                    conn_id = ConnID,
                                    peer_conn_id = ai_utp_util:bit16(ConnID + 1),
-                                   seq_nr = ai_utp_util:bit16_random()
+                                   seq_nr = SeqNR,
+                                   last_seq_nr = SeqNR
                                   },?SYN_SEND),
   ai_utp_net_util:send_syn(Net0).
 
