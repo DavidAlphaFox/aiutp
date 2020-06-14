@@ -295,7 +295,7 @@ accept(Net,#utp_packet{
                                      max_peer_window = PeerWinSize,
                                      conn_id = ConnID,
                                      peer_conn_id = PeerConnID,
-                                     ack_nr = ai_utp_net_util:bit16(AckNo + 1),
+                                     ack_nr = ai_utp_util:bit16(AckNo + 1),
                                      seq_nr = SeqNR,
                                      last_seq_nr = SeqNR,
                                      reply_micro = ReplyMicro},?SYN_RECEIVE)),
