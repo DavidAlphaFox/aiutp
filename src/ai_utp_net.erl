@@ -220,9 +220,10 @@ st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
         #utp_packet{ack_no = AckNo,seq_no = SeqNo},_)->
   Diff = ai_utp_util:bit16(SeqNR - AckNo),
   if Diff == 1 ->
-      ai_utp_net_util:change_state(
-        Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
-        ?ESTABLISHED);
+      Net0 = ai_utp_net_util:change_state(
+               Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
+               ?ESTABLISHED),
+      ai_utp_net_util:send_ack(Net0, true);
      true -> Net
   end;
 st_state(?SYN_RECEIVE,#utp_net{ack_nr = AckNR} = Net,
