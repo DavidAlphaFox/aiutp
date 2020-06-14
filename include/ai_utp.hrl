@@ -125,6 +125,7 @@
                  last_recv = 0:: integer(),
                  last_ack = undefined,
                  rto = 500,
-                 syn_sent_count = 1,
-                 last_lost = 0
+                 syn_sent_count = 0,
+                 last_lost = 0,
+                 last_state_changed = undefined
                 }).
