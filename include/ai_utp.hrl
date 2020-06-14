@@ -15,15 +15,21 @@
 -define(SEQ_NO_MASK, 16#FFFF).
 -define(ACK_NO_MASK, 16#FFFF).
 -define(HALF_CIRCLE, 16#6FFF).
--define(REORDER_BUFFER_MAX_SIZE,4096).
--define(OUTGOING_BUFFER_MAX_SIZE, 1024).
--define(PACKET_SIZE, 1180).
--define(OPT_RECV_BUF, 1208320).
--define(OPT_SEND_BUF, 1208320).
+-define(REORDER_BUFFER_MAX_SIZE,16384).
+-define(OUTGOING_BUFFER_MAX_SIZE, 32).
+-define(REORDER_SACK_MAX_SIZE,799).
+-define(PACKET_SIZE, 1176).
+-define(MIN_PACKET_SIZE,800).
+-define(OPT_RECV_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
+-define(OPT_SEND_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
 
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
--define(MAX_SEND_IDLE_TIME,5000000).
+-define(MAX_SEND_IDLE_TIME, 6000000).
+-define(MAX_CLOSING_WAIT,   6000000). %% 6s 2 * MAX RTO
+
+-define(TIMER_TIMEOUT,100).
+
 % us
 -define(CONGESTION_CONTROL_TARGET, 100000).
 %% ms窗口劣化
@@ -57,9 +63,10 @@
                           need_resend = false
                          }).
 -record(utp_net,{%%sndbuf setting, in bytes
-                 opt_sndbuf = ?OPT_SEND_BUF * 4,
+                 opt_sndbuf = ?OPT_SEND_BUF * 2,
                  %%rcvbuf setting, in bytes
-                 opt_recvbuf = ?OPT_RECV_BUF * 4,
+                 opt_recvbuf = ?OPT_RECV_BUF * 2,
+                 opt_ignore_lost = true,
                  socket = undefined,
                  remote = undefined,
                  state = undefined,
@@ -108,6 +115,7 @@
                  last_maxed_out_window :: integer(),
                  last_decay_win :: integer(),
                  fin_sent = false,
+                 fin_seq_no = -1,
                  fin_acked = false,
                  got_fin = false,
                  eof_seq_no = -1,
@@ -115,4 +123,8 @@
                  peer_conn_id,
                  last_send = 0 :: integer(),
                  last_recv = 0:: integer(),
-                 last_ack = undefined}).
+                 last_ack = undefined,
+                 rto = 500,
+                 syn_sent_count = 1,
+                 last_lost = 0
+                }).

@@ -1,8 +1,9 @@
 -module(ai_utp_rtt).
 
--export([rto/1,ack/3,lost/2]).
+-export([rto/1,ack/5,lost/2]).
 
 -define(MAX_WINDOW_INCREASE, 3000).
+%% 增大重传
 -define(DEFAULT_RTT_TIMEOUT, 500).
 
 -record(ai_utp_rtt, {
@@ -29,18 +30,19 @@ lost(none,_) -> #ai_utp_rtt{};
 lost(#ai_utp_rtt{delay = Delay} = RTT,LostCount)->
   Delay0 =
     if LostCount > 0 -> Delay * 1.5;
-       true  -> Delay / 2
+       true  -> Delay * 0.75
     end,
-  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8};
+  %% 使用Delay是尽量减少重传，如果不使用会出现暴力发包的情况
+  if Delay0 > 8 -> RTT#ai_utp_rtt{delay = 8 }; %% 2.4s
      Delay0 < 2 -> RTT#ai_utp_rtt{delay = 1.5};
      true -> RTT#ai_utp_rtt{delay = Delay}
   end.
 
 update(Estimate,#ai_utp_rtt { rtt = LastRTT, var = Var} ) ->
-      Delta = LastRTT - Estimate,
-      #ai_utp_rtt {
-         rtt = round(LastRTT - LastRTT/8 + Estimate/8),
-         var = round(Var + (abs(Delta) - Var) / 4) };
+  Delta = LastRTT - Estimate,
+  #ai_utp_rtt {
+     rtt = round(LastRTT - LastRTT/8 + Estimate/8),
+     var = round(Var + (abs(Delta) - Var) / 4) };
 
 update(Estimate,none)->
   #ai_utp_rtt {
@@ -51,17 +53,16 @@ update(Estimate,none)->
 %% The default timeout for packets associated with the socket is also
 %% updated every time rtt and rtt_var is updated. It is set to:
 rto(none) -> ?DEFAULT_RTT_TIMEOUT;
-rto(#ai_utp_rtt { rtt = RTT, var = Var}) ->
-  RTO = max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
-  RTO.
+rto(#ai_utp_rtt { rtt = RTT, var = Var ,delay = Delay}) ->
+  RTO = erlang:max(RTT + Var * 4, ?DEFAULT_RTT_TIMEOUT),
+  RTO * Delay.
 
 
 %% ACKnowledge an incoming packet
-ack(RTT, TimeSent, TimeAcked) ->
+ack(RTT, TimeSent,_TS,_TSDiff, TimeAcked) ->
   if
     TimeAcked >= TimeSent->
-      Estimate = ai_utp_util:bit32(TimeAcked - TimeSent) div 1000,
-
+      Estimate = ai_utp_util:bit32(TimeAcked - TimeSent ) div 1000,
       NewRTT = update(Estimate, RTT),
       NewRTO = rto(NewRTT),
       {ok, NewRTO, NewRTT};

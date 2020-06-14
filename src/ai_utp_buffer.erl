@@ -25,7 +25,8 @@ in(SeqNo,Payload,
   Less = ai_utp_util:wrapping_compare_less(SeqNo,AckNR, ?ACK_NO_MASK),
   Diff = ai_utp_util:bit16(SeqNo - AckNR),
   if Less == true -> duplicate;
-     Diff > ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
+     Diff > ?HALF_CIRCLE -> {ok,Net};
+     RSize >= ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
       case array:get(SeqNo, InBuf) of
         undefined ->
@@ -36,7 +37,6 @@ in(SeqNo,Payload,
         _ -> duplicate
       end
   end.
-
 recv(?ESTABLISHED,<<>>,Net) -> Net;
 recv(?ESTABLISHED,Payload,
      #utp_net{recvbuf = RecvBuf,
@@ -46,8 +46,29 @@ recv(?ESTABLISHED,Payload,
     recvbuf = queue:in({Size,Payload},RecvBuf),
     recvbuf_size = RecvBufSize + Size};
 
-recv(_,_,Net) -> Net.
+recv(?CLOSING,<<>>,Net) -> Net;
+recv(?CLOSING,Payload,
+     #utp_net{recvbuf = RecvBuf,
+              recvbuf_size = RecvBufSize} = Net) ->
+  Size = erlang:byte_size(Payload),
+  Net#utp_net{
+    recvbuf = queue:in({Size,Payload},RecvBuf),
+    recvbuf_size = RecvBufSize + Size}.
 
+recv_reorder(#utp_net{inbuf_size = 0} = Net)-> {ok,Net};
+recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
+                      state = State,
+                      ack_nr = SeqNo,inbuf = InBuf,inbuf_size = RSize
+                     } = Net) ->
+  case array:get(SeqNo,InBuf) of
+    undefined -> {ok,Net};
+    Payload ->
+      Net0 = recv(State, Payload, Net),
+      {fin,Net0#utp_net{
+             inbuf = array:set(SeqNo,undefined,InBuf),
+             inbuf_size = RSize -1,
+             ack_nr = ai_utp_util:bit16(SeqNo + 1)}}
+  end;
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
                       inbuf = InBuf,inbuf_size = RSize} = Net) ->
   case array:get(SeqNo,InBuf) of
@@ -74,6 +95,8 @@ ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
   {Lost,Packets ++ Packets0,
    Net#utp_net{outbuf = OutBuf1,
                cur_window_packets = CurWindowPackets - AckDistance}}.
+
+
 
 ack_distance(CurWindowPackets,SeqNR,AckNo)->
   %% ack的序列号需要小于SeqNo
@@ -116,76 +139,93 @@ need_resend(Index,Acked,Wrap,OutBuf)->
      true -> OutBuf
   end.
 
-sack_packet(Last,_,Last,_,OutBuf,Packets,Acked,Lost)->
-  {Lost,Acked,lists:reverse(Packets),OutBuf};
-sack_packet(Index,Base, Last,Map, OutBuf, Packets,Acked,Lost)->
+sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
+  when Index >=0 ->
+  SeqNo = ai_utp_util:bit16(Base + Index),
   case array:get(Index,OutBuf) of
-    undefined ->
-      %% 之前的包被Ack了
-      sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                  Map,OutBuf, Packets,Acked + 1,Lost);
-    Packet ->
-      BitIndex = ai_utp_util:bit16(Index - Base),
-      Pos = BitIndex bsr 3,
+    undefined -> sack_packet(Base,Map,Index - 1, Packets,OutBuf,Acked,Lost);
+    Wrap ->
+      Pos = Index bsr 3,
       case maps:get(Pos,Map) of
         0 ->
-          OutBuf0 = need_resend(Index,Acked,Packet,OutBuf),
-          sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                      Map,OutBuf0, Packets,Acked,Lost + 1);
+          OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
+          sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
         Bit ->
           Mask = 1 bsl (Index band 7),
           Set = Bit band Mask,
           if Set == 0 ->
-              OutBuf0 = need_resend(Index,Acked,Packet,OutBuf),
-              sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                          Map,OutBuf0, Packets,Acked,Lost + 1);
+              OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
+              sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
              true ->
-              sack_packet(ai_utp_util:bit16(Index - 1),Base, Last,
-                          Map,array:set(Index,undefined,OutBuf),
-                          [Packet|Packets],Acked + 1,Lost)
+              sack_packet(Base,Map,Index-1,[Wrap|Packets],OutBuf,Acked + 1,Lost)
           end
       end
-  end.
+  end;
+sack_packet(_,_,_,Packets,OutBuf,Acked,Lost) ->
+  {Lost,Acked,lists:reverse(Packets),OutBuf}.
 
-
-%% AckNo+2 =< SACK < SeqNR
+%% AckNo+2 =< SACK < SeqNR - 1
 sack_packet(_, _, undefined, OutBuf)-> {0,[],OutBuf};
 sack_packet(AckNo,SeqNR,Bits,OutBuf)->
   Max = erlang:byte_size(Bits) * 8,
   Map = sack_map(Bits,0,#{}),
   Base0 = ai_utp_util:bit16(AckNo + 1),
   Base = ai_utp_util:bit16(AckNo + 2),
-  Last = ai_utp_util:bit16(Base + Max - 1),
-  Less = ai_utp_util:wrapping_compare_less(Last,SeqNR,?ACK_NO_MASK),
+  SeqNo = ai_utp_util:bit16(SeqNR - 1),
+  Last = ai_utp_util:bit16(Base + Max -1),
+  Less = ai_utp_util:wrapping_compare_less(Last,SeqNo,?ACK_NO_MASK),
   if Less /= true -> {0,[],OutBuf};
      true ->
-      {Lost,_,Packets,OutBuf0} = sack_packet(Last,Base,Base0,Map, OutBuf,[],0,0),
+      {Lost,_,Packets,OutBuf0} = sack_packet(Base,Map,Max-1,[],OutBuf,0,0),
       case array:get(Base0,OutBuf0) of
-        undefined -> {Lost,Packets,OutBuf}; %% 此种情况不应该发生
+        undefined ->
+          logger:error("SACK AckNo: ~p SeqNR: ~p Base: ~p, Last:~p Max:~p~n",
+                       [AckNo, SeqNR,Base,Last,Max]),
+          {Lost,Packets,OutBuf0}; %% 此种情况不应该发生
         Wrap ->
-          {Lost,Packets,
-           array:set(Base0,Wrap#utp_packet_wrap{need_resend = true},OutBuf0)}
+          #utp_packet_wrap{ wanted = Wanted} = Wrap,
+          OutBuf1 =
+            if Wanted >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
+                array:set(SeqNo,Wrap#utp_packet_wrap{
+                                  need_resend = true },OutBuf0);
+               true ->
+                array:set(SeqNo,Wrap#utp_packet_wrap{
+                                  wanted = Wanted + 1},OutBuf0)
+            end,
+          {Lost,Packets,OutBuf1}
       end
   end.
 %% 生成SACK
-%% AckNo +2 =< SACK =< AckNo + 802
+%% AckNo +2 =< SACK =< AckNo + 801
 sack(_,#utp_net{inbuf_size = 0})-> undefined;
-sack(Base,#utp_net{inbuf = InBuf}) ->
-  {_,_,Acc} =
-    lists:foldl(fun(Index,{Pos,Bit,Acc})->
-                    Pos0 = Index bsr 3,
-                    Mask = 1 bsl (Index band 7),
-                    SeqNo = ai_utp_util:bit16(Base + Index),
-                    {Bit0,Acc0} =
-                      if Pos0 > Pos -> {0,<<Acc/binary,Bit/big-integer>>};
-                         true ->{Bit,Acc}
-                      end,
-                    case array:get(SeqNo, InBuf) of
-                      undefined -> {Pos0,Bit0,Acc0};
-                      _ -> {Pos0,Bit0 bor Mask,Acc0}
-                    end
-                end,{0,0,<<>>},lists:seq(0, 799)),
-  if erlang:byte_size(Acc) > 0 -> Acc;
-     true -> undefined
-  end.
+sack(Base,#utp_net{inbuf = InBuf,inbuf_size = RSize}) ->
+  build_sack(Base,InBuf,RSize,0,0,#{0 => 0}).
 
+build_sack(_,_,0,_,Pos,Map)->
+  lists:foldl(fun(BI,BAcc)->
+                  Bits = maps:get(BI,Map),
+                  <<BAcc/binary,Bits/big-integer>>
+              end, <<>>, lists:seq(0, Pos));
+build_sack(_,_,_,?REORDER_SACK_MAX_SIZE,Pos,Map)->
+  lists:foldl(fun(BI,BAcc)->
+                  Bits = maps:get(BI,Map),
+                  <<BAcc/binary,Bits/big-integer>>
+              end, <<>>, lists:seq(0, Pos));
+build_sack(Base,InBuf,RSize,Index,Pos,Map)->
+  SeqNo = ai_utp_util:bit16(Base + Index),
+  Pos0 = Index bsr 3,
+  Mask = 1 bsl (Index band 7),
+  Map0 =
+    if Pos0 > Pos ->
+        lists:foldl(fun(BI,BAcc)-> maps:put(BI,0,BAcc) end,
+                    Map,lists:seq(Pos +1 ,Pos0));
+       true -> Map
+    end,
+  case array:get(SeqNo,InBuf) of
+    undefined -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
+    _ ->
+      Bits = maps:get(Pos0,Map0),
+      Bits0 = Mask bor Bits,
+      build_sack(Base,InBuf,RSize - 1,Index + 1,
+                 Pos0,maps:put(Pos0,Bits0,Map0))
+  end.

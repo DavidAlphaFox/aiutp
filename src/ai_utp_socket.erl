@@ -84,7 +84,8 @@ init([Port,Options]) ->
       false -> [binary|Options];
       true -> Options
     end,
-  case gen_udp:open(Port,Options0) of
+  case gen_udp:open(Port,Options0 ++ [{sndbuf,?OPT_SEND_BUF * 4},
+                                      {recbuf,?OPT_RECV_BUF * 4}]) of
     {ok,Socket} ->
       {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
       ok = inet:setopts(Socket, [{active,once}]),
@@ -170,7 +171,8 @@ handle_info({'EXIT',Acceptor,Reason},
   {stop,Reason,State};
 handle_info({udp, Socket, IP, InPortNo, Packet},
             #state{socket = Socket,dispatch = Dispatch} = State)->
-  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet),
+  Now = ai_utp_util:microsecond(),
+  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet,Now),
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
 handle_info(_Info, State) ->

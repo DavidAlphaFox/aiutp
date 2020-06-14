@@ -12,7 +12,8 @@
          apply_senders/2,
          apply_receivers/2,
          clear_senders/1,
-         error_all/2
+         error_all/2,
+         flush/1
         ]).
 -record(utp_process,{
                      receiver :: queue:queue(),
@@ -22,7 +23,15 @@
 new()->
   #utp_process{receiver = queue:new(),
                sender = queue:new()}.
-  
+
+flush(#utp_process{sender = Sender} = PI)->
+  Payload = lists:foldl(
+    fun({sender,From,Data},Acc)->
+        gen_server:reply(From, ok),
+        <<Acc/binary,Data/binary>>
+    end,<<>>,queue:to_list(Sender)),
+  {Payload,PI#utp_process{sender = queue:new()}}.
+
 apply_all(PI, F) ->
   apply_senders(PI, F),
   apply_receivers(PI, F).
