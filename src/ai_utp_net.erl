@@ -208,6 +208,11 @@ st_data(_,Net,_,_) -> Net.
 
 
 %% 处理链接
+%% 数据收到响应
+st_state(?ESTABLISHED,Net,
+         #utp_packet{ack_no = AckNo} = Packet,Timing) ->
+  {Lost,Net0} = ack(Net,Packet,Timing),
+  fast_resend(Net0,AckNo,Lost);
 st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
         #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,Timing)->
   Diff = ai_utp_util:bit16(SeqNR - AckNo),
@@ -219,11 +224,14 @@ st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
       Net2;
      true -> Net
   end;
-%% 数据收到响应
-st_state(?ESTABLISHED,Net,
-         #utp_packet{ack_no = AckNo} = Packet,Timing) ->
-  {Lost,Net0} = ack(Net,Packet,Timing),
-  fast_resend(Net0,AckNo,Lost).
+st_state(?SYN_RECEIVE,#utp_net{ack_nr = AckNR} = Net,
+         #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,Timing)->
+  Diff = ai_utp_util:bit16(AckNR - AckNo),
+  if Diff == 1 ->
+      Net0 = ai_utp_net_util:change_state(Net,?ESTABLISHED),
+      st_state(?ESTABLISHED,Net0,Packet,Timing);
+     true -> Net
+  end.
 
 %% 主动关闭方是CLOSING
 %% 被动关闭方是CLOSE_WAIT
