@@ -42,7 +42,7 @@ ack(#utp_net{last_ack = LastAck,
   Result =
     if Less == true ->
         SAcks = proplists:get_value(sack, Ext,undefined),
-        {Lost,AckPackets,Net0} = ai_utp_buffer:ack_packet(AckNo, SAcks, Net),
+        {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo, SAcks, Net),
         {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
         {Lost,ai_utp_cc:cc(Net0#utp_net{last_ack = AckNo},Timing, MinRTT,
                            AckBytes,Lost,lists:reverse(Times),WndSize)};
@@ -197,7 +197,7 @@ st_data(?SYN_RECEIVE,
 st_data(?ESTABLISHED,Net,
         #utp_packet{seq_no = SeqNo,payload = Payload,
                     ack_no = AckNo}=Packet,Timing) ->
-  case ai_utp_buffer:in(SeqNo,Payload,Net) of
+  case ai_utp_rx:in(SeqNo,Payload,Net) of
     duplicate -> ai_utp_net_util:send_ack(Net, true);
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
