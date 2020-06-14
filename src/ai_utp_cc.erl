@@ -91,8 +91,9 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 
-ack_packet_rtt(#utp_net{rtt = RTT} = Net,SendTime,TS,TSDiff,Now) ->
-  {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,SendTime,TS,TSDiff,Now),
+ack_packet_rtt(#utp_net{rtt = RTT,opt_bust = OptBust} = Net,
+               SendTime,TS,TSDiff,Now) ->
+  {ok, NewRTO, NewRTT} = ai_utp_rtt:ack(RTT,SendTime,TS,TSDiff,Now,OptBust),
   Net#utp_net{rtt = NewRTT,rto =  NewRTO}.
 
 
