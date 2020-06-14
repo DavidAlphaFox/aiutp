@@ -150,47 +150,29 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
         Net0 -> {Net0,Proc}
       end
   end.
-  
-process_incoming(st_state, ?SYN_RECEIVE,
-                 #utp_net{seq_nr = SeqNR} = Net,
-                 #utp_packet{ack_no = AckNo} = Packet,Timing) ->
-  Diff = ai_utp_util:bit16(SeqNR - AckNo),
+
+
+st_syn(?SYN_RECEIVE,
+       #utp_net{ack_nr = AckNR,peer_conn_id = PeerConnID} = Net,
+       #utp_packet{seq_no = AckNo,conn_id = PeerConnID},_) ->
+  Diff = ai_utp_util:bit16(AckNR - 1),
   if Diff == 1 ->
-      {_,Net0} = ack(Net#utp_net{state = ?ESTABLISHED},Packet,Timing),
-      Net0;
+      ai_utp_net_util:send_syn_state(Net);
      true -> Net
   end;
-process_incoming(st_syn, ?SYN_RECEIVE,
-                 #utp_net{seq_nr = SeqNR,max_window = MaxWindow,
-                          peer_conn_id = PeerConnID,
-                          reply_micro = ReplyMicro} = Net,
-                 #utp_packet{seq_no = AckNo,conn_id = PeerConnID,
-                             win_sz = PeerWinSize},_) ->
-  Packet = ai_utp_protocol:make_ack_packet(ai_utp_util:bit16(SeqNR -1), AckNo),
-  Net0 = Net#utp_net{max_peer_window = PeerWinSize,
-                     ack_nr = ai_utp_util:bit16(AckNo + 1)},
-  Packet0 = Packet#utp_packet{win_sz = MaxWindow,conn_id = PeerConnID},
-  case ai_utp_net_util:send(Net0,Packet0,ReplyMicro) of
-    {ok,SendTimeNow} -> Net0#utp_net{last_send = SendTimeNow};
-    _ -> Net0
-  end;
-    
-process_incoming(st_data,?SYN_RECEIVE,
-                 #utp_net{seq_nr = SeqNR,ack_nr = PeerSeqNo} = Net,
-                 #utp_packet{ack_no = AckNo,seq_no = PeerSeqNo,
-                            win_sz = WndSize} =  Packet,Timing) ->
-  Diff = ai_utp_util:bit16(SeqNR - AckNo),
-  if Diff == 1 ->
-      process_incoming(st_data,?ESTABLISHED,
-                       Net#utp_net{state = ?ESTABLISHED,
-                                   max_peer_window = WndSize},
-                       Packet,Timing);
-     true -> Net
-  end;
-process_incoming(st_data,?ESTABLISHED,Net,
-                 #utp_packet{seq_no = SeqNo,payload = Payload,
-                             ack_no = AckNo
-                            }=Packet,Timing) ->
+st_syn(_,Net,_,_) ->Net.
+
+st_data(?SYN_RECEIVE,
+        #utp_net{ack_nr = PeerSeqNo} = Net,
+        #utp_packet{seq_no = PeerSeqNo,win_sz = WndSize} =  Packet,
+        Timing) ->
+  Net0 = ai_utp_net_util:change_state(
+           Net#utp_net{max_peer_window = WndSize},
+           ?ESTABLISHED),
+  st_data(?ESTABLISHED,Net0,Packet,Timing);
+st_data(?ESTABLISHED,Net,
+        #utp_packet{seq_no = SeqNo,payload = Payload,
+                    ack_no = AckNo}=Packet,Timing) ->
   case ai_utp_buffer:in(SeqNo,Payload,Net) of
     duplicate -> ai_utp_net_util:send_ack(Net, true);
     {_,Net0} ->
@@ -198,24 +180,31 @@ process_incoming(st_data,?ESTABLISHED,Net,
       Net2 = ai_utp_net_util:send_ack(Net1,false),
       fast_resend(Net2,AckNo,Lost)
   end;
+st_data(_,Net,_,_) -> Net.
 
-process_incoming(st_state,?ESTABLISHED,Net,
-                 #utp_packet{ack_no = AckNo} = Packet,Timing) ->
-  {Lost,Net0} = ack(Net,Packet,Timing),
-  fast_resend(Net0,AckNo,Lost);
-process_incoming(st_state,?SYN_SEND,
-                 #utp_net{seq_nr = SeqNR} = Net,
-                 #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,
-                 Timing) ->
+
+%% 处理链接
+st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
+        #utp_packet{ack_no = AckNo,seq_no = SeqNo} = Packet,Timing)->
   Diff = ai_utp_util:bit16(SeqNR - AckNo),
   if Diff == 1 ->
-      Net1 = Net#utp_net{state = ?ESTABLISHED,
-                         ack_nr = ai_utp_util:bit16(SeqNo + 1)},
+      Net1 = ai_utp_net_util:change_state(
+               Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
+               ?ESTABLISHED),
       {_,Net2} = ack(Net1,Packet,Timing),
       Net2;
      true -> Net
   end;
+%% 数据收到响应
+st_state(?ESTABLISHED,Net,
+         #utp_packet{ack_no = AckNo} = Packet,Timing) ->
+  {Lost,Net0} = ack(Net,Packet,Timing),
+  fast_resend(Net0,AckNo,Lost).
 
+%% 链接被重置
+st_reset(?CLOSED,Net,_,_) -> Net;
+st_reset(_,Net,_,_) ->
+  ai_utp_net_util:change_state(Net, ?RESET, econnreset).
 %%主动关闭, 发送出Fin，对面还没有回复Fin
 process_incoming(st_state,?CLOSING,
                  #utp_net{fin_sent = true,
