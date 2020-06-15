@@ -69,7 +69,7 @@ do_fast_resend(#utp_net{reply_micro = ReplyMicro,
                Index,ResendCount) ->
   case array:get(Index,OutBuf) of
     undefined ->
-      do_fast_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount -1);
+      do_fast_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount);
     Wrap ->
       #utp_packet_wrap{packet = Packet,transmissions = Trans,
                        need_resend = Resend} = Wrap,
