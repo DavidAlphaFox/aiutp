@@ -156,9 +156,12 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
           Set = Bit band Mask,
           if Set == 0 ->
               OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
-              sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
+              sack_packet(Base,Map,Index - 1, Packets,
+                          OutBuf0,Acked,Lost + 1);
              true ->
-              sack_packet(Base,Map,Index-1,[Wrap|Packets],OutBuf,Acked + 1,Lost)
+              sack_packet(Base,Map,Index-1,[Wrap|Packets],
+                          array:set(Index,undefined,OutBuf),
+                          Acked + 1,Lost)
           end
       end
   end;
