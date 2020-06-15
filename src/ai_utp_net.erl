@@ -92,8 +92,8 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
           end;
         Wrap ->
           #utp_packet_wrap{packet = Packet,transmissions = Trans,
-                           need_resend = Resend, payload = Payload} = Wrap,
-          if Resend == true ->
+                           need_resend = Resend} = Wrap,
+          if Resend == true andalos Trans > 0 ->
               case ai_utp_net_util:send(Net,Packet,ReplyMicro) of
                 {ok,SendTimeNow} ->
                   OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
@@ -106,33 +106,13 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
                               ResendCount - 1);
                 _ -> {false,Net}
               end;
-             (Trans == 0) andalso (Index == Last)->
-              %% 说明是新的包，继续传输直到队列满了
-              case ai_utp_net_util:send(Net,Packet,ReplyMicro) of
-                {ok,SendTimeNow} ->
-                  OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
-                                              need_resend = false,
-                                              transmissions = Trans + 1,
-                                              send_time = SendTimeNow},OutBuf),
-                  {true,Net#utp_net{last_send = SendTimeNow,
-                                    cur_window = CurWindow + Payload,
-                                    outbuf = OutBuf0,
-                                    cur_window_packets = CurWindowPackets + 1}};
-                _ -> {false,Net}
-              end;
-             true -> {false,Net} %% 这种情况不应当发生
+             true -> {true,Net} %% 这种情况不应当发生
           end
       end
   end.
 
-fast_resend(#utp_net{seq_nr = SeqNR,cur_window_packets = CurWindowPackets
-                    } = Net,AckNo,Lost)->
-  Index = ai_utp_util:bit16(AckNo + 1),
-  MaxSend = if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets -> CurWindowPackets;
-               true -> 1
-            end,
-  NeedSend = erlang:min(MaxSend,Lost),
-  fast_resend(Net#utp_net{last_lost = Lost}, Index, SeqNR,NeedSend).
+fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
+  fast_resend(Net#utp_net{last_lost = Lost}, Index, SeqNR,4).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
 process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
