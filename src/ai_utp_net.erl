@@ -476,7 +476,7 @@ do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
   %% 100ms is too big
   do_send(Net,Proc,true);
 do_send(#utp_net{state = ?CLOSING,fin_sent = true} = Net,Proc)->
-  Proc0 = ai_utp_process:error_all(Proc, {error,eshutdown}),
+  Proc0 = ai_utp_process:error_all(Proc, eshutdown),
   {Net,Proc0};
 do_send(Net,Proc) ->{Net,Proc}.
 
