@@ -17,7 +17,7 @@
 -define(HALF_CIRCLE, 16#6FFF).
 -define(REORDER_BUFFER_MAX_SIZE,16384).
 -define(OUTGOING_BUFFER_MAX_SIZE, 512).
--define(REORDER_SACK_MAX_SIZE,799).
+-define(REORDER_SACK_MAX_SIZE,800).
 -define(PACKET_SIZE, 1176).
 -define(MIN_PACKET_SIZE,800).
 -define(OPT_RECV_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
@@ -43,6 +43,8 @@
 -define(MIN_WINDOW_SIZE, 102400).
 -define(MAX_WINDOW_SIZE,14680064).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
+
+-define(EMPTY_SLOT,undefined).
 
 -record(utp_packet, {type           :: utp_packet_type(),
                      conn_id        :: integer(),

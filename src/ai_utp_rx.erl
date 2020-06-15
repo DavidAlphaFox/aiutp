@@ -2,8 +2,6 @@
 -include("ai_utp.hrl").
 
 -export([in/3,ack_packet/3,sack/2]).
-
--define(EMPTY_SLOT,undefined).
 %% 需要修改ack_nr
 %% ack_nr总是代表下一个需要进行ack的包
 %% 此处只应该接收st_data的包
@@ -82,15 +80,17 @@ recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
   end.
 
 
-ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
-                                seq_nr = SeqNR,outbuf = OutBuf} = Net)->
+ack_packet(AckNo,SAcks,
+           #utp_net{cur_window_packets = CurWindowPackets,
+                    seq_nr = SeqNR,
+                    outbuf = OutBuf} = Net)->
   %% 最老的序列号
   WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
   %% AckNo必须小于SeqNR，distance = 0的时候，不应该进行ack
   AckDistance = ack_distance(CurWindowPackets, SeqNR, AckNo),
   {Packets,OutBuf0} =
     if AckDistance == 0 -> {[],OutBuf};
-       true -> ack_packet(WindowStart,AckNo,OutBuf,[])
+       true -> ack(WindowStart,AckNo,OutBuf,[])
     end,
   {Lost,Packets0,OutBuf1} = sack_packet(AckNo,SeqNR, SAcks, OutBuf0),
   {Lost,Packets ++ Packets0,
@@ -110,21 +110,21 @@ ack_distance(CurWindowPackets,SeqNR,AckNo)->
      true -> 0
   end.
 
-ack_packet(AckNo,AckNo,OutBuf,Packets)->
+ack(AckNo,AckNo,OutBuf,Packets)->
   case array:get(AckNo,OutBuf) of
     ?EMPTY_SLOT -> {lists:reverse(Packets),OutBuf};
     Packet ->
       {lists:reverse([Packet|Packets]),
        array:set(AckNo,?EMPTY_SLOT,OutBuf)}
   end;
-ack_packet(Index,AckNo,OutBuf,Packets)->
+ack(Index,AckNo,OutBuf,Packets)->
   case array:get(Index,OutBuf) of
     ?EMPTY_SLOT ->
       %% 前面某个Ack包通过SACK，Ack掉这个包了
-      ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
+      ack(ai_utp_util:bit16(Index + 1),AckNo,
                  OutBuf,Packets);
      Packet ->
-      ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
+      ack(ai_utp_util:bit16(Index + 1),AckNo,
                  array:set(Index,?EMPTY_SLOT,OutBuf),
                  [Packet|Packets])
   end.
@@ -161,7 +161,7 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
                           OutBuf0,Acked,Lost + 1);
              true ->
               sack_packet(Base,Map,Index-1,[Wrap|Packets],
-                          array:set(Index,undefined,OutBuf),
+                          array:set(SeqNo,undefined,OutBuf),
                           Acked + 1,Lost)
           end
       end
