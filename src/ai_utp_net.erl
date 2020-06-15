@@ -144,8 +144,8 @@ st_data(?ESTABLISHED,Net,
     duplicate -> ai_utp_net_util:send_ack(Net, false);
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
-      Net2 = ai_utp_net_util:send_ack(Net1,false),
-      fast_resend(Net2,AckNo,Lost)
+      %Net2 = ai_utp_net_util:send_ack(Net1,false),
+      fast_resend(Net1,AckNo,Lost)
   end;
 st_data(_,Net,_,_) -> Net.
 
@@ -469,7 +469,7 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
   %% for some small and senstive data
   %% 100ms is too big
-  do_send(Net,Proc,true);
+  do_send(Net,Proc,fasle);
 do_send(#utp_net{state = ?CLOSING,fin_sent = true} = Net,Proc)->
   Proc0 = ai_utp_process:error_all(Proc, {error,eshutdown}),
   {Net,Proc0};
@@ -542,17 +542,9 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
-force_state(State,#utp_net{last_send = LastSend,rto = RTO} = Net)->
-  Now = ai_utp_util:microsecond(),
-  Diff = Now - LastSend,
+force_state(State, Net)->
   if (State == ?ESTABLISHED orelse State == ?CLOSING)->
-      if
-        Diff >= ?MAX_SEND_IDLE_TIME ->
-          ai_utp_net_util:send_ack(Net,true);
-        (Diff div 1000) >= RTO * 1.5 ->
-          ai_utp_net_util:send_ack(Net,flase);
-        true-> Net
-      end;
+      ai_utp_net_util:send_ack(Net,false);
      true -> Net
   end.
 
