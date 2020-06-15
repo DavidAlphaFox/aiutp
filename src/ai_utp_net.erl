@@ -145,7 +145,9 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
        true -> ai_utp_util:wrapping_compare_less(SeqNo, AckNR, ?ACK_NO_MASK)
     end,
   if Quick == true ->
-      Net0 = ai_utp_net_util:send_ack(Net, false),
+      Net0 = ai_utp_net_util:send_ack(Net#utp_net{
+                                        last_recv = ai_utp_util:microsecond()},
+                                      false),
       if (Lost == 0) andalso
          (CurWindowPackets < ?OUTGOING_BUFFER_MAX_SIZE) ->
           do_send(Net0,Proc,true);
@@ -673,10 +675,11 @@ on_tick(?CLOSING,
       {ai_utp_net_util:change_state(Net, ?CLOSED),Proc};
      true -> {Net,Proc}
   end;
-on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
+on_tick(State,#utp_net{last_recv = LastReceived,conn_id = ConnID} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
+      logger:error("RECV IDLE TIMEOUT ConnID: ~p~n",[ConnID]),
       {Net#utp_net{state = ?CLOSED,error = econnaborted}, Proc};
      true ->
       {SendNew,Net0} = expire_resend(Net, Now),
