@@ -144,8 +144,13 @@ st_data(?ESTABLISHED,Net,
     duplicate -> ai_utp_net_util:send_ack(Net, false);
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
-      %Net2 = ai_utp_net_util:send_ack(Net1,false),
-      fast_resend(Net1,AckNo,Lost)
+      Net2 =
+        if Net#utp_net.inbuf_size /= Net1#utp_net.inbuf_size orelse
+           Net#utp_net.ack_nr /= Net1#utp_net.ack_nr ->
+            ai_utp_net_util:send_ack(Net1,false);
+           true -> Net1
+        end,
+      fast_resend(Net2,AckNo,Lost)
   end;
 st_data(_,Net,_,_) -> Net.
 
@@ -542,9 +547,11 @@ expire_resend(#utp_net{seq_nr = SeqNR,
       expire_resend(Net,WindowStart,ResendCount,Now);
      true -> {true,Net}
   end.
-force_state(State, Net)->
-  if (State == ?ESTABLISHED orelse State == ?CLOSING)->
-      ai_utp_net_util:send_ack(Net,false);
+force_state(State, #utp_net{last_send = LastSned } = Net)->
+  Now = ai_utp_util:microsecond(),
+  if (State == ?ESTABLISHED orelse State == ?CLOSING) andalso
+      (Now - LastSend) >= ?MAX_SEND_IDLE_TIME ->
+      ai_utp_net_util:send_ack(Net,true);
      true -> Net
   end.
 
