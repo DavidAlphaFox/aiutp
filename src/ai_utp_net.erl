@@ -603,7 +603,7 @@ force_state(State,#utp_net{last_send = LastSend} = Net)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastSend,
   if (State == ?ESTABLISHED orelse State == ?CLOSING) andalso
-     Diff > ?ACK_INTERVAL ->
+     Diff > ?MAX_SEND_IDLE_TIME ->
       ai_utp_net_util:send_ack(Net,true);
      true-> Net
   end.
