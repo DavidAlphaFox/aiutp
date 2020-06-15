@@ -142,9 +142,7 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
                  Timing,Proc) ->
   Quick =
     if AckNR == undefined -> false;
-       true ->
-        Wanted = ai_utp_util:bit16(AckNR - 1),
-        ai_utp_util:wrapping_compare_less(SeqNo, Wanted, ?ACK_NO_MASK)
+       true -> ai_utp_util:wrapping_compare_less(SeqNo, AckNR, ?ACK_NO_MASK)
     end,
   if Quick == true ->
       Net0 = ai_utp_net_util:send_ack(Net, false),
