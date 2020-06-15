@@ -25,7 +25,7 @@
 
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
--define(MAX_SEND_IDLE_TIME, 6000000).
+-define(MAX_SEND_IDLE_TIME, 2000000).
 -define(MAX_CLOSE_WAIT,     5000000). %% 5s 2 * MAX RTO
 
 -define(TIMER_TIMEOUT,100).
