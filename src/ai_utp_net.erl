@@ -124,8 +124,8 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
           st_reset -> st_reset(State,Net0,Packet,Timing)
         end,
       if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
-          do_send(Net1, Proc,true);
-         true -> {Net1,proc}
+          do_send(Net1,Proc,true);
+         true -> {Net1,Proc}
       end
   end.
 
