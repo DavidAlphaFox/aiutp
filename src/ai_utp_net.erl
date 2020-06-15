@@ -41,8 +41,8 @@ ack(#utp_net{last_ack = LastAck,
   %% 只更新了reorder 或者收到重复包
   Result =
     if Less == true orelse LastAck0 == AckNo ->
-        SAcks = proplists:get_value(sack, Ext,undefined),
-        {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo, SAcks, Net),
+        %SAcks = proplists:get_value(sack, Ext,undefined),
+        {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo, undefined, Net),
         {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
         {Lost,ai_utp_cc:cc(Net0#utp_net{last_ack = AckNo},Timing, MinRTT,
                            AckBytes,Lost,lists:reverse(Times),WndSize)};
