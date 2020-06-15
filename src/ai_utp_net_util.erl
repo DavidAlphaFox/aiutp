@@ -18,8 +18,7 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
     if (Quick == true) orelse (RSize == 0 ) ->
         ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
        true ->
-        %Bits = ai_utp_rx:sack(ai_utp_util:bit16(AckNR + 1),Net),
-        Bits = undefined,
+        Bits = ai_utp_rx:sack(ai_utp_util:bit16(AckNR + 1),Net),
         case Bits of
           undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
           _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])

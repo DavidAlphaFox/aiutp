@@ -40,9 +40,9 @@ ack(#utp_net{last_ack = LastAck,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder 或者收到重复包
   Result =
-    if Less == true orelse LastAck0 == AckNo ->
-        %SAcks = proplists:get_value(sack, Ext,undefined),
-        {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo, undefined, Net),
+    if Less == true ->
+        SAcks = proplists:get_value(sack, Ext,undefined),
+        {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo,SAcks, Net),
         {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
         {Lost,ai_utp_cc:cc(Net0#utp_net{last_ack = AckNo},Timing, MinRTT,
                            AckBytes,Lost,lists:reverse(Times),WndSize)};
@@ -180,7 +180,7 @@ st_state(?SYN_SEND,#utp_net{seq_nr = SeqNR} = Net,
       Net0 = ai_utp_net_util:change_state(
                Net#utp_net{ack_nr = ai_utp_util:bit16(SeqNo + 1)},
                ?ESTABLISHED),
-      ai_utp_net_util:send_ack(Net0, true);
+      ai_utp_net_util:send_ack(Net0,true);
      true -> Net
   end;
 st_state(?SYN_RECEIVE,#utp_net{ack_nr = AckNR} = Net,
