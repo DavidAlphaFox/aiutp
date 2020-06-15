@@ -303,11 +303,13 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
                    parent_monitor = MRef,
                    controller_monitor = CMonitor,
                    connector = Connector,
+                   process = Proc,
                    net = Net
                   } = State)->
   State0 =
     if Connector == undefined ->
-        State#state{net = ai_utp_net:close(Net)};
+        State#state{net = ai_utp_net:close(Net),
+                    process = ai_utp_process:error_all(Proc, econnaborted)};
        true ->
         gen_server:reply(Connector, {error,eagain}),
         if CMonitor == undefined -> State;
@@ -328,7 +330,8 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
     ?CLOSED -> ok;
     _ ->
       %%其它状态
-      ai_utp_net:close(Net,Proc)
+      ai_utp_process:error_all(Proc, econnaborted),
+      ai_utp_net:close(Net)
   end,
   handle_info(timeout,State#state{
                         controller = undefined,
