@@ -229,7 +229,9 @@ handle_cast({packet,Packet,Timing},
           gen_server:reply(Closer, ok);
          true -> ok
       end,
-      {noreply,active_read(State#state{net = Net0,tick_timer = undefined,
+      {noreply,active_read(State#state{net = Net0,
+                                       tick_timer = undefined,
+                                       closer = undefined,
                                        process = Proc0})};
     _ ->
       {noreply,active_read(State#state{process = Proc0,net = Net0})}
