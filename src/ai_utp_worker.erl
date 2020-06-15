@@ -356,6 +356,7 @@ handle_info(_Info, State) ->
 terminate(_Reason, #state{controller = undefined})-> ok;
 terminate(_Reason, #state{controller = Control,active = Active,
                           parent = Parent,net = Net}) ->
+  logger:error("uTP terminate: ~p~n",[self()]),
   if Active == true ->
       Self = self(),
       UTPSocket = {utp,Parent,Self},
@@ -454,12 +455,12 @@ on_tick(NetState,_,#state{net = Net,
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
   {noreply,
-   active_read(State0#state{tick_timer = Timer,net = Net0,process = Proc0})
-  }.
+   active_read(State0#state{tick_timer = Timer,net = Net0,process = Proc0})}.
 
 active_read(#state{parent = Parent,
                    net = Net,
                    controller = Control,
+                   process = Proc,
                    active = true} = State)->
   Self = self(),
   case ai_utp_net:do_read(Net) of
@@ -468,10 +469,13 @@ active_read(#state{parent = Parent,
       State#state{net = Net0,active = false};
      _ ->
       case ai_utp_net:state(Net) of
-        ?CLOSED -> Self ! timeout;
+        ?CLOSED ->
+          Self ! timeout,
+          Error = ai_utp_net:net_error(Net),
+          ai_utp_process:error_all(Proc, Error);
         _ -> ok
       end,
-      State
+      State#state{process = ai_utp_process:new()}
   end;
 active_read(State) -> State.
 
