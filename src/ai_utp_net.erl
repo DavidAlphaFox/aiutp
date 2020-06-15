@@ -83,7 +83,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
                      cur_window = CurWindow} = Net,
             Index,Last,ResendCount) ->
   Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
-  if (Less == true) orelse (Index == Last) ->
+  if Less == true ->
       case array:get(Index,OutBuf) of
         undefined ->
           if Index == Last -> {false,Net};
@@ -128,8 +128,7 @@ fast_resend(#utp_net{reply_micro = ReplyMicro,
 fast_resend(#utp_net{seq_nr = SeqNR,cur_window_packets = CurWindowPackets
                     } = Net,AckNo,Lost)->
   Index = ai_utp_util:bit16(AckNo + 1),
-  MaxSend = if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
-                ?OUTGOING_BUFFER_MAX_SIZE - CurWindowPackets;
+  MaxSend = if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets -> CurWindowPackets;
                true -> 1
             end,
   NeedSend = erlang:min(MaxSend,Lost),
