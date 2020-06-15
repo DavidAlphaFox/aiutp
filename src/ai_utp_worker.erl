@@ -440,27 +440,34 @@ on_tick(NetState,_,#state{net = Net,
     if (NetState0 == ?CLOSED) and (Closer /= undefined)->
         self() ! timeout,
         gen_server:reply(Closer,ok),
-        State;
+        State#state{tick_timer = undefined};
        (NetState0 == ?CLOSED) and (Connector /= undefined)->
         erlang:demonitor(CMonitor,[flush]),
         self() ! timeout,
         gen_server:reply(Connector, {error,etimeout}),
         State#state{controller_monitor = undefined,
                     controller = undefined,
-                    connector = undefined};
-        true -> State
+                    connector = undefined,
+                    tick_timer = undefined};
+       true -> State
     end,
   Timer =
     if NetState0 == ?CLOSED -> undefined;
        true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
     end,
+  Proc1 =
+    if NetState0 == ?CLOSED->
+        Error = ai_utp_net:net_error(Net0),
+        ai_utp_process:error_all(Proc0, Error);
+       true -> Proc0
+    end,
   {noreply,
-   active_read(State0#state{tick_timer = Timer,net = Net0,process = Proc0})}.
+   active_read(State0#state{tick_timer = Timer,net = Net0,
+                            process = Proc1})}.
 
 active_read(#state{parent = Parent,
                    net = Net,
                    controller = Control,
-                   process = Proc,
                    active = true} = State)->
   Self = self(),
   case ai_utp_net:do_read(Net) of
@@ -470,14 +477,12 @@ active_read(#state{parent = Parent,
      _ ->
       case ai_utp_net:state(Net) of
         ?CLOSED ->
-          Self ! timeout,
-          Error = ai_utp_net:net_error(Net),
-          ai_utp_process:error_all(Proc, Error);
+          Self ! timeout;
         _ -> ok
       end,
       State#state{process = ai_utp_process:new()}
   end;
-active_read(State) -> State.
+active_read(State)-> State.
 
 sync_input(Socket,NewOwner,Flag)->
   receive
