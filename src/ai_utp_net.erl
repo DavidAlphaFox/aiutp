@@ -69,7 +69,7 @@ do_fast_resend(#utp_net{reply_micro = ReplyMicro,
                Index,ResendCount) ->
   case array:get(Index,OutBuf) of
     undefined ->
-      do_fast_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount);
+      do_fast_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount-1);
     Wrap ->
       #utp_packet_wrap{packet = Packet,transmissions = Trans,
                        need_resend = Resend} = Wrap,
@@ -91,7 +91,7 @@ do_fast_resend(#utp_net{reply_micro = ReplyMicro,
 
 fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   Diff = ai_utp_util:bit16(SeqNR - AckNo -1),
-  MaxSend = erlang:min(Diff,5),
+  MaxSend = erlang:min(Diff,10),
   Index = ai_utp_util:bit16(AckNo + 1),
   do_fast_resend(Net#utp_net{last_lost = Lost}, Index,MaxSend).
 
