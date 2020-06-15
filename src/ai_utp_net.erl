@@ -474,7 +474,7 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
   %% for some small and senstive data
   %% 100ms is too big
-  do_send(Net,Proc,fasle);
+  do_send(Net,Proc,true);
 do_send(#utp_net{state = ?CLOSING,fin_sent = true} = Net,Proc)->
   Proc0 = ai_utp_process:error_all(Proc, {error,eshutdown}),
   {Net,Proc0};
