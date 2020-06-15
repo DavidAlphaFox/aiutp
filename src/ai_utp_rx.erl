@@ -3,6 +3,7 @@
 
 -export([in/3,ack_packet/3,sack/2]).
 
+-define(EMPTY_SLOT,undefined).
 %% 需要修改ack_nr
 %% ack_nr总是代表下一个需要进行ack的包
 %% 此处只应该接收st_data的包
@@ -29,7 +30,7 @@ in(SeqNo,Payload,
      RSize >= ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
       case array:get(SeqNo, InBuf) of
-        undefined ->
+        ?EMPTY_SLOT ->
           {ok,Net#utp_net{
                 inbuf = array:set(SeqNo, Payload,InBuf),
                 inbuf_size = RSize + 1
@@ -61,21 +62,21 @@ recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
                       ack_nr = SeqNo,inbuf = InBuf,inbuf_size = RSize
                      } = Net) ->
   case array:get(SeqNo,InBuf) of
-    undefined -> {ok,Net};
+    ?EMPTY_SLOT -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
       {fin,Net0#utp_net{
-             inbuf = array:set(SeqNo,undefined,InBuf),
-             inbuf_size = RSize -1,
+             inbuf = array:set(SeqNo,?EMPTY_SLOT,InBuf),
+             inbuf_size = RSize - 1,
              ack_nr = ai_utp_util:bit16(SeqNo + 1)}}
   end;
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
                       inbuf = InBuf,inbuf_size = RSize} = Net) ->
   case array:get(SeqNo,InBuf) of
-    undefined -> {ok,Net};
+    ?EMPTY_SLOT -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
-      recv_reorder(Net0#utp_net{inbuf = array:set(SeqNo,undefined,InBuf),
+      recv_reorder(Net0#utp_net{inbuf = array:set(SeqNo,?EMPTY_SLOT,InBuf),
                                 inbuf_size = RSize -1,
                                 ack_nr = ai_utp_util:bit16(SeqNo + 1)})
   end.
@@ -111,20 +112,20 @@ ack_distance(CurWindowPackets,SeqNR,AckNo)->
 
 ack_packet(AckNo,AckNo,OutBuf,Packets)->
   case array:get(AckNo,OutBuf) of
-    undefined -> {lists:reverse(Packets),OutBuf};
+    ?EMPTY_SLOT -> {lists:reverse(Packets),OutBuf};
     Packet ->
       {lists:reverse([Packet|Packets]),
-       array:set(AckNo,undefined,OutBuf)}
+       array:set(AckNo,?EMPTY_SLOT,OutBuf)}
   end;
 ack_packet(Index,AckNo,OutBuf,Packets)->
   case array:get(Index,OutBuf) of
-    undefined ->
+    ?EMPTY_SLOT ->
       %% 前面某个Ack包通过SACK，Ack掉这个包了
       ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
                  OutBuf,Packets);
      Packet ->
       ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
-                 array:set(Index,undefined,OutBuf),
+                 array:set(Index,?EMPTY_SLOT,OutBuf),
                  [Packet|Packets])
   end.
   
@@ -143,7 +144,7 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
   when Index >=0 ->
   SeqNo = ai_utp_util:bit16(Base + Index),
   case array:get(SeqNo,OutBuf) of
-    undefined ->
+    ?EMPTY_SLOT ->
       sack_packet(Base,Map,Index - 1,Packets,OutBuf,Acked,Lost);
     Wrap ->
       Pos = Index bsr 3,
@@ -182,7 +183,7 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
      true ->
       {Lost,_,Packets,OutBuf0} = sack_packet(Base,Map,Max-1,[],OutBuf,0,0),
       case array:get(Base0,OutBuf0) of
-        undefined ->
+        ?EMPTY_SLOT ->
           logger:error("SACK AckNo: ~p SeqNR: ~p Base: ~p, Last:~p Max:~p~n",
                        [AckNo, SeqNR,Base,Last,Max]),
           {Lost,Packets,OutBuf0}; %% 此种情况不应该发生
@@ -226,7 +227,7 @@ build_sack(Base,InBuf,RSize,Index,Pos,Map)->
        true -> Map
     end,
   case array:get(SeqNo,InBuf) of
-    undefined -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
+    ?EMPTY_SLOT -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
     _ ->
       Bits = maps:get(Pos0,Map0),
       Bits0 = Mask bor Bits,
