@@ -196,7 +196,7 @@ st_data(?ESTABLISHED,Net,
         #utp_packet{seq_no = SeqNo,payload = Payload,
                     ack_no = AckNo}=Packet,Timing) ->
   case ai_utp_rx:in(SeqNo,Payload,Net) of
-    duplicate -> ai_utp_net_util:send_ack(Net, true);
+    duplicate -> ai_utp_net_util:send_ack(Net, false);
     {_,Net0} ->
       {Lost,Net1} = ack(Net0,Packet,Timing),
       Net2 = ai_utp_net_util:send_ack(Net1,false),
@@ -603,7 +603,7 @@ force_state(State,#utp_net{last_send = LastSend} = Net)->
   if (State == ?ESTABLISHED orelse State == ?CLOSING)->
       if
         Diff >= ?MAX_SEND_IDLE_TIME ->
-          ai_utp_net_util:send_ack(Net,true);
+          ai_utp_net_util:send_ack(Net,false);
         true-> Net
       end;
      true -> Net
