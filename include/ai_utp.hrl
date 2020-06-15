@@ -68,8 +68,8 @@
                  opt_sndbuf = ?OPT_SEND_BUF * 2,
                  %%rcvbuf setting, in bytes
                  opt_recvbuf = ?OPT_RECV_BUF * 2,
-                 opt_ignore_lost = false,
-                 opt_bust = true,
+                 opt_ignore_lost = true,
+                 opt_bust = false,
                  socket = undefined,
                  remote = undefined,
                  state = undefined,
