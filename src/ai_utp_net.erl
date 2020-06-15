@@ -63,56 +63,37 @@ ack(#utp_net{last_ack = LastAck,
         
 
 
-fast_resend(#utp_net{
-               outbuf = OutBuf
-              } = Net,Index, Last,0)->
-  Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
+do_fast_resend(Net,_,0)-> Net;
+do_fast_resend(#utp_net{reply_micro = ReplyMicro,
+                     outbuf = OutBuf} = Net,
+               Index,ResendCount) ->
   case array:get(Index,OutBuf) of
     undefined ->
-      if Less == true -> {false,Net};
-         true -> {true,Net}
-      end;
-    #utp_packet_wrap{need_resend = Resend} ->
-      if Resend == true -> {false,Net};
-         true -> {true,Net}
-      end
-  end;
-fast_resend(#utp_net{reply_micro = ReplyMicro,
-                     outbuf = OutBuf,
-                     cur_window_packets = CurWindowPackets,
-                     cur_window = CurWindow} = Net,
-            Index,Last,ResendCount) ->
-  Less = ai_utp_util:wrapping_compare_less(Index, Last, ?ACK_NO_MASK),
-  if Less == true ->
-      case array:get(Index,OutBuf) of
-        undefined ->
-          if Index == Last -> {false,Net};
-             true -> fast_resend(Net,ai_utp_util:bit16(Index + 1),
-                                 Last,ResendCount)
+      do_fast_resend(Net,ai_utp_util:bit16(Index + 1),ResendCount -1);
+    Wrap ->
+      #utp_packet_wrap{packet = Packet,transmissions = Trans,
+                       need_resend = Resend} = Wrap,
+      if Resend == true andalso Trans > 0 ->
+          case ai_utp_net_util:send(Net,Packet,ReplyMicro) of
+            {ok,SendTimeNow} ->
+              OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
+                                          need_resend = false,
+                                          transmissions = Trans + 1,
+                                          send_time = SendTimeNow},OutBuf),
+              do_fast_resend(Net#utp_net{last_send = SendTimeNow,
+                                         outbuf = OutBuf0},
+                             ai_utp_util:bit16(Index + 1),ResendCount - 1);
+            _ -> Net
           end;
-        Wrap ->
-          #utp_packet_wrap{packet = Packet,transmissions = Trans,
-                           need_resend = Resend} = Wrap,
-          if Resend == true andalos Trans > 0 ->
-              case ai_utp_net_util:send(Net,Packet,ReplyMicro) of
-                {ok,SendTimeNow} ->
-                  OutBuf0 = array:set(Index,Wrap#utp_packet_wrap{
-                                              need_resend = false,
-                                              transmissions = Trans + 1,
-                                              send_time = SendTimeNow},OutBuf),
-                  fast_resend(Net#utp_net{last_send = SendTimeNow,
-                                          outbuf = OutBuf0},
-                              ai_utp_util:bit16(Index + 1),Last,
-                              ResendCount - 1);
-                _ -> {false,Net}
-              end;
-             true -> {true,Net} %% 这种情况不应当发生
-          end
+         true -> Net
       end
   end.
 
 fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
-  fast_resend(Net#utp_net{last_lost = Lost}, Index, SeqNR,4).
+  Diff = ai_utp_util:bit16(SeqNR - AckNo -1),
+  MaxSend = erlang:min(Diff,5),
+  Index = ai_utp_util:bit16(AckNo + 1),
+  do_fast_resend(Net#utp_net{last_lost = Lost}, Index,MaxSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
 process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
@@ -134,7 +115,7 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
       end;
      true ->
       Net0 = Net#utp_net{last_recv = ai_utp_util:microsecond() },
-      Result =
+      Net1 =
         case Type of
           st_syn -> st_syn(State,Net0,Packet,Timing);
           st_data -> st_data(State,Net0,Packet,Timing);
@@ -142,12 +123,9 @@ process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
           st_fin -> st_fin(State,Net0,Packet,Timing);
           st_reset -> st_reset(State,Net0,Packet,Timing)
         end,
-      case Result of
-        {SendNew,Net1} ->
-          if SendNew == false -> {Net1,Proc};
-             true -> do_send(Net1, Proc,true)
-          end;
-        Net1 -> {Net1,Proc}
+      if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
+          do_send(Net1, Proc,true);
+         true -> {Net1,proc}
       end
   end.
 
