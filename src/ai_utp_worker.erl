@@ -224,7 +224,9 @@ handle_cast({packet,Packet,Timing},
   case ai_utp_net:state(Net0) of
      ?CLOSED ->
       cancle_tick_timer(Timer),
-      if Closer /= undefined -> gen_server:reply(Closer, ok);
+      if Closer /= undefined ->
+          self() ! timeout,
+          gen_server:reply(Closer, ok);
          true -> ok
       end,
       {noreply,active_read(State#state{net = Net0,tick_timer = undefined,
@@ -326,9 +328,12 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
       %%其它状态
       ai_utp_net:close(Net,Proc)
   end,
-  {noreply,State#state{controller = undefined,
-                       process = ai_utp_process:new(),
-                       controller_monitor = undefined},0};
+  handle_info(timeout,State#state{
+                        controller = undefined,
+                        process = ai_utp_process:new(),
+                        controller_monitor = undefined
+                       });
+
 handle_info(_Info, State) ->
   {noreply, State}.
 
