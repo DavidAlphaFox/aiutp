@@ -31,7 +31,7 @@ ack_bytes(AckPackets,Now)->
 ack(#utp_net{last_ack = LastAck,
              state = State,seq_nr = SeqNR} =Net,
     #utp_packet{ack_no = AckNo,
-                win_sz = WndSize,extension = Ext},
+                win_sz = WndSize},
     {_,_,Now} = Timing)->
   LastAck0 =
     if LastAck == undefined -> ai_utp_util:bit16(AckNo -1);
