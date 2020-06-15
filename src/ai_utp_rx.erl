@@ -129,7 +129,7 @@ ack_packet(Index,AckNo,OutBuf,Packets)->
   end.
   
 sack_map(<<>>,_,Map) -> Map;
-sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
+sack_map(<<Bits/big-unsigned-integer,Rest/binary>>,N,Map) ->
   sack_map(Rest,N+1,maps:put(N,Bits,Map)).
 
 need_resend(Index,Acked,Wrap,OutBuf)->
@@ -143,8 +143,8 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
   when Index >=0 ->
   SeqNo = ai_utp_util:bit16(Base + Index),
   case array:get(SeqNo,OutBuf) of
-    undefined -> sack_packet(Base,Map,Index - 1,
-                             Packets,OutBuf,Acked,Lost);
+    undefined ->
+      sack_packet(Base,Map,Index - 1,Packets,OutBuf,Acked,Lost);
     Wrap ->
       Pos = Index bsr 3,
       case maps:get(Pos,Map) of
@@ -208,12 +208,12 @@ sack(Base,#utp_net{inbuf = InBuf,inbuf_size = RSize}) ->
 build_sack(_,_,0,_,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
-                  <<BAcc/binary,Bits/big-integer>>
+                  <<BAcc/binary,Bits/big-unsigned-integer>>
               end, <<>>, lists:seq(0, Pos));
 build_sack(_,_,_,?REORDER_SACK_MAX_SIZE,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
-                  <<BAcc/binary,Bits/big-integer>>
+                  <<BAcc/binary,Bits/big-unsigned-integer>>
               end, <<>>, lists:seq(0, Pos));
 build_sack(Base,InBuf,RSize,Index,Pos,Map)->
   SeqNo = ai_utp_util:bit16(Base + Index),
