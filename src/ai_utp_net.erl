@@ -40,7 +40,7 @@ ack(#utp_net{last_ack = LastAck,
   Less = ai_utp_util:wrapping_compare_less(LastAck0,AckNo,?ACK_NO_MASK),
   %% 只更新了reorder 或者收到重复包
   Result =
-    if Less == true orelse LastAck0 == AckNo ->
+    if Less == true  ->
         SAcks = proplists:get_value(sack, Ext,undefined),
         {Lost,AckPackets,Net0} = ai_utp_rx:ack_packet(AckNo,SAcks, Net),
         {MinRTT,Times,AckBytes} = ack_bytes(AckPackets,Now),
@@ -96,37 +96,23 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   do_fast_resend(Net#utp_net{last_lost = Lost}, Index,MaxSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
-process_incoming(#utp_net{state = State,ack_nr = AckNR,last_lost = Lost,
-                          cur_window_packets = CurWindowPackets } = Net,
-                 #utp_packet{type = Type,seq_no = SeqNo} = Packet,
+process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets
+                          } = Net,
+                 #utp_packet{type = Type} = Packet,
                  Timing,Proc) ->
-  Quick =
-    if AckNR == undefined -> false;
-       true -> ai_utp_util:wrapping_compare_less(SeqNo, AckNR, ?ACK_NO_MASK)
+
+  Net0 = Net#utp_net{last_recv = ai_utp_util:microsecond() },
+  Net1 =
+    case Type of
+      st_syn -> st_syn(State,Net0,Packet,Timing);
+      st_data -> st_data(State,Net0,Packet,Timing);
+      st_state -> st_state(State,Net0,Packet,Timing);
+      st_fin -> st_fin(State,Net0,Packet,Timing);
+      st_reset -> st_reset(State,Net0,Packet,Timing)
     end,
-  if Quick == true ->
-      Net0 = ai_utp_net_util:send_ack(Net#utp_net{
-                                        last_recv = ai_utp_util:microsecond()},
-                                      false),
-      if (Lost == 0) andalso
-         (CurWindowPackets < ?OUTGOING_BUFFER_MAX_SIZE) ->
-          do_send(Net0,Proc,true);
-         true -> {Net0,Proc}
-      end;
-     true ->
-      Net0 = Net#utp_net{last_recv = ai_utp_util:microsecond() },
-      Net1 =
-        case Type of
-          st_syn -> st_syn(State,Net0,Packet,Timing);
-          st_data -> st_data(State,Net0,Packet,Timing);
-          st_state -> st_state(State,Net0,Packet,Timing);
-          st_fin -> st_fin(State,Net0,Packet,Timing);
-          st_reset -> st_reset(State,Net0,Packet,Timing)
-        end,
-      if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
-          do_send(Net1,Proc,true);
-         true -> {Net1,Proc}
-      end
+  if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
+      do_send(Net1,Proc,true);
+     true -> {Net1,Proc}
   end.
 
 
