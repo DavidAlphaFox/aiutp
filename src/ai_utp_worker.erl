@@ -168,16 +168,15 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
                                     controller_monitor = CMonitor0})};
 handle_call({send,Data},From,
             #state{process = Proc,net = Net} = State)->
-  case ai_utp_net:state(Net) of
-    ?CLOSED ->
-      Reason = ai_utp_net:net_error(Net),
-      self() ! timeout,
-      {reply,{error,Reason},State};
-    _ ->
-      Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
-      {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
-      {noreply,active_read(State#state{net = Net0,process = Proc1})}
-  end;
+  Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
+  {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
+
+  case ai_utp_net:state(Net0) of
+    ?CLOSED -> self() ! timeout;
+    true -> ok
+  end,
+  {noreply,active_read(State#state{net = Net0,process = Proc1})};
+
 handle_call({active,true},_From,State) ->
   {reply,ok,active_read(State#state{active = true})};
 handle_call(controller,_From,#state{controller = Controller} = State)->
