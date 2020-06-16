@@ -26,7 +26,7 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
                                             [{ext_bits,ExtBits}]);
           _ ->
             ai_utp_protocol:make_ack_packet(SeqNo, AckNo,
-                                            [{sack,Bits},[{ext_bits,ExtBits}]])
+                                            [{sack,Bits},{ext_bits,ExtBits}])
         end
     end,
   Packet0 = Packet#utp_packet{win_sz = window_size(Net),
