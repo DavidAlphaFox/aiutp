@@ -43,6 +43,7 @@
 -define(MIN_WINDOW_SIZE, 102400).
 -define(MAX_WINDOW_SIZE,14680064).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
+-define(MAX_SYN_RESNED,5).
 
 -define(EMPTY_SLOT,undefined).
 
@@ -126,7 +127,7 @@
                  last_send = 0 :: integer(),
                  last_recv = 0:: integer(),
                  last_ack = undefined,
-                 rto = 500,
+                 rto = 200,
                  syn_sent_count = 0,
                  last_lost = 0,
                  last_state_changed = undefined}).

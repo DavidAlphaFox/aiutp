@@ -363,10 +363,10 @@ on_tick(?SYN_SEND,#utp_net{rto = RTO,
                            last_send = LastSend,
                            syn_sent_count = SynSentCount
                           } = Net,Proc)
-  when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  when SynSentCount > ?MAX_SYN_RESNED ->
   Now = ai_utp_util:microsecond(),
   Diff = (Now - LastSend) div 1000,
-  if Diff >= (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
+  if Diff >= (RTO * ?MAX_SYN_RESNED) ->
       {ai_utp_net_util:change_state(Net, ?CLOSED, etimeout),Proc};
      true -> {Net,Proc}
   end;
@@ -386,10 +386,10 @@ on_tick(?SYN_RECEIVE,#utp_net{rto = RTO,
                            last_send = LastSend,
                            syn_sent_count = SynSentCount
                           } = Net,Proc)
-  when SynSentCount > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+  when SynSentCount > ?MAX_SYN_RESNED ->
   Now = ai_utp_util:microsecond(),
   Diff = (Now - LastSend) div 1000,
-  if Diff > (RTO * ?DUPLICATE_ACKS_BEFORE_RESEND) ->
+  if Diff > (RTO * ?MAX_SYN_RESNED) ->
       {ai_utp_net_util:change_state(Net, ?CLOSED, etimeout),Proc};
      true -> {Net,Proc}
   end;
