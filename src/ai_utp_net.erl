@@ -438,7 +438,6 @@ on_tick(State,#utp_net{last_recv = LastReceived,conn_id = ConnID} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
-      logger:error("RECV IDLE TIMEOUT ConnID: ~p~n",[ConnID]),
       {Net#utp_net{state = ?CLOSED,error = econnaborted}, Proc};
      true ->
       {SendNew,Net0} = expire_resend(Net, Now),

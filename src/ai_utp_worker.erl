@@ -355,7 +355,6 @@ handle_info(_Info, State) ->
 terminate(_Reason, #state{controller = undefined})-> ok;
 terminate(_Reason, #state{controller = Control,active = Active,
                           parent = Parent,net = Net}) ->
-  logger:error("uTP terminate: ~p~n",[self()]),
   if Active == true ->
       Self = self(),
       UTPSocket = {utp,Parent,Self},
