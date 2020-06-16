@@ -72,7 +72,7 @@ decode(Packet,RecvTS) ->
 -spec decode_packet(binary(),integer()) ->
         {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet,RecvTS) ->
-  <<Type:4/big-integer,2:4/big-integer,
+  <<Type:4/big-integer,1:4/big-integer,
     Extension:8/big-integer, ConnectionId:16/big-integer,
     TS:32/big-integer,TSDiff:32/big-integer,
     WindowSize:32/big-integer,SeqNo:16/big-integer,
@@ -130,7 +130,7 @@ encode(#utp_packet {type = Type,
                 payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
-  <<EncTy:4/big-integer,2:4/big-integer,
+  <<EncTy:4/big-integer,1:4/big-integer,
     Extension:8/big-integer, ConnID:16/big-integer,
     TS:32/big-integer,TSDiff:32/big-integer,
     WSize:32/big-integer,
