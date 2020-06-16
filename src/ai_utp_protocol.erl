@@ -32,7 +32,7 @@ make_syn_packet(SeqNo) ->
   #utp_packet { type = st_syn,
             seq_no = SeqNo,
             ack_no = 0,
-            extension = []}.
+            extension = ?SYN_EXTS}.
 make_fin_packet(SeqNo,AckNo)->
   #utp_packet{ type = st_fin,
                seq_no = SeqNo,
