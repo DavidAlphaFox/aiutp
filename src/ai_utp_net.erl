@@ -434,7 +434,7 @@ on_tick(?CLOSING,
       {ai_utp_net_util:change_state(Net, ?CLOSED),Proc};
      true -> {Net,Proc}
   end;
-on_tick(State,#utp_net{last_recv = LastReceived,conn_id = ConnID} =  Net,Proc)->
+on_tick(State,#utp_net{last_recv = LastReceived} =  Net,Proc)->
   Now = ai_utp_util:microsecond(),
   Diff = Now - LastReceived,
   if Diff >= ?MAX_RECV_IDLE_TIME ->
