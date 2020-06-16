@@ -173,7 +173,7 @@ handle_call({send,Data},From,
 
   case ai_utp_net:state(Net0) of
     ?CLOSED -> self() ! timeout;
-    true -> ok
+    _ -> ok
   end,
   {noreply,active_read(State#state{net = Net0,process = Proc1})};
 
