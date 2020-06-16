@@ -130,4 +130,5 @@
                  rto = 200,
                  syn_sent_count = 0,
                  last_lost = 0,
-                 last_state_changed = undefined}).
+                 last_state_changed = undefined,
+                 ext_bits = undefined}).

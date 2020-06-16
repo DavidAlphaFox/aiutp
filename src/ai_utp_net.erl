@@ -96,23 +96,26 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   do_fast_resend(Net#utp_net{last_lost = Lost}, Index,MaxSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
-process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets
-                          } = Net,
-                 #utp_packet{type = Type} = Packet,
-                 Timing,Proc) ->
-
-  Net0 = Net#utp_net{last_recv = ai_utp_util:microsecond() },
-  Net1 =
-    case Type of
-      st_syn -> st_syn(State,Net0,Packet,Timing);
-      st_data -> st_data(State,Net0,Packet,Timing);
-      st_state -> st_state(State,Net0,Packet,Timing);
-      st_fin -> st_fin(State,Net0,Packet,Timing);
-      st_reset -> st_reset(State,Net0,Packet,Timing)
-    end,
-  if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
-      do_send(Net1,Proc,true);
-     true -> {Net1,Proc}
+process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets,
+                          ext_bits = ExtBits} = Net,
+                 #utp_packet{type = Type,extension = Ext} = Packet,
+                {_,_,Now} = Timing,Proc) ->
+  PacketExtBits = proplists:get_value(ext_bits, Ext),
+  if PacketExtBits == ExtBits orelse ExtBits == undefined->
+      Net0 = Net#utp_net{last_recv = Now },
+      Net1 =
+        case Type of
+          st_syn -> st_syn(State,Net0,Packet,Timing);
+          st_data -> st_data(State,Net0,Packet,Timing);
+          st_state -> st_state(State,Net0,Packet,Timing);
+          st_fin -> st_fin(State,Net0,Packet,Timing);
+          st_reset -> st_reset(State,Net0,Packet,Timing)
+        end,
+      if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
+          do_send(Net1,Proc,true);
+         true -> {Net1,Proc}
+      end;
+     true  -> {Net,Proc}
   end.
 
 
@@ -230,12 +233,18 @@ close(#utp_net{sndbuf = SndBuf,
   
 connect(Net,ConnID)->
   SeqNR = ai_utp_util:bit16_random(),
+  H = ai_utp_util:bit32_random(),
+  L = ai_utp_util:bit32_random(),
+  ExtBits = <<H:32/big-unsigned-integer,
+              L:32/big-unsigned-integer>>,
+
   Net0 =
     ai_utp_net_util:change_state(Net#utp_net{
                                    conn_id = ConnID,
                                    peer_conn_id = ai_utp_util:bit16(ConnID + 1),
                                    seq_nr = SeqNR,
-                                   last_seq_nr = SeqNR
+                                   last_seq_nr = SeqNR,
+                                   ext_bits = ExtBits
                                   },?SYN_SEND),
   ai_utp_net_util:send_syn(Net0).
 
@@ -243,8 +252,10 @@ connect(Net,ConnID)->
 accept(Net,#utp_packet{
               conn_id = PeerConnID,
               seq_no = AckNo,
-              win_sz = PeerWinSize},
+              win_sz = PeerWinSize,
+              extension = Ext},
        {TS,_,Now})->
+  ExtBits = proplists:get_value(ext_bits, Ext),
   SeqNR = ai_utp_util:bit16_random(),
   ConnID = ai_utp_util:bit16(PeerConnID + 1),
   ReplyMicro = Now - TS,
@@ -258,7 +269,8 @@ accept(Net,#utp_packet{
                                      ack_nr = ai_utp_util:bit16(AckNo + 1),
                                      seq_nr = SeqNR,
                                      last_seq_nr = SeqNR,
-                                     reply_micro = ReplyMicro},?SYN_RECEIVE)),
+                                     reply_micro = ReplyMicro,
+                                     ext_bits = ExtBits},?SYN_RECEIVE)),
   {Net0,ConnID}.
 
 

@@ -11,17 +11,22 @@ send(#utp_net{socket = Socket,remote = Remote},Packet,TSDiff)->
 
 send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
                   reply_micro = ReplyMicro,inbuf_size = RSize,
-                  peer_conn_id = PeerConnID} = Net,Quick)->
+                  peer_conn_id = PeerConnID,
+                  ext_bits = ExtBits} = Net,Quick)->
   AckNo = ai_utp_util:bit16(AckNR -1),
   SeqNo = ai_utp_util:bit16(SeqNR -1),
   Packet =
     if (Quick == true) orelse (RSize == 0 ) ->
-        ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
+        ai_utp_protocol:make_ack_packet(SeqNo, AckNo,[{ext_bits,ExtBits}]);
        true ->
         Bits = ai_utp_rx:sack(ai_utp_util:bit16(AckNR + 1),Net),
         case Bits of
-          undefined -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo);
-          _ -> ai_utp_protocol:make_ack_packet(SeqNo, AckNo, [{sack,Bits}])
+          undefined ->
+            ai_utp_protocol:make_ack_packet(SeqNo, AckNo,
+                                            [{ext_bits,ExtBits}]);
+          _ ->
+            ai_utp_protocol:make_ack_packet(SeqNo, AckNo,
+                                            [{sack,Bits},[{ext_bits,ExtBits}]])
         end
     end,
   Packet0 = Packet#utp_packet{win_sz = window_size(Net),
@@ -32,10 +37,13 @@ send_ack(#utp_net{ack_nr = AckNR,seq_nr = SeqNR,
   end.
 
 send_syn(#utp_net{max_window = MaxWindow,seq_nr = SeqNR,
-                  conn_id = ConnID,syn_sent_count = SynSentCount} = Net) ->
+                  conn_id = ConnID,syn_sent_count = SynSentCount,
+                  ext_bits = ExtBits} = Net) ->
   SeqNo = ai_utp_util:bit16(SeqNR - 1),
   Packet = ai_utp_protocol:make_syn_packet(SeqNo),
-  case send(Net,Packet#utp_packet{conn_id = ConnID,win_sz = MaxWindow},0) of
+  case send(Net,Packet#utp_packet{conn_id = ConnID,
+                                  win_sz = MaxWindow,
+                                  extension = [{ext_bits,ExtBits}]},0) of
     {ok,SendTimeNow} ->
       Net#utp_net{
         last_send = SendTimeNow,
@@ -56,11 +64,13 @@ send_syn_state(#utp_net{seq_nr = SeqNR,
                         max_window = MaxWindow,
                         peer_conn_id = PeerConnID,
                         syn_sent_count = SynSentCount,
-                        reply_micro = ReplyMicro} = Net)->
+                        reply_micro = ReplyMicro,
+                        ext_bits = ExtBits} = Net)->
   SeqNo = ai_utp_util:bit16(SeqNR - 1),
   AckNo = ai_utp_util:bit16(AckNR - 1),
   Res = ai_utp_protocol:make_ack_packet(SeqNo, AckNo),
   case send(Net,Res#utp_packet{win_sz = MaxWindow,
+                               extension = [{ext_bits,ExtBits}],
                                conn_id = PeerConnID},ReplyMicro) of
     {ok,SendTimeNow}->
       Net#utp_net{syn_sent_count = SynSentCount + 1,
@@ -75,11 +85,13 @@ send_syn_state(#utp_net{seq_nr = SeqNR,
 send_fin(#utp_net{last_seq_nr = SeqNR,
                   peer_conn_id = PeerConnID,
                   reply_micro = ReplyMicro,
+                  ext_bits = ExtBits,
                   ack_nr = AckNR} = Net)->
   FinSeqNo = ai_utp_util:bit16(SeqNR - 1),
   AckNo = ai_utp_util:bit16(AckNR - 1),
   Fin = ai_utp_protocol:make_fin_packet(FinSeqNo, AckNo),
-  Fin0 = Fin#utp_packet{conn_id = PeerConnID,win_sz = 0},
+  Fin0 = Fin#utp_packet{conn_id = PeerConnID,win_sz = 0,
+                        extension = [{ext_bits,ExtBits}]},
   case send(Net,Fin0,ReplyMicro) of
     {ok,SendTimeNow}->
       Net#utp_net{fin_sent = true,

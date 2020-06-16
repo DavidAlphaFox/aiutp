@@ -30,17 +30,17 @@ send_packet(Net,ToFill,Packet,ReplyMicro)->
 %% 对于所有没有发送成功的包，都不记录在发送窗口内
 fill_window(Net,0) -> Net;
 fill_window(#utp_net{sndbuf_size = 0}= Net,_) -> Net;
-fill_window(#utp_net{
-                 seq_nr = SeqNo,
-                 last_seq_nr = SeqNo,
-                 ack_nr = AckNR,
-                 cur_window = CurWindow,
-                 cur_window_packets = CurWindowPackets,
-                 outbuf = OutBuf,
-                 peer_conn_id = PeerConnID,
-                 sndbuf = SndBuf,
-                 reply_micro = ReplyMicro,
-                 sndbuf_size = SndBufSize} = Net,Bytes) ->
+fill_window(#utp_net{seq_nr = SeqNo,
+                     last_seq_nr = SeqNo,
+                     ack_nr = AckNR,
+                     cur_window = CurWindow,
+                     cur_window_packets = CurWindowPackets,
+                     outbuf = OutBuf,
+                     peer_conn_id = PeerConnID,
+                     sndbuf = SndBuf,
+                     ext_bits = ExtBits,
+                     reply_micro = ReplyMicro,
+                     sndbuf_size = SndBufSize} = Net,Bytes) ->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = ai_utp_net_util:window_size(Net),
   ToFill =
@@ -52,7 +52,8 @@ fill_window(#utp_net{
       Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
       Packet0 = Packet#utp_packet{payload = Bin,
                                   win_sz = WinSize,
-                                  conn_id = PeerConnID},
+                                  conn_id = PeerConnID,
+                                  extension = [{ext_bits,ExtBits}]},
       {LastSend,WrapPacket} = send_packet(Net, ToFill, Packet0,ReplyMicro),
       if LastSend == undefined ->
           Net#utp_net{last_seq_nr = ai_utp_util:bit16(SeqNo + 1),
@@ -75,7 +76,8 @@ fill_window(#utp_net{
       Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
       Packet0 = Packet#utp_packet{payload = Bin,
                                   win_sz = WinSize,
-                                  conn_id = PeerConnID},
+                                  conn_id = PeerConnID,
+                                  extension = [{ext_bits,ExtBits}]},
       {LastSend,WrapPacket} = send_packet(Net,Filled, Packet0,ReplyMicro),
       if LastSend == undefined ->
           Net#utp_net{
@@ -114,12 +116,12 @@ fill_window(#utp_net{
 fast_send(Net,NextSeqNR,_,0)-> {false,Net#utp_net{seq_nr = NextSeqNR}};
 %% 稍后重新计算发送窗口
 fast_send(Net,Last,Last,_) -> {true,Net#utp_net{seq_nr = Last}};
-fast_send(#utp_net{
-             reply_micro = ReplyMicro,
-             ack_nr = AckNR,
-             cur_window_packets = CurWindowPackets,
-             cur_window = CurWindow,
-             outbuf = OutBuf} = Net,Index,Last,Bytes) ->
+fast_send(#utp_net{reply_micro = ReplyMicro,
+                   ack_nr = AckNR,
+                   cur_window_packets = CurWindowPackets,
+                   cur_window = CurWindow,
+                   outbuf = OutBuf
+                  } = Net,Index,Last,Bytes) ->
 
   Wrap = array:get(Index,OutBuf),
   AckNo = ai_utp_util:bit16(AckNR - 1),
@@ -166,17 +168,20 @@ dequeue_sndbuf(ToFill,SndBuf,Acc)->
 
 flush(#utp_net{last_seq_nr = SeqNo,ack_nr = AckNR,
                sndbuf_size = SndBufSize,sndbuf = SndBuf,
-               outbuf = OutBuf,peer_conn_id = ConnID
+               outbuf = OutBuf,peer_conn_id = ConnID,
+               ext_bits  = ExtBits
               } = Net)->
   AckNo = ai_utp_util:bit16(AckNR - 1),
   WinSize = ai_utp_net_util:window_size(Net),
   case fill_from_sndbuf(?PACKET_SIZE,SndBuf,SndBufSize) of
     {filled,Bin,SndBuf0} ->
       Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
+      Packet0 = Packet#utp_packet{win_sz = WinSize,
+                                  payload = Bin,
+                                  conn_id = ConnID,
+                                  extension = [{ext_bits,ExtBits}]},
       WrapPacket =
-        #utp_packet_wrap{packet = Packet#utp_packet{win_sz = WinSize,
-                                                    payload = Bin,
-                                                    conn_id = ConnID},
+        #utp_packet_wrap{packet = Packet0,
                          transmissions = 0,
                          payload = ?PACKET_SIZE,
                          send_time = undefined},
@@ -187,10 +192,12 @@ flush(#utp_net{last_seq_nr = SeqNo,ack_nr = AckNR,
       flush(Net0);
     {Filled,Bin,SndBuf0}->
       Packet = ai_utp_protocol:make_data_packet(SeqNo, AckNo),
+      Packet0 = Packet#utp_packet{win_sz = WinSize,
+                                  payload = Bin,
+                                  conn_id = ConnID,
+                                  extension = [{ext_bits,ExtBits}]},
       WrapPacket =
-        #utp_packet_wrap{packet = Packet#utp_packet{win_sz = WinSize,
-                                                    payload = Bin,
-                                                    conn_id = ConnID},
+        #utp_packet_wrap{packet = Packet0,
                          transmissions = 0,
                          payload = Filled,
                          send_time = undefined},
