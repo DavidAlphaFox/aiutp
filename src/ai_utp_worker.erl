@@ -467,6 +467,7 @@ on_tick(NetState,_,#state{net = Net,
 active_read(#state{parent = Parent,
                    net = Net,
                    controller = Control,
+                   process = Proc,
                    active = true} = State)->
   Self = self(),
   case ai_utp_net:do_read(Net) of
@@ -474,12 +475,14 @@ active_read(#state{parent = Parent,
       Control ! {utp,{utp,Parent,Self},Buffer},
       State#state{net = Net0,active = false};
      _ ->
-      case ai_utp_net:state(Net) of
-        ?CLOSED ->
-          Self ! timeout;
-        _ -> ok
-      end,
-      State#state{process = ai_utp_process:new()}
+      Proc0 =
+        case ai_utp_net:state(Net) of
+          ?CLOSED ->
+            Self ! timeout,
+            ai_utp_process:error_all(Proc, ai_utp_net:net_error(Net));
+          _ -> Proc
+        end,
+      State#state{process = Proc0}
   end;
 active_read(State)-> State.
 
