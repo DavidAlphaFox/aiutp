@@ -220,14 +220,18 @@ close(#utp_net{sndbuf = SndBuf,
   Net1 = ai_utp_tx:flush(Net0),
   #utp_net{last_ack = LastAck,last_seq_nr = SeqNR,
            cur_window_packets = CurWindowPackets} = Net1,
-  Diff = ai_utp_util:bit16(SeqNR - LastAck),
-  %% 最后一个ACK和下一个包号相差1，说明已经都响应了
-  if Diff == 1 ->
-      0 = CurWindowPackets, %% 断言，如果不等一定会崩溃
-      ai_utp_net_util:send_fin(
-        ai_utp_net_util:change_state(Net1, ?CLOSING));
+  if LastAck /= undefined ->
+      Diff = ai_utp_util:bit16(SeqNR - LastAck),
+      %% 最后一个ACK和下一个包号相差1，说明已经都响应了
+      if Diff == 1 ->
+          0 = CurWindowPackets, %% 断言，如果不等一定会崩溃
+          ai_utp_net_util:send_fin(
+            ai_utp_net_util:change_state(Net1, ?CLOSING));
+         true ->
+          %% 变状态,但是不发送fin包
+          ai_utp_net_util:change_state(Net1, ?CLOSING)
+      end;
      true ->
-      %% 变状态,但是不发送fin包
       ai_utp_net_util:change_state(Net1, ?CLOSING)
   end.
   
