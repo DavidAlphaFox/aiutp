@@ -5,7 +5,7 @@
          enqueue_receiver/3,
          reenqueue_receiver/4,
          dequeue_receiver/1,
-         fill_send_window/2,
+         fill_sndbuf/2,
          bytes_in_recv_buffer/1,
          recv_buffer_empty/1,
          apply_all/2,
@@ -73,7 +73,7 @@ enqueue_sender(From, Data,
   NQ = queue:in({sender, From, Data}, SQ),
   PI#utp_process{ sender = NQ }.
 
-fill_send_window(N, #utp_process{ sender = SQ } = PI) when is_integer(N) ->
+fill_sndbuf(N, #utp_process{ sender = SQ } = PI) when is_integer(N) ->
   case dequeue(N, SQ, <<>>) of
     {done, Bin, SQ1} ->
       {filled, Bin, PI#utp_process{ sender = SQ1}};
