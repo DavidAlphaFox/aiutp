@@ -195,9 +195,11 @@ accept_incoming({Caller,_} = Acceptor,
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
     {error,exist}->
+      Exts = proplists:get_value(ext_bits, Packet#utp_packet.extension),
       ResetPacket = ai_utp_protocol:make_reset_packet(
                       Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
-      ai_utp_util:send(Socket, Remote, ResetPacket, 0),
+      ai_utp_util:send(Socket, Remote,
+                       ResetPacket#utp_packet{extension = [{ext_bits,Exts}]}, 0),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
     Error ->
       logger:error(Error),
@@ -209,9 +211,11 @@ pair_incoming(Remote,Packet,_,
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
+  Exts = proplists:get_value(ext_bits, Packet#utp_packet.extension),
   ResetPacket = ai_utp_protocol:make_reset_packet(
                   Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
-  ai_utp_util:send(Socket, Remote, ResetPacket, 0),
+  ai_utp_util:send(Socket, Remote,
+                   ResetPacket#utp_packet{extension = [{ext_bits,Exts}]}, 0),
   {noreply,State};
 
 pair_incoming(Remote,Packet,Timing,

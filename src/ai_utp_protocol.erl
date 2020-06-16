@@ -143,6 +143,7 @@ encode_extensions([{sack, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),
   {?EXT_SACK, <<Next:8/big-integer, Sz:8/big-integer, Bits/binary, Bin/binary>>};
+encode_extensions([{ext_bits,undefined}| R])-> encode_extensions(R);
 encode_extensions([{ext_bits, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),

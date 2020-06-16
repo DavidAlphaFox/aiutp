@@ -137,14 +137,18 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({reset,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo}},
-            #state{socket = Socket} = State)->
-  reset(Socket, Remote, ConnID, SeqNo),
+handle_cast({reset,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo,
+                                      extension = Ext}},
+             #state{socket = Socket} = State)->
+  reset(Socket, Remote, ConnID, SeqNo,
+        proplists:get_value(ext_bits,Ext)),
   {noreply,State};
 
-handle_cast({syn,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo}},
+handle_cast({syn,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo,
+                                    extension = Ext}},
             #state{socket = Socket,acceptor = closed} = State)->
-  reset(Socket,Remote,ConnID,SeqNo),
+  reset(Socket,Remote,ConnID,SeqNo,
+        proplists:get_value(ext_bits,Ext)),
   {noreply,State};
 handle_cast({syn,_,_,_} = Req,#state{acceptor = Acceptor} = State)->
   ai_utp_acceptor:incoming(Acceptor,Req),
@@ -223,6 +227,7 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-reset(Socket,Remote,ConnID,AckNo)->
+reset(Socket,Remote,ConnID,AckNo,Exts)->
   Packet = ai_utp_protocol:make_reset_packet(ConnID, AckNo),
-  ai_utp_util:send(Socket, Remote, Packet, 0).
+  ai_utp_util:send(Socket, Remote,
+                   Packet#utp_packet{extension = [{ext_bits,Exts}]}, 0).

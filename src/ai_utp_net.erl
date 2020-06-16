@@ -101,7 +101,7 @@ process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets,
                  #utp_packet{type = Type,extension = Ext} = Packet,
                 {_,_,Now} = Timing,Proc) ->
   PacketExtBits = proplists:get_value(ext_bits, Ext),
-  if PacketExtBits == ExtBits orelse ExtBits == undefined->
+  if PacketExtBits == ExtBits orelse ExtBits == undefined ->
       Net0 = Net#utp_net{last_recv = Now },
       Net1 =
         case Type of
