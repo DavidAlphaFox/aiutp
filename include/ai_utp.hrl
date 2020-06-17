@@ -47,7 +47,7 @@
 
 -define(EMPTY_SLOT,undefined).
 -define(UTP_OPTIONS,[utp_sndbuf,utp_recvbuf,
-                     utp_ignore_lost,opt_brust]).
+                     utp_ignore_lost,utp_brust]).
 
 -record(utp_packet, {type           :: utp_packet_type(),
                      conn_id        :: integer(),
