@@ -172,12 +172,14 @@ handle_call({send,Data},From,
             #state{process = Proc,net = Net} = State)->
   Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
   {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
-
-  case ai_utp_net:state(Net0) of
-    ?CLOSED -> self() ! timeout;
-    _ -> ok
-  end,
-  {noreply,active_read(State#state{net = Net0,process = Proc1})};
+  Proc2 =
+    case ai_utp_net:state(Net0) of
+      ?CLOSED ->
+        ai_utp_process:error_all(Proc1, closed)
+        self() ! timeout;
+      _ -> Proc1
+    end,
+  {noreply,active_read(State#state{net = Net0,process = Proc2})};
 
 handle_call({active,true},_From,State) ->
   {reply,ok,active_read(State#state{active = true})};
