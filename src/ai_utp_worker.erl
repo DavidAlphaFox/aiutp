@@ -175,9 +175,10 @@ handle_call({send,Data},From,
   Proc2 =
     case ai_utp_net:state(Net0) of
       ?CLOSED ->
-
-        erlang:send_after(5000, self(), timeout),
-        ai_utp_process:error_all(Proc1, closed);
+        Proc3 = ai_utp_process:error_all(Proc1, closed),
+        timer:sleep(100),
+        self() ! timeout,
+        Proc3;
       _ -> Proc1
     end,
   {noreply,active_read(State#state{net = Net0,process = Proc2})};
@@ -194,6 +195,8 @@ handle_call({close,Controll},From,#state{controller = Controll,
   Net0 = ai_utp_net:close(Net,Proc),
   case ai_utp_net:state(Net0) of
     ?CLOSED ->
+      gen_server:reply(From, ok),
+      timer:sleep(100),
       self() ! timeout,
       {reply,ok,State#state{active = false,net = Net0,
                             process = ai_utp_process:new()}};
