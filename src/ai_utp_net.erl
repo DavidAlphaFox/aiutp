@@ -151,6 +151,22 @@ st_data(?ESTABLISHED,Net,
         end,
       fast_resend(Net2,AckNo,Lost)
   end;
+%% 同时都处在了CLOSING状态
+st_data(?CLOSING,Net,
+        #utp_packet{seq_no = SeqNo,payload = Payload,
+                    ack_no = AckNo}=Packet,Timing) ->
+  case ai_utp_rx:in(SeqNo,Payload,Net) of
+    duplicate -> ai_utp_net_util:send_ack(Net, false);
+    {_,Net0} ->
+      {Lost,Net1} = ack(Net0,Packet,Timing),
+      Net2 =
+        if Net#utp_net.inbuf_size /= Net1#utp_net.inbuf_size orelse
+           Net#utp_net.ack_nr /= Net1#utp_net.ack_nr ->
+            ai_utp_net_util:send_ack(Net1,false);
+           true -> Net1
+        end,
+      fast_resend(Net2,AckNo,Lost)
+  end;
 st_data(_,Net,_,_) -> Net.
 
 

@@ -52,7 +52,9 @@ recv(?CLOSE_WAIT,Payload,
   Size = erlang:byte_size(Payload),
   Net#utp_net{
     recvbuf = queue:in({Size,Payload},RecvBuf),
-    recvbuf_size = RecvBufSize + Size}.
+    recvbuf_size = RecvBufSize + Size};
+%% CLOSING状态只增加序列号，并不要真收数据
+recv(_,_,Net) -> Net.
 
 recv_reorder(#utp_net{inbuf_size = 0} = Net)-> {ok,Net};
 recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
