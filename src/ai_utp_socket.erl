@@ -236,7 +236,22 @@ split_options(Options)->
       false -> [binary|UDPOptions];
       true -> UDPOptions
     end,
-  {UDPOptions0,UTPOptions}.
+  UTPSndBuf = proplists:get_value(utp_sndbuf,UTPOptions) * 4,
+  UTPRecvBuf = proplists:get_value(utp_recvbuf,UTPOptions) * 4,
+  UDPSndBuf = proplists:get_value(sndbuf,UDPOptions0,UTPSndBuf),
+  UDPRecBuf = proplists:get_value(recbuf,UDPOptions0,UTPRecvBuf),
+  UDPSndBuf0 =
+    if UDPSndBuf < UTPSndBuf -> UTPSndBuf;
+       true -> UDPSndBuf
+    end,
+  UDPRecBuf0 =
+    if UDPRecBuf < UTPRecvBuf -> UTPRecvBuf;
+       true -> UDPRecBuf
+    end,
+  UDPRecBuf = proplists:get_value(recbuf,UDPOptions0,UTPRecvBuf),
+  UDPOptions1 = [{sndbuf,UDPSndBuf0}| proplists:delete(sndbuf, UDPOptions0)],
+  UDPOptions2 = [{recbuf,UDPRecBuf0}| proplists:delete(recbuf, UDPOptions1)],
+  {UDPOptions2,UTPOptions}.
 
 
 split_options([],Acc)-> Acc;
