@@ -12,7 +12,7 @@
 
 -include("ai_utp.hrl").
 %% API
--export([start_link/3]).
+-export([start_link/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -29,7 +29,8 @@
                 monitors,
                 syns,
                 syn_len,
-                max_syn_len
+                max_syn_len,
+                options
                }).
 
 %%%===================================================================
@@ -44,12 +45,12 @@ incoming(Pid,Req)->
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(),port(),list()) -> {ok, Pid :: pid()} |
+-spec start_link(pid(),port(),list(),list()) -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link(Parent,Socket,Options) ->
-  gen_server:start_link(?MODULE, [Parent,Socket,Options], []).
+start_link(Parent,Socket,Options,UTPOptions) ->
+  gen_server:start_link(?MODULE, [Parent,Socket,Options,UTPOptions], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,7 +67,7 @@ start_link(Parent,Socket,Options) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Parent,Socket,Options]) ->
+init([Parent,Socket,Options,UTPOptions]) ->
   Backlog =
     case Options of
       undefined -> ?BACKLOG;
@@ -78,8 +79,8 @@ init([Parent,Socket,Options]) ->
           acceptors = queue:new(),
           syns = queue:new(),
           syn_len = 0,
-          max_syn_len = Backlog
-         }}.
+          max_syn_len = Backlog,
+          options = UTPOptions}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -186,8 +187,8 @@ accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
   {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
 accept_incoming({Caller,_} = Acceptor,
                 #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
-                      parent = Parent,socket = Socket } = State)->
-  {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket),
+                       parent = Parent,socket = Socket,options = Options} = State)->
+  {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket,Options),
   {{value,Req},Syns0} = queue:out(Syns),
   {Remote,Packet,Timing} = Req,
   case ai_utp_worker:accept(Worker, Caller,Remote, Packet,Timing) of

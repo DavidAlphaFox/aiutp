@@ -12,7 +12,7 @@
 -include("ai_utp.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -43,6 +43,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
 connect(Pid,Caller,Address,Port)->
   gen_server:call(Pid, {connect,Caller,{Address,Port}},infinity).
 accept(Pid,Caller,Remote,Packet,Timing)->
@@ -83,12 +84,12 @@ incoming(Pid,Packet,Timing)->
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(),port()) -> {ok, Pid :: pid()} |
+-spec start_link(pid(),port(),list()) -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link(Parent,Socket) ->
-  gen_server:start_link(?MODULE, [Parent,Socket], []).
+start_link(Parent,Socket,Options) ->
+  gen_server:start_link(?MODULE, [Parent,Socket,Options], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -105,13 +106,14 @@ start_link(Parent,Socket) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Parent,Socket]) ->
+init([Parent,Socket,Options]) ->
   ParentMonitor = erlang:monitor(process,Parent),
+  Net0 = net(Options),
   {ok, #state{
           parent = Parent,
           socket = Socket,
           parent_monitor = ParentMonitor,
-          net = #utp_net{socket = Socket},
+          net = Net0#utp_net{socket = Socket},
           process = ai_utp_process:new()}}.
 
 %%--------------------------------------------------------------------
@@ -496,3 +498,22 @@ sync_input(Socket,NewOwner,Flag)->
   after 0 ->
       Flag
   end.
+
+net(Options)->
+  OptSndBuf = proplists:get_value(utp_sndbuf, Options,?OPT_SEND_BUF),
+  OptRecvBuf = proplists:get_value(utp_recvbuf, Options,?OPT_RECV_BUF),
+  OptIgnoreLost = proplists:get_value(utp_ignore_lost,Options,true),
+  OptBrust = proplists:get_value(utp_brust, Options,false),
+  OptSndBuf0 =
+    if OptSndBuf > ?MIN_WINDOW_SIZE -> OptSndBuf;
+       true -> ?MIN_WINDOW_SIZE
+    end,
+  OptRecvBuf0 =
+    if OptRecvBuf > ?PACKET_SIZE -> OptRecvBuf;
+       true -> ?PACKET_SIZE
+    end,
+  #utp_net{
+     opt_bust = OptBrust,
+     opt_ignore_lost = OptIgnoreLost,
+     opt_sndbuf = OptSndBuf0,
+     opt_recvbuf = OptRecvBuf0}.

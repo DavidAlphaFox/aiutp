@@ -46,6 +46,8 @@
 -define(MAX_SYN_RESNED,5).
 
 -define(EMPTY_SLOT,undefined).
+-define(UTP_OPTIONS,[utp_sndbuf,utp_recvbuf,
+                     utp_ignore_lost,opt_brust]).
 
 -record(utp_packet, {type           :: utp_packet_type(),
                      conn_id        :: integer(),
@@ -85,9 +87,9 @@
                  %% don't count either
                  cur_window = 0,
                  %% maximum window size, in bytes
-                 max_window = ?OPT_SEND_BUF,
+                 max_window = ?MAX_WINDOW_SIZE,
                  %% max receive window for other end, in bytes
-                 max_peer_window = ?OPT_RECV_BUF,
+                 max_peer_window = ?MAX_WINDOW_SIZE,
                  %% All sequence numbers up to including this have been properly received
                  %% by us
                  ack_nr = undefined,

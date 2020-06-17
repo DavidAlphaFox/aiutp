@@ -15,14 +15,15 @@
 
 %% Supervisor callbacks
 -export([init/1]).
--export([new/2]).
+-export([new/3]).
 
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
-new(Parent,Socket)-> supervisor:start_child(?SERVER, [Parent,Socket]).
+new(Parent,Socket,Options)->
+  supervisor:start_child(?SERVER, [Parent,Socket,Options]).
 
 %%--------------------------------------------------------------------
 %% @doc

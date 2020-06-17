@@ -23,15 +23,15 @@
 -record(state, {
                 socket,
                 dispatch,
-                acceptor = closed
-               }).
+                acceptor = closed,
+                options}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 connect(UTPSocket,Address,Port)->
-  {ok,Socket} = gen_server:call(UTPSocket,socket),
-  {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket),
+  {ok,{Socket,UTPOptions}} = gen_server:call(UTPSocket,socket),
+  {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket,UTPOptions),
   Address0 = ai_utp_util:getaddr(Address),
   Caller = self(),
   case ai_utp_worker:connect(Worker,Caller,Address0, Port) of
@@ -79,17 +79,12 @@ start_link(Port,Options) ->
 init([Port,Options]) ->
   process_flag(trap_exit, true),
   Parent = self(),
-  Options0 =
-    case proplists:is_defined(binary,Options) of
-      false -> [binary|Options];
-      true -> Options
-    end,
-  case gen_udp:open(Port,Options0 ++ [{sndbuf,?OPT_SEND_BUF * 4},
-                                      {recbuf,?OPT_RECV_BUF * 4}]) of
+  {UDPOptions,UTPOptions} = split_options(Options),
+  case gen_udp:open(Port,UDPOptions) of
     {ok,Socket} ->
       {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
       ok = inet:setopts(Socket, [{active,once}]),
-      {ok, #state{socket = Socket,dispatch = Dispatch}};
+      {ok, #state{socket = Socket,dispatch = Dispatch,options = UTPOptions}};
     {error,Reason} -> {stop,Reason}
   end.
 
@@ -108,12 +103,13 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call(socket,_From,#state{socket = Socket} = State)->
-  {reply,{ok,Socket},State};
+handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
+  {reply,{ok,{Socket,Options}},State};
 handle_call({listen,Options},_From,
-            #state{socket = Socket,acceptor = closed} = State)->
+            #state{socket = Socket,acceptor = closed,
+                   options = UTPOptions} = State)->
   Parent = self(),
-  {ok,Acceptor} = ai_utp_acceptor:start_link(Parent,Socket,Options),
+  {ok,Acceptor} = ai_utp_acceptor:start_link(Parent,Socket,Options,UTPOptions),
   {reply,ok,State#state{acceptor = Acceptor}};
 handle_call({listen,_},_From,State) ->
   {reply,{error,is_listen_socket},State};
@@ -231,3 +227,27 @@ reset(Socket,Remote,ConnID,AckNo,Exts)->
   Packet = ai_utp_protocol:make_reset_packet(ConnID, AckNo),
   ai_utp_util:send(Socket, Remote,
                    Packet#utp_packet{extension = [{ext_bits,Exts}]}, 0).
+
+split_options(Options)->
+  {UDPOptions,UTPOptions} =
+    split_options(Options,{[],[]}),
+  UDPOptions0 =
+    case proplists:is_defined(binary,UDPOptions) of
+      false -> [binary|UDPOptions];
+      true -> UDPOptions
+    end,
+  {UDPOptions0,UTPOptions}.
+
+
+split_options([],Acc)-> Acc;
+split_options([{Key,_} = Opt|T],{UDPOptions,UTPOptions})->
+  Member = lists:member(Key, ?UTP_OPTIONS),
+  Acc =
+    if Member == true ->
+        {UDPOptions,[Opt|UTPOptions]};
+       true ->
+        {[Opt|UDPOptions],UTPOptions}
+    end,
+  split_options(T,Acc);
+split_options([Opt|T],{UDPOptions,UTPOptions})->
+  split_options(T,{[Opt|UDPOptions],UTPOptions}).
