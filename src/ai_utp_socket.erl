@@ -236,8 +236,8 @@ split_options(Options)->
       false -> [binary|UDPOptions];
       true -> UDPOptions
     end,
-  UTPSndBuf = proplists:get_value(utp_sndbuf,UTPOptions) * 4,
-  UTPRecvBuf = proplists:get_value(utp_recvbuf,UTPOptions) * 4,
+  UTPSndBuf = proplists:get_value(utp_sndbuf,UTPOptions,?OPT_SEND_BUF) * 4,
+  UTPRecvBuf = proplists:get_value(utp_recvbuf,UTPOptions,?OPT_RECV_BUF) * 4,
   UDPSndBuf = proplists:get_value(sndbuf,UDPOptions0,UTPSndBuf),
   UDPRecBuf = proplists:get_value(recbuf,UDPOptions0,UTPRecvBuf),
   UDPSndBuf0 =
