@@ -58,8 +58,10 @@ update_estimate_exceed(#utp_net{our_ledbat = Ours} = NW,MinRTT) ->
       end
   end.
 
-congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
-                            last_maxed_out_window = LastMaxedOutWindow }=Net,
+congestion_control(#utp_net{
+                      opt_recvbuf = OptRecvBuf,
+                      our_ledbat = OurLedbat,max_window = MaxWindow,
+                      last_maxed_out_window = LastMaxedOutWindow }=Net,
                    AckedBytes, NowMS,MinRTT)->
   OurDelay = min(MinRTT,ai_utp_ledbat:get_value(OurLedbat)),
 
@@ -87,7 +89,7 @@ congestion_control(#utp_net{our_ledbat = OurLedbat,max_window = MaxWindow,
        true -> ScaledGain
     end,
   LedbatCwnd = ai_utp_util:clamp(MaxWindow + ScaledGain0,
-                                 ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
+                                 ?MIN_WINDOW_SIZE,OptRecvBuf),
   Net#utp_net{max_window = erlang:floor(LedbatCwnd)}.
 
 

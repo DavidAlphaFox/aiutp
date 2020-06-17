@@ -96,8 +96,7 @@ fast_resend(#utp_net{seq_nr = SeqNR} = Net,AckNo,Lost)->
   do_fast_resend(Net#utp_net{last_lost = Lost}, Index,MaxSend).
 
 process_incoming(#utp_net{state = ?CLOSED} = Net,_,_,Proc)-> {Net,Proc};
-process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets,
-                          ext_bits = ExtBits} = Net,
+process_incoming(#utp_net{state = State,ext_bits = ExtBits} = Net,
                  #utp_packet{type = Type,extension = Ext} = Packet,
                 {_,_,Now} = Timing,Proc) ->
   PacketExtBits = proplists:get_value(ext_bits, Ext),
@@ -111,10 +110,7 @@ process_incoming(#utp_net{state = State,cur_window_packets = CurWindowPackets,
           st_fin -> st_fin(State,Net0,Packet,Timing);
           st_reset -> st_reset(State,Net0,Packet,Timing)
         end,
-      if ?OUTGOING_BUFFER_MAX_SIZE > CurWindowPackets ->
-          do_send(Net1,Proc,true);
-         true -> {Net1,Proc}
-      end;
+      do_send(Net1,Proc,true);
      true  -> {Net,Proc}
   end.
 
@@ -357,8 +353,7 @@ expire_resend(#utp_net{seq_nr = SeqNR,
                        cur_window_packets = CurWindowPackets} = Net, Now)->
   if CurWindowPackets > 0 ->
       WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
-      ResendCount = erlang:min(CurWindowPackets,?OUTGOING_BUFFER_MAX_SIZE),
-      expire_resend(Net,WindowStart,ResendCount,Now);
+      expire_resend(Net,WindowStart,CurWindowPackets,Now);
      true -> {true,Net}
   end.
 force_state(State, #utp_net{last_send = LastSend } = Net)->
