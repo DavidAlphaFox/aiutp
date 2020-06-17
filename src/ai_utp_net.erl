@@ -217,6 +217,7 @@ st_reset(_,Net,_,_) ->
   ai_utp_net_util:change_state(Net, ?CLOSED, econnreset).
 close(Net)->
   ai_utp_net_util:change_state(Net, ?CLOSED, econnaborted).
+close(#utp_net{state = ?CLOSED} = Net,_Proc)-> Net;
 close(#utp_net{sndbuf = SndBuf,
                sndbuf_size = SndBufSize
          } = Net,Proc)->
