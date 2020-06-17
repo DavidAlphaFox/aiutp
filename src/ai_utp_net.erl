@@ -281,11 +281,6 @@ accept(Net,#utp_packet{
 state(#utp_net{state = State})-> State.
 
 
-
-
-
-
-
 %% try to full fill one package
 do_send(#utp_net{state = ?ESTABLISHED } = Net,Proc)->
   %% for some small and senstive data

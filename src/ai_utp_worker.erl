@@ -175,7 +175,7 @@ handle_call({send,Data},From,
   Proc2 =
     case ai_utp_net:state(Net0) of
       ?CLOSED ->
-        ai_utp_process:error_all(Proc1, closed)
+        ai_utp_process:error_all(Proc1, closed),
         self() ! timeout;
       _ -> Proc1
     end,
