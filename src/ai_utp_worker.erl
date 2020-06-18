@@ -286,6 +286,8 @@ handle_info(timeout,#state{parent_monitor = ParentMonitor,
                            tick_timer = Timer,
                            conn_id = ConnID,
                            remote = Remote,
+                           process = Proc,
+                           net = Net,
                            controller_monitor = CMonitor} =  State)->
   if ParentMonitor /= undefined ->
       erlang:demonitor(ParentMonitor,[flush]);
@@ -296,8 +298,15 @@ handle_info(timeout,#state{parent_monitor = ParentMonitor,
      true -> ok
   end,
   cancle_tick_timer(Timer),
+  Reason =
+    case ai_utp_net:net_error(Net) of
+      normal -> closed;
+      R -> R
+    end,
+  Proc0 = ai_utp_process:error_all(Proc, Reason),
   ai_utp_conn:free(Remote, ConnID),
   {stop,normal,State#state{parent_monitor = undefined,
+                           process = Proc0,
                            controller_monitor = undefined}};
 handle_info({timeout,TRef,{rto,N}},
             #state{net = Net,tick_timer = {set,TRef}} = State)->
