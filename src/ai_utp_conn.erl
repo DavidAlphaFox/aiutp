@@ -212,9 +212,11 @@ free(Socket,Remote,ConnectionID)->
   
 close(Ref) ->
   [{{ref, Ref}, Socket}] = ets:lookup(?TAB, {ref, Ref}),
+  ets:delete(?TAB,{ref,Ref}),
+  ets:delete(?TAB,{ref,Socket}),
   case [Conn || [Conn] <-  ets:match(?TAB, {'$1', {socket,Socket}})] of
-    [{conn,ConnectionID,Remote}] ->
-      free(Socket,Remote,ConnectionID);
+    [ConnKey] ->
+      ets:delete(?TAB, ConnKey);
      _-> ok
   end.
 

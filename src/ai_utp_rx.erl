@@ -2,7 +2,6 @@
 -include("ai_utp.hrl").
 
 -export([in/3,ack_packet/3,sack/2]).
-
 %% 需要修改ack_nr
 %% ack_nr总是代表下一个需要进行ack的包
 %% 此处只应该接收st_data的包
@@ -29,7 +28,7 @@ in(SeqNo,Payload,
      RSize >= ?REORDER_BUFFER_MAX_SIZE -> {ok,Net};
      true ->
       case array:get(SeqNo, InBuf) of
-        undefined ->
+        ?EMPTY_SLOT ->
           {ok,Net#utp_net{
                 inbuf = array:set(SeqNo, Payload,InBuf),
                 inbuf_size = RSize + 1
@@ -53,7 +52,9 @@ recv(?CLOSE_WAIT,Payload,
   Size = erlang:byte_size(Payload),
   Net#utp_net{
     recvbuf = queue:in({Size,Payload},RecvBuf),
-    recvbuf_size = RecvBufSize + Size}.
+    recvbuf_size = RecvBufSize + Size};
+%% CLOSING状态只增加序列号，并不要真收数据
+recv(_,_,Net) -> Net.
 
 recv_reorder(#utp_net{inbuf_size = 0} = Net)-> {ok,Net};
 recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
@@ -61,35 +62,37 @@ recv_reorder(#utp_net{got_fin = true,eof_seq_no = SeqNo,
                       ack_nr = SeqNo,inbuf = InBuf,inbuf_size = RSize
                      } = Net) ->
   case array:get(SeqNo,InBuf) of
-    undefined -> {ok,Net};
+    ?EMPTY_SLOT -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
       {fin,Net0#utp_net{
-             inbuf = array:set(SeqNo,undefined,InBuf),
-             inbuf_size = RSize -1,
+             inbuf = array:set(SeqNo,?EMPTY_SLOT,InBuf),
+             inbuf_size = RSize - 1,
              ack_nr = ai_utp_util:bit16(SeqNo + 1)}}
   end;
 recv_reorder(#utp_net{state = State,ack_nr = SeqNo,
                       inbuf = InBuf,inbuf_size = RSize} = Net) ->
   case array:get(SeqNo,InBuf) of
-    undefined -> {ok,Net};
+    ?EMPTY_SLOT -> {ok,Net};
     Payload ->
       Net0 = recv(State, Payload, Net),
-      recv_reorder(Net0#utp_net{inbuf = array:set(SeqNo,undefined,InBuf),
+      recv_reorder(Net0#utp_net{inbuf = array:set(SeqNo,?EMPTY_SLOT,InBuf),
                                 inbuf_size = RSize -1,
                                 ack_nr = ai_utp_util:bit16(SeqNo + 1)})
   end.
 
 
-ack_packet(AckNo,SAcks,#utp_net{cur_window_packets = CurWindowPackets,
-                                seq_nr = SeqNR,outbuf = OutBuf} = Net)->
+ack_packet(AckNo,SAcks,
+           #utp_net{cur_window_packets = CurWindowPackets,
+                    seq_nr = SeqNR,
+                    outbuf = OutBuf} = Net)->
   %% 最老的序列号
   WindowStart = ai_utp_util:bit16(SeqNR - CurWindowPackets),
   %% AckNo必须小于SeqNR，distance = 0的时候，不应该进行ack
   AckDistance = ack_distance(CurWindowPackets, SeqNR, AckNo),
   {Packets,OutBuf0} =
     if AckDistance == 0 -> {[],OutBuf};
-       true -> ack_packet(WindowStart,AckNo,OutBuf,[])
+       true -> ack(WindowStart,AckNo,OutBuf,[])
     end,
   {Lost,Packets0,OutBuf1} = sack_packet(AckNo,SeqNR, SAcks, OutBuf0),
   {Lost,Packets ++ Packets0,
@@ -109,27 +112,27 @@ ack_distance(CurWindowPackets,SeqNR,AckNo)->
      true -> 0
   end.
 
-ack_packet(AckNo,AckNo,OutBuf,Packets)->
+ack(AckNo,AckNo,OutBuf,Packets)->
   case array:get(AckNo,OutBuf) of
-    undefined -> {lists:reverse(Packets),OutBuf};
+    ?EMPTY_SLOT -> {lists:reverse(Packets),OutBuf};
     Packet ->
       {lists:reverse([Packet|Packets]),
-       array:set(AckNo,undefined,OutBuf)}
+       array:set(AckNo,?EMPTY_SLOT,OutBuf)}
   end;
-ack_packet(Index,AckNo,OutBuf,Packets)->
+ack(Index,AckNo,OutBuf,Packets)->
   case array:get(Index,OutBuf) of
-    undefined ->
+    ?EMPTY_SLOT ->
       %% 前面某个Ack包通过SACK，Ack掉这个包了
-      ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
+      ack(ai_utp_util:bit16(Index + 1),AckNo,
                  OutBuf,Packets);
      Packet ->
-      ack_packet(ai_utp_util:bit16(Index + 1),AckNo,
-                 array:set(Index,undefined,OutBuf),
+      ack(ai_utp_util:bit16(Index + 1),AckNo,
+                 array:set(Index,?EMPTY_SLOT,OutBuf),
                  [Packet|Packets])
   end.
   
 sack_map(<<>>,_,Map) -> Map;
-sack_map(<<Bits/big-integer,Rest/binary>>,N,Map) ->
+sack_map(<<Bits/big-unsigned-integer,Rest/binary>>,N,Map) ->
   sack_map(Rest,N+1,maps:put(N,Bits,Map)).
 
 need_resend(Index,Acked,Wrap,OutBuf)->
@@ -143,8 +146,8 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
   when Index >=0 ->
   SeqNo = ai_utp_util:bit16(Base + Index),
   case array:get(SeqNo,OutBuf) of
-    undefined -> sack_packet(Base,Map,Index - 1,
-                             Packets,OutBuf,Acked,Lost);
+    ?EMPTY_SLOT ->
+      sack_packet(Base,Map,Index - 1,Packets,OutBuf,Acked,Lost);
     Wrap ->
       Pos = Index bsr 3,
       case maps:get(Pos,Map) of
@@ -156,9 +159,12 @@ sack_packet(Base,Map,Index,Packets,OutBuf,Acked,Lost)
           Set = Bit band Mask,
           if Set == 0 ->
               OutBuf0 = need_resend(SeqNo,Acked,Wrap,OutBuf),
-              sack_packet(Base,Map,Index - 1, Packets,OutBuf0,Acked,Lost + 1);
+              sack_packet(Base,Map,Index - 1, Packets,
+                          OutBuf0,Acked,Lost + 1);
              true ->
-              sack_packet(Base,Map,Index-1,[Wrap|Packets],OutBuf,Acked + 1,Lost)
+              sack_packet(Base,Map,Index-1,[Wrap|Packets],
+                          array:set(SeqNo,undefined,OutBuf),
+                          Acked + 1,Lost)
           end
       end
   end;
@@ -179,7 +185,7 @@ sack_packet(AckNo,SeqNR,Bits,OutBuf)->
      true ->
       {Lost,_,Packets,OutBuf0} = sack_packet(Base,Map,Max-1,[],OutBuf,0,0),
       case array:get(Base0,OutBuf0) of
-        undefined ->
+        ?EMPTY_SLOT ->
           logger:error("SACK AckNo: ~p SeqNR: ~p Base: ~p, Last:~p Max:~p~n",
                        [AckNo, SeqNR,Base,Last,Max]),
           {Lost,Packets,OutBuf0}; %% 此种情况不应该发生
@@ -205,12 +211,12 @@ sack(Base,#utp_net{inbuf = InBuf,inbuf_size = RSize}) ->
 build_sack(_,_,0,_,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
-                  <<BAcc/binary,Bits/big-integer>>
+                  <<BAcc/binary,Bits/big-unsigned-integer>>
               end, <<>>, lists:seq(0, Pos));
 build_sack(_,_,_,?REORDER_SACK_MAX_SIZE,Pos,Map)->
   lists:foldl(fun(BI,BAcc)->
                   Bits = maps:get(BI,Map),
-                  <<BAcc/binary,Bits/big-integer>>
+                  <<BAcc/binary,Bits/big-unsigned-integer>>
               end, <<>>, lists:seq(0, Pos));
 build_sack(Base,InBuf,RSize,Index,Pos,Map)->
   SeqNo = ai_utp_util:bit16(Base + Index),
@@ -223,7 +229,7 @@ build_sack(Base,InBuf,RSize,Index,Pos,Map)->
        true -> Map
     end,
   case array:get(SeqNo,InBuf) of
-    undefined -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
+    ?EMPTY_SLOT -> build_sack(Base,InBuf,RSize,Index + 1,Pos0,Map0);
     _ ->
       Bits = maps:get(Pos0,Map0),
       Bits0 = Mask bor Bits,

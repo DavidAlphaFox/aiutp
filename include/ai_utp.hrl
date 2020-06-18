@@ -16,16 +16,15 @@
 -define(ACK_NO_MASK, 16#FFFF).
 -define(HALF_CIRCLE, 16#6FFF).
 -define(REORDER_BUFFER_MAX_SIZE,16384).
--define(OUTGOING_BUFFER_MAX_SIZE, 32).
--define(REORDER_SACK_MAX_SIZE,799).
+-define(REORDER_SACK_MAX_SIZE,800).
 -define(PACKET_SIZE, 1176).
 -define(MIN_PACKET_SIZE,800).
--define(OPT_RECV_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
--define(OPT_SEND_BUF, ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE).
+-define(OPT_RECV_BUF, 128 * ?PACKET_SIZE).
+-define(OPT_SEND_BUF, 128 * ?PACKET_SIZE).
 
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
--define(MAX_SEND_IDLE_TIME, 6000000).
+-define(MAX_SEND_IDLE_TIME, 2000000).
 -define(MAX_CLOSE_WAIT,     5000000). %% 5s 2 * MAX RTO
 
 -define(TIMER_TIMEOUT,100).
@@ -43,6 +42,11 @@
 -define(MIN_WINDOW_SIZE, 102400).
 -define(MAX_WINDOW_SIZE,14680064).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
+-define(MAX_SYN_RESNED,5).
+
+-define(EMPTY_SLOT,undefined).
+-define(UTP_OPTIONS,[utp_sndbuf,utp_recvbuf,
+                     utp_ignore_lost,utp_brust]).
 
 -record(utp_packet, {type           :: utp_packet_type(),
                      conn_id        :: integer(),
@@ -66,8 +70,8 @@
                  opt_sndbuf = ?OPT_SEND_BUF * 2,
                  %%rcvbuf setting, in bytes
                  opt_recvbuf = ?OPT_RECV_BUF * 2,
-                 opt_ignore_lost = false,
-                 opt_bust = true,
+                 opt_ignore_lost = true,
+                 opt_bust = false,
                  socket = undefined,
                  remote = undefined,
                  state = undefined,
@@ -82,9 +86,9 @@
                  %% don't count either
                  cur_window = 0,
                  %% maximum window size, in bytes
-                 max_window = ?OPT_SEND_BUF,
+                 max_window = ?MAX_WINDOW_SIZE,
                  %% max receive window for other end, in bytes
-                 max_peer_window = ?OPT_RECV_BUF,
+                 max_peer_window = ?MAX_WINDOW_SIZE,
                  %% All sequence numbers up to including this have been properly received
                  %% by us
                  ack_nr = undefined,
@@ -124,7 +128,8 @@
                  last_send = 0 :: integer(),
                  last_recv = 0:: integer(),
                  last_ack = undefined,
-                 rto = 500,
+                 rto = 200,
                  syn_sent_count = 0,
                  last_lost = 0,
-                 last_state_changed = undefined}).
+                 last_state_changed = undefined,
+                 ext_bits = undefined}).
