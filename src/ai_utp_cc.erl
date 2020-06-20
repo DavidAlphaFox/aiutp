@@ -100,12 +100,13 @@ ack_packet_rtt(#utp_net{rtt = RTT,opt_bust = OptBust} = Net,
 
 
 update_decay_window(Net,0,_)->Net;
-update_decay_window(#utp_net{last_decay_win = LastDecay,
-                            max_window = MaxWindow} = Net,
+update_decay_window(#utp_net{opt_recvbuf = OptRecvBuf,
+                             last_decay_win = LastDecay,
+                             max_window = MaxWindow} = Net,
                     Lost,NowMS) when Lost > ?DUPLICATE_ACKS_BEFORE_RESEND->
     if (NowMS - LastDecay) > ?MAX_WINDOW_DECAY ->
         MaxWindow0 = ai_utp_util:clamp(erlang:floor(MaxWindow * 0.75),
-                                       ?MIN_WINDOW_SIZE,?MAX_WINDOW_SIZE),
+                                       ?MIN_WINDOW_SIZE,OptRecvBuf),
         Net#utp_net{max_window = MaxWindow0, last_decay_win = NowMS};
        true -> Net
     end;
