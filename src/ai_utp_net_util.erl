@@ -104,9 +104,9 @@ send_fin(#utp_net{last_seq_nr = SeqNR,
   end.
 
 
-window_size(#utp_net{opt_recvbuf = OptRecvBuf,
+window_size(#utp_net{max_window = MaxWindow,
                      recvbuf_size = RecvBufSize}) ->
-  if OptRecvBuf > RecvBufSize -> OptRecvBuf - RecvBufSize;
+  if MaxWindow > RecvBufSize -> MaxWindow - RecvBufSize;
      true -> 0
   end.
 
@@ -118,11 +118,10 @@ sndbuf_remain(#utp_net{opt_sndbuf = OptSndBuf,
       OptSndBuf - BufSize;
      true -> 0
   end.
-max_send_bytes(#utp_net{max_window = MaxWindow,
-                        max_peer_window = MaxPeerWindow,
+max_send_bytes(#utp_net{max_peer_window = MaxPeerWindow,
                         cur_window = CurWindow})->
-  SendBytes = MaxWindow - CurWindow,
-  if SendBytes >= ?PACKET_SIZE -> erlang:min(MaxPeerWindow,SendBytes);
+  SendBytes = MaxPeerWindow - CurWindow,
+  if SendBytes >= ?PACKET_SIZE -> SendBytes;
      true -> 0
   end.
 

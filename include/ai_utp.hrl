@@ -19,8 +19,8 @@
 -define(REORDER_SACK_MAX_SIZE,800).
 -define(PACKET_SIZE, 1176).
 -define(MIN_PACKET_SIZE,800).
--define(OPT_RECV_BUF, 4096 * ?PACKET_SIZE).
--define(OPT_SEND_BUF, 4096 * ?PACKET_SIZE).
+-define(OPT_RECV_BUF, 512 * ?PACKET_SIZE).
+-define(OPT_SEND_BUF, 512 * ?PACKET_SIZE).
 
 %us
 -define(MAX_RECV_IDLE_TIME,30000000).
@@ -40,7 +40,6 @@
 %% 最小的传输窗口是3000 bytes
 % bytes
 -define(MIN_WINDOW_SIZE, 102400).
--define(MAX_WINDOW_SIZE,14680064).
 -define(DUPLICATE_ACKS_BEFORE_RESEND,3).
 -define(MAX_SYN_RESNED,5).
 
@@ -67,9 +66,9 @@
                           need_resend = false
                          }).
 -record(utp_net,{%%sndbuf setting, in bytes
-                 opt_sndbuf = ?OPT_SEND_BUF * 2,
+                 opt_sndbuf = ?OPT_SEND_BUF ,
                  %%rcvbuf setting, in bytes
-                 opt_recvbuf = ?OPT_RECV_BUF * 2,
+                 opt_recvbuf = ?OPT_RECV_BUF,
                  opt_ignore_lost = true,
                  opt_bust = false,
                  socket = undefined,
@@ -86,9 +85,9 @@
                  %% don't count either
                  cur_window = 0,
                  %% maximum window size, in bytes
-                 max_window = ?MAX_WINDOW_SIZE,
+                 max_window = ?OPT_SEND_BUF,
                  %% max receive window for other end, in bytes
-                 max_peer_window = ?MAX_WINDOW_SIZE,
+                 max_peer_window = ?OPT_SEND_BUF,
                  %% All sequence numbers up to including this have been properly received
                  %% by us
                  ack_nr = undefined,
