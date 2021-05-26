@@ -17,3 +17,7 @@ _build
 *.iml
 rebar3.crashdump
 *~
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
