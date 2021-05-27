@@ -22,3 +22,4 @@ CMakeFiles
 Makefile
 cmake_install.cmake
 *.so
+*.dylib

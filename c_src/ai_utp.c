@@ -1,4 +1,4 @@
-#include "erl_nif.h"
+#include <erl_nif.h>
 
 ERL_NIF_TERM
 mk_atom(ErlNifEnv* env, const char* atom)
