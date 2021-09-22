@@ -29,6 +29,12 @@
 -define(KEEPALIVE_INTERVAL,29000). %ms
 % 29 seconds determined from measuring many home NAT devices
 -define(UTP_HEADER_SIZE,20).
+
+-define(SEQ_NR_MASK,16#FFFF).
+-define(ACK_NR_MASK,16#FFFF).
+-define(TIMESTAMP_MASK, 16#FFFFFFFF).
+-define(RTT_MAX,16#FFFFFFFFFFFFFFFF).
+
 -define(AIUTP_MTU_DEF, 1400).
 -define(AIUTP_WND_DEF, 255 * ?PACKET_SIZE).
 
@@ -51,8 +57,13 @@
 -define(CS_CONNECTED_FULL,'CS_CONNECTED_FULL').
 -define(CS_RESET,'CS_RESET').
 -define(CS_DESTROY,'CS_DESTROY').
+-define(ST_DATA,'ST_DATA').
+-define(ST_FIN,'ST_FIN').
+-define(ST_STATE,'ST_STATE').
+-define(ST_RESET,'ST_RESET').
+-define(ST_SYN,'ST_SYN').
 
--record(aiutp_packet, {type           ::  st_data | st_fin | st_state | st_reset | st_syn,
+-record(aiutp_packet, {type           :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN,
                        conn_id        :: integer(), % 会话ID
                        wnd = 0        :: integer(), % 我们的窗口
                        seq_nr         :: integer(), % 我们的序号
@@ -61,6 +72,7 @@
                        payload =  <<>> :: binary()
                     }).
 -define(aiutp_packet_wrap,{packet,
+                           payload = 0,
                            time_sent = 0, %microsecond
                            transmissions = 0,
                            need_resend = 0}).

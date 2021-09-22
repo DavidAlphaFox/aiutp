@@ -20,8 +20,8 @@
                       unused = 0,
                       tail = ?LAST_INDEX}).
 new(Size) ->
-  Data = array:new(Size),
-  Index  = array:new(Size, {default, 0}),
+  Data = array:new(Size,{fixed,true}),
+  Index  = array:new(Size, [{default, 0},{fixed,true}]),
   init(#aiutp_buffer{data = Data, index = Index,
                      size = Size, unused = Size}).
 
