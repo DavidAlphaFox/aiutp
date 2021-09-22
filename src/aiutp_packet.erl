@@ -1,15 +1,8 @@
--module(ai_utp_protocol).
--include("ai_utp.hrl").
+-module(aiutp_packet).
+-include("aiutp.hrl").
 
 -export([decode/2,encode/2,encode/3]).
--export([make_syn_packet/1,make_ack_packet/2,
-         make_ack_packet/3,make_reset_packet/2,
-         make_data_packet/2,make_fin_packet/2]).
-
--define(SYN_EXTS, [{ext_bits, <<0:64/integer>>}]).
-
--type conn_id() :: 0..16#FFFF.
--export_type([utp_packet/0, conn_id/0]).
+-export([reset/2,syn/1,fin/2,ack/3,ack/2,data/2]).
 
 -define(EXT_SACK, 1).
 -define(EXT_BITS, 2).
@@ -20,43 +13,39 @@
 -define(ST_RESET, 3).
 -define(ST_SYN,   4).
 
+reset(ConnID,AckNo)->
+  #aiutp_packet{type = st_reset,
+                ack_no = AckNo,
+                seq_no = 0,
+                win_sz = 0,
+                extension = [],
+                conn_id = ConnID}.
+syn(SeqNo) ->
+  #aiutp_packet {type = st_syn,
+                 seq_no = SeqNo,
+                 ack_no = 0,
+                 extension = []}.
+fin(SeqNo,AckNo)->
+  #aiutp_packet{type = st_fin,
+                seq_no = SeqNo,
+                ack_no = AckNo,
+                extension = []}.
+ack(SeqNo,AckNo,Ext)->
+  #aiutp_packet {type = st_state,
+                 seq_no = SeqNo,
+                 ack_no = AckNo,
+                 extension = Ext}.
+ack(SeqNo, AckNo) ->
+  #aiutp_packet {type = st_state,
+                 seq_no = SeqNo,
+                 ack_no = AckNo,
+                 extension = []}.
+data(SeqNo,AckNo)->
+  #aiutp_packet{type = st_data,
+                seq_no = SeqNo,
+                ack_no = AckNo,
+                extension = []}.
 
-make_reset_packet(ConnID,AckNo)->
-  #utp_packet{type = st_reset,
-          ack_no = AckNo,
-          seq_no = ai_utp_util:bit16_random(),
-          win_sz = 0,
-          extension = [],
-          conn_id = ConnID}.
-make_syn_packet(SeqNo) ->
-  #utp_packet { type = st_syn,
-            seq_no = SeqNo,
-            ack_no = 0,
-            extension = []}.
-make_fin_packet(SeqNo,AckNo)->
-  #utp_packet{ type = st_fin,
-               seq_no = SeqNo,
-               ack_no = AckNo,
-               extension = []}.
-make_ack_packet(SeqNo,AckNo,Ext)->
-  #utp_packet {type = st_state,
-           seq_no = SeqNo,
-           ack_no = AckNo,
-           extension = Ext}.
-make_ack_packet(SeqNo, AckNo) ->
-  #utp_packet {type = st_state,
-           seq_no = SeqNo,
-           ack_no = AckNo,
-           extension = []}.
-make_data_packet(SeqNo,AckNo)->
-  #utp_packet{type = st_data,
-             seq_no = SeqNo,
-             ack_no = AckNo,
-             extension = []}.
-
--spec decode(binary(),integer()) ->
-        {ok, {utp_packet(),{timestamp(), timestamp(), timestamp()}}} |
-        {error, term()}.
 decode(Packet,RecvTS) ->
   try
     case decode_packet(Packet,RecvTS) of
@@ -67,10 +56,6 @@ decode(Packet,RecvTS) ->
     _:_ -> {error,drop}
   end.
 
-
-
--spec decode_packet(binary(),integer()) ->
-        {utp_packet(),{timestamp(), timestamp(), timestamp()}}.
 decode_packet(Packet,RecvTS) ->
   <<Type:4/big-integer,1:4/big-integer,
     Extension:8/big-integer, ConnectionId:16/big-integer,
@@ -81,20 +66,18 @@ decode_packet(Packet,RecvTS) ->
   Ty = decode_type(Type),
   Verified = validate_packet_type(Ty, Payload),
   if Verified /= ok -> {error,drop};
-     true ->{#utp_packet{type = Ty,
-                         conn_id = ConnectionId,
-                         win_sz = WindowSize,
-                         seq_no = SeqNo,
-                         ack_no = AckNo,
-                         extension = Extensions,
-                         payload = Payload},
+     true ->{#aiutp_packet{type = Ty,
+                           conn_id = ConnectionId,
+                           win_sz = WindowSize,
+                           seq_no = SeqNo,
+                           ack_no = AckNo,
+                           extension = Extensions,
+                           payload = Payload},
              {TS,TSDiff,RecvTS}}
   end.
 
-
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
-decode_extensions(?EXT_SACK, <<Next:8/big-integer,
-                               Len:8/big-integer, R/binary>>, Acc) ->
+decode_extensions(?EXT_SACK, <<Next:8/big-integer,Len:8/big-integer, R/binary>>, Acc) ->
   <<Bits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{sack, Bits} | Acc]);
 decode_extensions(?EXT_BITS, <<Next:8/big-integer,
@@ -120,14 +103,13 @@ validate_packet_type(Ty, Payload) ->
 encode(Packet,TSDiff)->
   TS = ai_utp_util:microsecond(),
   encode(Packet,TS,TSDiff).
--spec encode(utp_packet(), integer(),integer()) -> binary().
-encode(#utp_packet {type = Type,
-                conn_id = ConnID,
-                win_sz = WSize,
-                seq_no = SeqNo,
-                ack_no = AckNo,
-                extension = ExtList,
-                payload = Payload}, TS,TSDiff) ->
+encode(#aiutp_packet {type = Type,
+                      conn_id = ConnID,
+                      win_sz = WSize,
+                      seq_no = SeqNo,
+                      ack_no = AckNo,
+                      extension = ExtList,
+                      payload = Payload}, TS,TSDiff) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
   <<EncTy:4/big-integer,1:4/big-integer,
