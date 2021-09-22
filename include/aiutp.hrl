@@ -28,6 +28,10 @@
 -define(RST_INFO_LIMIT,1000).
 -define(KEEPALIVE_INTERVAL,29000). %ms
 % 29 seconds determined from measuring many home NAT devices
+-define(UTP_HEADER_SIZE,20).
+-define(AIUTP_MTU_DEF, 1400).
+-define(AIUTP_WND_DEF, 255 * ?PACKET_SIZE).
+
 
 -define(DIV_ROUND_UP(NUM,DENOM),((NUM + DENOM - 1) div DENOM)).
 -define(MIN(F, S), case F < S of true -> F; false -> S end).
@@ -51,12 +55,94 @@
 -record(aiutp_packet, {type           ::  st_data | st_fin | st_state | st_reset | st_syn,
                        conn_id        :: integer(), % 会话ID
                        wnd = 0        :: integer(), % 我们的窗口
-                       seq_no         :: integer(), % 我们的序号
-                       ack_no         :: integer(), % 确认的序号
+                       seq_nr         :: integer(), % 我们的序号
+                       ack_nr         :: integer(), % 确认的序号
                        extension = [] :: [{sack, binary()} | {ext_bits, binary()}],
-                       payload = <<>> :: binary()
+                       payload =  <<>> :: binary()
                     }).
 -define(aiutp_packet_wrap,{packet,
                            time_sent = 0, %microsecond
                            transmissions = 0,
                            need_resend = 0}).
+
+-define(aiutp_pcb,{state = ?CS_UNINITIALIZED,
+                   reorder_count = 0,
+                   duplicate_ack = 0,
+                   cur_window_packets = 0,
+                   %% the number of packets in the send queue. Packets that haven't
+                   %% yet been sent count as well as packets marked as needing resend
+                   %% the oldest un-acked packet in the send queue is seq_nr - cur_window_packets
+                   cur_window = 0,
+                   % how much of the window is used, number of bytes in-flight
+                   % packets that have not yet been sent do not count, packets
+                   % that are marked as needing to be re-sent (due to a timeout)
+                   % don't count either
+                   max_window = 0, % maximum window size in bytes,
+                   target_delay = 10000, % mircoseconds
+                   got_fin = false, %% is a FIN packet in reassembly buffer
+                   got_fin_reached = false, %% Have we reached the FIN
+                   fin_sent = false, % Have we sent our FIN
+                   fin_sent_acked = false, % Have our FIN been ACKed
+                   read_shutdown = false, %  Reading is disabled
+                   close_requested = false, % User called utp_close()
+                   fast_timeout = false, % Timeout procedure
+                   max_window_user = ?AIUTP_WND_DEF, % max receive window for other end, in bytes
+                   last_rwin_decay = 0, % TickCount when we last decayed window (wraps)
+                   eof_pkt = 0,
+                   % the sequence number of the FIN packet. This field is only set
+                   % when we have received a FIN, and the flag field has the FIN flag set.
+                   % it is used to know when it is safe to destroy the socket, we must have
+                   % received all packets up to this sequence number first.
+                   ack_nr = 0,
+                   % All sequence numbers up to including this have been properly received by us
+                   seq_nr = 1,
+                   % This is the sequence number for the next packet to be sent.
+                   timeout_seq_nr = 0,
+                   fast_resend_seq_nr = 1,
+                   % This is the sequence number of the next packet we're allowed to
+                   % do a fast resend with. This makes sure we only do a fast-resend
+                   % once per packet. We can resend the packet with this sequence number
+                   % or any later packet (with a higher sequence number).
+                   reply_micro = 0,
+                   last_got_packet = 0,
+                   last_sent_packet = 0,
+                   last_measured_delay = 0,
+                   last_maxed_out_window = 0,
+                   % timestamp of the last time the cwnd was full
+                   % this is used to prevent the congestion window
+                   % from growing when we're not sending at capacity
+                   rtt = 0, %Round trip time
+                   rtt_var = 800, %Round trip time variance
+                   rto = 3000, %Round trip timeout
+                   rtt_hist,
+                   retransmit_timeout = 0,
+                   rto_timeout = 0, %The RTO timer will timeout here
+                   zerowindow_time = 0 ,%When the window size is set to zero, start this timer. It will send a new packet every 30secs
+                   conn_id_recv,% Connection ID for packets I receive
+                   conn_id_send,% Connection ID for packets I send
+                   last_rcv_win = 0 ,%Last rcv window we advertised, in bytes
+                   our_hist,
+                   their_hist,
+                   average_delay = 0,
+                   % this is the average delay samples, as compared to the initial sample. It's averaged over 5 seconds
+                   current_delay_sum = 0,
+                   % this is the sum of all the delay samples
+                   % we've made recently. The important distinction
+                   % of these samples is that they are all made compared
+                   % to the initial sample, this is to deal with
+                   % wrapping in a simple way
+                   current_delay_samples = 0,
+                   % number of sample ins current_delay_sum
+                   average_delay_base = 0,
+                   % initialized to 0, set to the first raw delay sample
+                   % each sample that's added to current_delay_sum
+                   % is subtracted from the value first, to make it
+                   % a delay relative to this sample
+                   average_sample_time = 0,
+                   % the next time we should add an average delay sample into average_delay_hist
+                   clock_drift = 0,
+                   % the estimated clock drift between our computer
+                   % and the endpoint computer. The unit is microseconds
+                   % per 5 seconds
+                   inbuf,
+                   outbuf}).
