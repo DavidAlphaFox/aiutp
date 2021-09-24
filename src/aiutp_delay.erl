@@ -5,6 +5,7 @@
          new/1,
          shift/2,
          add_sample/3,
+         delay_base/1,
          value/1]).
 
 -record(aiutp_delay, {delay_base,
@@ -128,5 +129,6 @@ add_sample(Sample,CurMilli,
 % and sample is very large (because it wrapped past zero), sample
 %  needs to be considered the smaller
 
+delay_base(#aiutp_delay{delay_base = DelayBase}) -> DelayBase.
 value(#aiutp_delay{cur_delay_hist = Hist})->
   array:foldl(fun(_,El,Acc) -> ?MIN(El,Acc) end, 16#FFFFFFFF, Hist).

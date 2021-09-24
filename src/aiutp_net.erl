@@ -47,5 +47,5 @@ build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
      true ->
       Acc = list:foldl(fun(Idx,Map)-> maps:put(Idx,0,Map) end,#{},lists:seq(0,3)),
       Head = aiutp_buffer:head(InBuf),
-      build_sack(Size0,Acc,AckNR + 1,Head,InBuf)
+      build_sack(Size0,Acc,AckNR + 2,Head,InBuf)
   end.

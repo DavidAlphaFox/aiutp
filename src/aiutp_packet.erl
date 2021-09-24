@@ -1,7 +1,7 @@
 -module(aiutp_packet).
 -include("aiutp.hrl").
 
--export([decode/2,encode/2,encode/3]).
+-export([decode/1,encode/1]).
 -export([reset/2,syn/1,fin/2,ack/3,ack/2,data/2]).
 
 -define(EXT_SACK, 1).
@@ -48,7 +48,7 @@ data(SeqNR,AckNR)->
 
 decode(Packet,RecvTS) ->
   try
-    case decode_packet(Packet,RecvTS) of
+    case decode_packet(Packet) of
       {error,_} = Error-> Error;
       R -> {ok,R}
     end
@@ -56,7 +56,7 @@ decode(Packet,RecvTS) ->
     _:_ -> {error,drop}
   end.
 
-decode_packet(Packet,RecvTS) ->
+decode_packet(Packet) ->
   <<Type:4/big-integer,1:4/big-integer,
     Extension:8/big-integer, ConnectionId:16/big-integer,
     TS:32/big-integer,TSDiff:32/big-integer,
@@ -66,14 +66,15 @@ decode_packet(Packet,RecvTS) ->
   Ty = decode_type(Type),
   Verified = validate_packet_type(Ty, Payload),
   if Verified /= ok -> {error,drop};
-     true ->{#aiutp_packet{type = Ty,
+     true ->#aiutp_packet{type = Ty,
                            conn_id = ConnectionId,
+                           tv_usec = TS,
+                           reply_micro = TSDiff,
                            wnd = WindowSize,
                            seq_nr = SeqNR,
                            ack_nr = AckNR,
                            extension = Extensions,
-                           payload = Payload},
-             {TS,TSDiff,RecvTS}}
+                           payload = Payload}
   end.
 
 decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
@@ -100,16 +101,15 @@ validate_packet_type(Ty, Payload) ->
   end.
 
 
-encode(Packet,TSDiff)->
-  TS = ai_utp_util:microsecond(),
-  encode(Packet,TS,TSDiff).
-encode(#aiutp_packet {type = Type,
+encode((#aiutp_packet{type = Type,
                       conn_id = ConnId,
+                      tv_usec = TS,
+                      reply_micro = TSDiff,
                       wnd = WSize,
                       seq_nr = SeqNR,
                       ack_nr = AckNR,
                       extension = ExtList,
-                      payload = Payload}, TS,TSDiff) ->
+                      payload = Payload}) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
   EncTy = encode_type(Type),
   <<EncTy:4/big-integer,1:4/big-integer,

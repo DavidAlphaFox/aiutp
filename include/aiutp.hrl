@@ -66,12 +66,15 @@
 -record(aiutp_packet, {type           :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN,
                        conn_id        :: integer(), % 会话ID
                        wnd = 0        :: integer(), % 我们的窗口
-                       seq_nr         :: integer(), % 我们的序号
-                       ack_nr         :: integer(), % 确认的序号
+                       seq_nr = 0     :: integer(), % 我们的序号
+                       ack_nr = 0         :: integer(), % 确认的序号
+                       tv_usec = 0        :: integer(), % 发送时间
+                       reply_micro = 0    :: integer(), % 回复时间
                        extension = [] :: [{sack, binary()} | {ext_bits, binary()}],
                        payload =  <<>> :: binary()
                     }).
 -define(aiutp_packet_wrap,{packet,
+                           content = undefined,
                            payload = 0,
                            time_sent = 0, %microsecond
                            transmissions = 0,
@@ -128,6 +131,7 @@
                    rto = 3000, %Round trip timeout
                    rtt_hist,
                    retransmit_timeout = 0,
+                   retransmit_count = 0,
                    rto_timeout = 0, %The RTO timer will timeout here
                    zerowindow_time = 0 ,%When the window size is set to zero, start this timer. It will send a new packet every 30secs
                    conn_id_recv,% Connection ID for packets I receive
@@ -156,5 +160,7 @@
                    % the estimated clock drift between our computer
                    % and the endpoint computer. The unit is microseconds
                    % per 5 seconds
+                   ssthresh = 0,
+                   slow_start = true,
                    inbuf,
                    outbuf}).
