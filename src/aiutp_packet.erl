@@ -46,7 +46,7 @@ data(SeqNR,AckNR)->
                 ack_nr = AckNR,
                 extension = []}.
 
-decode(Packet,RecvTS) ->
+decode(Packet) ->
   try
     case decode_packet(Packet) of
       {error,_} = Error-> Error;
@@ -101,7 +101,7 @@ validate_packet_type(Ty, Payload) ->
   end.
 
 
-encode((#aiutp_packet{type = Type,
+encode(#aiutp_packet{type = Type,
                       conn_id = ConnId,
                       tv_usec = TS,
                       reply_micro = TSDiff,

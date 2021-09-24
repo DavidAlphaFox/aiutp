@@ -61,12 +61,13 @@ process(Acc,?ST_SYN,
                        ack_nr = AckNR,
                        seq_nr = aiutp_util:bit16_random(),
                        last_got_packet = aiutp_util:millisecond()},
-  {aiutp_net:send_ack(Acc,PCB0),PCB0};
+  aiutp_net:send_ack(Acc,PCB0);
 process(Acc,?ST_SYN,
         #aiutp_packet{seq_nr = AckNR},
         #aiutp_pcb{state = ?CS_SYN_RECV,ack_nr = AckNR} = PCB) ->
-  {aiutp_net:send_ack(Acc, PCB),
-   PCB#aiutp_pcb{last_got_packet = aiutp_util:millisecond()}};
+  PCB0 = PCB#aiutp_pcb{last_got_packet = aiutp_util:millisecond()},
+  aiutp_net:send_ack(Acc, PCB0);
+
 %% 处理所有非RESET和非SYN
 process(Acc,_,
         #aiutp_packet{seq_nr = PktSeqNR,ack_nr = PktAckNR}=Packet,
@@ -92,21 +93,21 @@ process_packet(Acc,
         % if this is a syn-ack, initialize our ack_nr
         % to match the sequence number we got from the other end
         PCB#aiutp_pcb{ack_nr =  aiutp_util:bit16(PktSeqNR - 1),
-                      last_got_packet = Now};
-       true -> PCB#aiutp_pcb{last_got_packet = Now}
+                      last_got_packet = Now,time = {Now,MicroNow}};
+       true -> PCB#aiutp_pcb{last_got_packet = Now,time = {Now,MicroNow}}
     end,
   %% 处理超出reorder范围的Packet
   DiffSeqNR = diff_seq_nr(PktSeqNR,PCB0),
   if DiffSeqNR >= ?REORDER_BUFFER_MAX_SIZE ->
       if (DiffSeqNR >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
-         PktType /= ?ST_STATE -> {aiutp_net:send_ack(Acc, PCB0),PCB0};
+         PktType /= ?ST_STATE -> aiutp_net:send_ack(Acc, PCB0);
          true -> {Acc,PCB0}
       end;
-     true -> process_packet_1(Acc,{Now,MicroNow},Packet,PCB0)
+     true -> process_packet_1(Acc,Packet,PCB0)
   end.
 
 %% 计算dulpicateAck
-process_packet_1(Acc,Time,
+process_packet_1(Acc,
                  #aiutp_packet{type = PktType,ack_nr = PktAckNR } = Packet,
                  #aiutp_pcb{cur_window_packets = CurWindowPackets,
                             duplicate_ack = DuplicateAck,
@@ -114,10 +115,10 @@ process_packet_1(Acc,Time,
   when CurWindowPackets > 0->
   if (PktAckNR == aiutp_util:bit16(SeqNR -CurWindowPackets -1)) and
      PktType == ?ST_STATE ->
-      process_packet_2(Acc,Time,Packet,
+      process_packet_2(Acc,Packet,
                        PCB#aiutp_pcb{duplicate_ack = DuplicateAck + 1});
      true ->
-      process_packet_2(Acc,Time,Packet,
+      process_packet_2(Acc,Packet,
                        PCB#aiutp_pcb{duplicate_ack = 0})
   end;
 % if we get the same ack_nr as in the last packet
@@ -133,7 +134,7 @@ process_packet_1(Acc,Time,
 % (except in the case of a selective ACK). This is in line with BSD4.4 TCP
 % implementation.
 
-process_packet_1(Acc,Time,Packet,PCB)-> process_packet_2(Acc,Time,Packet,PCB).
+process_packet_1(Acc,Packet,PCB)-> process_packet_2(Acc,Packet,PCB).
 
 acks(PktAckNR,#aiutp_pcb{seq_nr = SeqNR,
                          cur_window_packets = CurWindowPackets})->
@@ -330,9 +331,9 @@ cc_control(Now,AckedBytes,ActualDelay,RTT,
 
 
 %% 流控
-process_packet_2(Acc,{Now,MicroNow} = Time,
+process_packet_2(Acc,
                  #aiutp_packet{ack_nr = PktAckNR} = Packet,
-                 #aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB)->
+                 #aiutp_pcb{time = {Now,MicroNow}, cur_window_packets = CurWindowPackets} = PCB)->
   {AckedBytes,RTT} = caculate_acked_bytes(Now,PCB),
   {ActualDelay,PCB0} = caculate_delay(Now,MicroNow,Packet,PCB),
   OurHist = PCB#aiutp_pcb.our_hist,
@@ -348,8 +349,8 @@ process_packet_2(Acc,{Now,MicroNow} = Time,
        true-> PCB0
     end,
   Acks = acks(PktAckNR,PCB),
-  if Acks =< CurWindowPackets -> process_packet_3(Acc,Time,Packet,PCB1);
-     true -> process_packet_4(Acc,Time,Packet,CPB1)
+  if Acks =< CurWindowPackets -> process_packet_3(Acc,Packet,PCB1);
+     true -> process_packet_4(Acc,Packet,CPB1)
   end.
 
 caculate_rtt(RTT,RTTVar,TimeSent)->
@@ -401,10 +402,11 @@ caculate_cur_window_packets(SeqNR,OutBuf)->
   Packet = WrapPacket#aiutp_packet_wrap.packet,
   aiutp_util:bit16(SeqNR - Packet#aiutp_packet.seq_nr).
 %% 处理Acked
-process_packet_3(Acc,{Now,_} = Time,
+process_packet_3(Acc,
                  #aiutp_packet{type = PktType,
                                ack_nr = PktAckNR,wnd = PktMaxWindowUser},
                  #aiutp_pcb{state = State,
+                            time = {Now,_},
                             fast_resend_seq_nr = FastResendSeqNR,
                             cur_window_packets = CurWindowPackets,
                             cur_window = CurWindow,
@@ -443,5 +445,19 @@ process_packet_3(Acc,{Now,_} = Time,
     end,
   AckedAcc = {RTT,RTTVar,RTO,RTTHist,RTOTimeout,RetransmitTimeout,CurWindow},
   Iter = aiutp_buffer:head(OutBuf),
-  {Acc,OutBuf0} = acked_in_obuf(Now,MaxSeq,0,Iter,-1,AckedAcc,OutBuf),
-  CurWindowPackets0 - caculate_cur_window_packets(SeqNR,OutBuf0),
+  {{RTT0,RTTVar0,RTO0,RTTHist0,RTOTimeout0,RetransmitTimeout0,CurWindow0},
+   OutBuf0} = acked_in_obuf(Now,MaxSeq,0,Iter,-1,AckedAcc,OutBuf),
+  CurWindowPackets0 = caculate_cur_window_packets(SeqNR,OutBuf0),
+  PCB0 = PCB#aiutp_pcb { state = Stat1,outbuf = OutBuf0,fin_sent_acked = FinSentAcked0,
+                         fast_resend_seq_nr = FastResendSeqNR0,
+                         rtt = RTT0, rtt_var = RTTVar0,rtt_hist = RTTHist0,
+                         rto = RTO0,rto_timeout = RTOTimeout0,
+                         retransmit_timeout = RetransmitTimeout0,
+                         retransmit_count = 0, cur_window = CurWindow0,
+                         cur_window_packets = CurWindowPacket0},
+
+  {Acc0,PCB1} =
+    if CurWindowPacket0 == 1 ->
+        aiutp_net:send_packet(Acc,aiutp_buffer:head(OutBuf0),PCB0);
+       true -> {Acc,PCB0}
+    end,

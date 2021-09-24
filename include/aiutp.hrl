@@ -35,7 +35,7 @@
 -define(TIMESTAMP_MASK, 16#FFFFFFFF).
 -define(RTT_MAX,16#FFFFFFFFFFFFFFFF).
 
--define(AIUTP_MTU_DEF, 1400).
+-define(AIUTP_MTU_DEF, 1435).
 -define(AIUTP_WND_DEF, 255 * ?PACKET_SIZE).
 
 
@@ -81,6 +81,7 @@
                            need_resend = 0}).
 
 -define(aiutp_pcb,{state = ?CS_UNINITIALIZED,
+                   time = undefined,
                    reorder_count = 0,
                    duplicate_ack = 0,
                    cur_window_packets = 0,
