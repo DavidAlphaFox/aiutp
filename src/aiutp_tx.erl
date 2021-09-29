@@ -1,6 +1,7 @@
 -module(aiutp_tx).
 -include("aiutp.hrl").
--export([pick_acked/2]).
+-export([pick_acked/2,
+         in/2]).
 
 
 %% 迎来计算我们需要从outbuf中移除多少数据包
@@ -100,5 +101,17 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
     }}.
 
 
+split(<<Bin:?PACKET_SIZE/binary,Rest/binary>>,Q)->
+  if erlang:byte_size(Rest) > ?PACKET_SIZE -> split(Rest,aiutp_queue:push_back({?ST_DATA,Bin}, Q));
+     true ->
+      Q0 = aiutp_queue:push_back({?ST_DATA,Bin}, Q),
+      aiutp_queue:push_back({?ST_DATA,Rest}, Q0)
+  end.
+
+
 in(Data,#aiutp_pcb{outque = OutQue} = PCB) ->
-  Data =
+  OutQue0 =
+    if erlang:byte_size(Data) > ?PACKET_SIZE -> split(Data,OutQue);
+       true -> aiutp_queue:push_back({?ST_DATA,Data}, OutQue)
+    end,
+  aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue0}).

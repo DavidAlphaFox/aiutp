@@ -29,7 +29,7 @@
 -define(KEEPALIVE_INTERVAL,29000). %ms
 % 29 seconds determined from measuring many home NAT devices
 -define(UTP_HEADER_SIZE,20).
-
+-define(TIMEOUT_CHECK_INTERVAL,500).
 -define(SEQ_NR_MASK,16#FFFF).
 -define(ACK_NR_MASK,16#FFFF).
 -define(TIMESTAMP_MASK, 16#FFFFFFFF).
@@ -78,9 +78,10 @@
                            payload = 0,
                            time_sent = 0, %microsecond
                            transmissions = 0,
-                           need_resend = 0}).
+                           need_resend = false}).
 
 -define(aiutp_pcb,{state = ?CS_UNINITIALIZED,
+                   socket = [],
                    time = undefined,
                    ida = fasle,
                    reorder_count = 0,

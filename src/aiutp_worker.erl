@@ -6,32 +6,31 @@
 %%% @end
 %%% Created :  3 Jun 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_worker).
+-module(aiutp_worker).
 -behaviour(gen_server).
 
--include("ai_utp.hrl").
+-include("aiutp.hrl").
 
 %% API
--export([start_link/3]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
 
--export([connect/4,accept/5,incoming/3,
+-export([connect/4,accept/5,incoming/2,
          send/2,recv/2,active/2,close/2,
          controlling_process/2]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {
-                parent :: pid(),
+-record(state, {parent :: pid(),
                 socket :: port(),
                 parent_monitor :: reference(),
                 controller :: pid(),
                 controller_monitor :: reference(),
                 remote :: tuple(),
-                net,
+                pcb,
                 tick_timer :: reference(),
                 connector,
                 closer,
@@ -56,13 +55,13 @@ active(Pid,V)->
   gen_server:call(Pid,{active,V},infinity).
 close(Pid,Caller)->
   gen_server:call(Pid,{close,Caller},infinity).
+
 controlling_process(Pid,Proc)->
   Caller = self(),
   {ok,Control} = gen_server:call(Pid,controller),
-  if
-    Control == Proc -> ok;
-    Control /= Caller -> {error,not_owner};
-    true ->
+  if Control == Proc -> ok;
+     Control /= Caller -> {error,not_owner};
+     true ->
       {ok,Active} = gen_server:call(Pid,active),
       if Active == true -> active(Pid,false);
          true -> ok
@@ -70,14 +69,13 @@ controlling_process(Pid,Proc)->
       Closed =  sync_input(Pid,Proc,false),
       if
         Closed == true -> ok;
-        true ->
-          Msg = {controlling_process,Caller,Proc,Active},
-          gen_server:call(Pid,Msg,infinity)
+        true -> gen_server:call(Pid,{controlling_process,Caller,Proc,Active},infinity)
       end
   end.
+
   
-incoming(Pid,Packet,Timing)->
-  gen_server:cast(Pid,{packet,Packet,Timing}).
+incoming(Pid,Packet)->
+  gen_server:cast(Pid,{packet,Packet}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -88,8 +86,8 @@ incoming(Pid,Packet,Timing)->
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link(Parent,Socket,Options) ->
-  gen_server:start_link(?MODULE, [Parent,Socket,Options], []).
+start_link(Parent,Socket) ->
+  gen_server:start_link(?MODULE, [Parent,Socket], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -106,15 +104,13 @@ start_link(Parent,Socket,Options) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Parent,Socket,Options]) ->
+init([Parent,Socket]) ->
   ParentMonitor = erlang:monitor(process,Parent),
-  Net0 = net(Options),
   {ok, #state{
           parent = Parent,
           socket = Socket,
-          parent_monitor = ParentMonitor,
-          net = Net0#utp_net{socket = Socket},
-          process = ai_utp_process:new()}}.
+          parent_monitor = ParentMonitor}}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -222,12 +218,11 @@ handle_call({close,_},_From,State) ->
 
 
 %% 已经链接了
-handle_cast({packet,Packet,Timing},
-            #state{net = Net, connector = undefined,
-                   process = Proc,closer = Closer,
-                   tick_timer = Timer} = State)->
+handle_cast({packet,Packet},
+            #state{pcb = PCB,connector = undefined} = State)->
+  PCB0 = aiutp_pcb:process(Packet, PCB),
+  {Buffers,PCB1} = aiutp_pcb:swap_socket(PCB0),
 
-  {Net0,Proc0} = ai_utp_net:process_incoming(Net,Packet,Timing,Proc),
   case ai_utp_net:state(Net0) of
      ?CLOSED ->
       cancle_tick_timer(Timer),
@@ -308,10 +303,11 @@ handle_info(timeout,#state{parent_monitor = ParentMonitor,
   {stop,normal,State#state{parent_monitor = undefined,
                            process = Proc0,
                            controller_monitor = undefined}};
-handle_info({timeout,TRef,{rto,N}},
-            #state{net = Net,tick_timer = {set,TRef}} = State)->
-  NetState = ai_utp_net:state(Net),
-  on_tick(NetState,N,State);
+handle_info({timeout,TRef,{check_interval,N}},
+            #state{pcb = PCB,tick_timer = {set,TRef}}= State)->
+  PCB1 = aiutp_pcb:check_timeouts(PCB),
+  Buffers = aiutp_pcb:swap_socket(PCB1),
+
 
 %% 端口崩溃了，就什么好说的了
 handle_info({'DOWN', MRef, process, Parent, _Reason},
@@ -422,19 +418,18 @@ register_conn(Remote,N)->
   end.
 
 
-start_tick_timer(N, Timer) ->
-  start_tick_timer(N, N, Timer).
+start_tick_timer(N, Timer) -> start_tick_timer(N, N, Timer).
 start_tick_timer(N, K, undefined) ->
   if N == undefined -> undefined;
      true ->
-      Ref = erlang:start_timer(N, self(),{rto,K}),
+      Ref = erlang:start_timer(N, self(),{check_interval,K}),
       {set, Ref}
   end;
 start_tick_timer(N, K, {set, Ref}) ->
   erlang:cancel_timer(Ref),
   if N == undefined -> undefined;
      true ->
-      NewRef = erlang:start_timer(N, self(),{rto,K}),
+      NewRef = erlang:start_timer(N, self(),{check_interval,K}),
       {set, NewRef}
   end.
 cancle_tick_timer(undefined) -> undefined;
@@ -502,6 +497,8 @@ active_read(#state{parent = Parent,
   end;
 active_read(State)-> State.
 
+
+
 sync_input(Socket,NewOwner,Flag)->
   receive
     {utp,Socket,_} = M ->
@@ -513,22 +510,3 @@ sync_input(Socket,NewOwner,Flag)->
   after 0 ->
       Flag
   end.
-
-net(Options)->
-  OptSndBuf = proplists:get_value(utp_sndbuf, Options,?OPT_SEND_BUF),
-  OptRecvBuf = proplists:get_value(utp_recvbuf, Options,?OPT_RECV_BUF),
-  OptIgnoreLost = proplists:get_value(utp_ignore_lost,Options,true),
-  OptBrust = proplists:get_value(utp_brust, Options,false),
-  OptSndBuf0 =
-    if OptSndBuf > ?MIN_WINDOW_SIZE -> OptSndBuf;
-       true -> ?MIN_WINDOW_SIZE
-    end,
-  OptRecvBuf0 =
-    if OptRecvBuf > ?PACKET_SIZE -> OptRecvBuf;
-       true -> ?PACKET_SIZE
-    end,
-  #utp_net{
-     opt_bust = OptBrust,
-     opt_ignore_lost = OptIgnoreLost,
-     opt_sndbuf = OptSndBuf0,
-     opt_recvbuf = OptRecvBuf0}.

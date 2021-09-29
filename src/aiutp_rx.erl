@@ -1,19 +1,17 @@
 -module(aiutp_rx).
 -include("aiutp.hrl").
--export([in/3]).
+-export([in/2]).
 
-in(Acc,#aiutp_packet{seq_nr = PktSeqNR} = Packet,
+in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
    #aiutp_pcb{ack_nr = AckNR} = PCB)->
   DiffSeq  = aiutp_util:bit16(PktSeqNR - AckNR - 1),
-  {Acc0,PCB1} =
-    if DiffSeq == 0 -> recv(Acc,Packet,PCB#aiutp_pcb{ack_nr = aiutp_util:bit16(AckNR + 1)});
-       true->
-        PCB0 = recv_reorder(DiffSeq,Packet,PCB),
-        {Acc,PCB0}
+  PCB1 =
+    if DiffSeq == 0 -> recv(Packet,PCB#aiutp_pcb{ack_nr = aiutp_util:bit16(AckNR + 1)});
+       true->  recv_reorder(DiffSeq,Packet,PCB)
     end,
-  {Acc0,PCB1#aiutp_pcb{ida = true}}.
+  PCB1#aiutp_pcb{ida = true}.
 
-recv(Acc,Packet,
+recv(Packet,
      #aiutp_pcb{time={Now,_},
                 inque = InQ,
                 got_fin_reached = GotFinReached,
@@ -23,7 +21,7 @@ recv(Acc,Packet,
                 rto  = RTO
                } = PCB)->
   InQ0 = aiutp_queue:push_back(Packet#aiutp_packet.payload, InQ),
-  {Acc0,PCB1} =
+  PCB1 =
     if (GotFinReached == false) and
        (GotFIn == true) and
        (EOFPkt == AckNR) ->
@@ -33,10 +31,10 @@ recv(Acc,Packet,
                               reorder_count = 0,
                               inbuf = aiutp_buffer:new(?REORDER_BUFFER_MAX_SIZE + 1)
                              },
-        {aiutp_net:send_ack(Acc, PCB0),PCB0};
-       true -> {Acc,PCB#aiutp_pcb{inque = InQ0}}
+        aiutp_net:send_ack(PCB0);
+       true -> PCB#aiutp_pcb{inque = InQ0}
     end,
-  if PCB1#aiutp_pcb.reorder_count == 0 -> {Acc0,PCB1};
+  if PCB1#aiutp_pcb.reorder_count == 0 -> PCB1;
      true ->
       #aiutp_pcb{inbuf = InBuf,
                  reorder_count = ReorderCount} = PCB1,
@@ -44,12 +42,12 @@ recv(Acc,Packet,
       Packet0 = aiutp_buffer:data(Iter, InBuf),
       NextAckNR = aiutp_util:bit16(AckNR + 1),
       if Packet0#aiutp_packet.seq_nr == NextAckNR ->
-          recv(Acc,Packet0,PCB1#aiutp_pcb{
-                             inbuf = aiutp_buffer:pop(Iter, InBuf),
-                             reorder_count = ReorderCount -1 ,
-                             ack_nr  = NextAckNR
-                            });
-         true -> {Acc0,PCB1}
+          recv(Packet0,PCB1#aiutp_pcb{
+                         inbuf = aiutp_buffer:pop(Iter, InBuf),
+                         reorder_count = ReorderCount -1 ,
+                         ack_nr  = NextAckNR
+                        });
+         true -> PCB1
       end
   end.
 

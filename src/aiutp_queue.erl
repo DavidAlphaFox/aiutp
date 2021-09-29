@@ -8,7 +8,8 @@
          push_back/2,
          front/1,
          back/1,
-         empty/1]).
+         empty/1,
+         to_list/1]).
 
 -record(aiutp_queue, {queue = queue:new(), size = 0}).
 
@@ -37,3 +38,4 @@ empty(_) -> false.
 
 front(#aiutp_queue{queue = Q}) -> queue:get(Q).
 back(#aiutp_queue{queue = Q})-> queue:get_r(Q).
+to_list(#aiutp_queue{queue  = Q}) -> queue:to_list(Q).
