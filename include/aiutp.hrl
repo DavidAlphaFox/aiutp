@@ -82,6 +82,7 @@
 
 -define(aiutp_pcb,{state = ?CS_UNINITIALIZED,
                    time = undefined,
+                   ida = fasle,
                    reorder_count = 0,
                    duplicate_ack = 0,
                    cur_window_packets = 0,
@@ -164,4 +165,6 @@
                    ssthresh = 0,
                    slow_start = true,
                    inbuf,
-                   outbuf}).
+                   outbuf,
+                   inque,
+                   outque}).

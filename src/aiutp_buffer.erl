@@ -2,6 +2,7 @@
 
 -export([new/1,
          head/1,
+         tail/1,
          next/2,
          data/2,
          replace/3,
@@ -40,6 +41,7 @@ size(#aiutp_buffer{size = Size}) ->Size.
 
 head(#aiutp_buffer{used = Used}) -> Used.
 next(Prev, #aiutp_buffer{index = Index}) -> array:get(Prev, Index).
+tail(#aiutp_buffer{tail = Tail}) -> Tail.
 
 data(Pos, #aiutp_buffer{data = Data}) -> array:get(Pos, Data).
 
