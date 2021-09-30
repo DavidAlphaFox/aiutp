@@ -85,6 +85,7 @@
                            need_resend = false}).
 
 -record(aiutp_pcb,{state = ?CS_UNINITIALIZED,
+                   retransmit_count = 0,
                    socket = [],
                    time = undefined,
                    ida = fasle,
@@ -138,7 +139,6 @@
                    rto = 3000, %Round trip timeout
                    rtt_hist,
                    retransmit_timeout = 0,
-                   retransmit_count = 0,
                    rto_timeout = 0, %The RTO timer will timeout here
                    zerowindow_time = 0 ,%When the window size is set to zero, start this timer. It will send a new packet every 30secs
                    conn_id_recv,% Connection ID for packets I receive

@@ -118,8 +118,9 @@ handle_cast({accept,Acceptor},
     SynLen > 0 -> accept_incoming(Acceptor,State);
     true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
   end;
-handle_cast({?ST_SYN,Remote,Packet},State)-> pair_incoming(Remote,Packet,State);
-handle_cast(_Request, State) ->
+handle_cast({?ST_SYN,Remote,Packet},State)->
+  pair_incoming(Remote,Packet,State);
+handle_cast(Request, State) ->
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -186,24 +187,19 @@ accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
   {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
 accept_incoming({Caller,_} = Acceptor,
                 #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
-                       parent = Parent,socket = Socket,options = Options} = State)->
-  {ok,Worker} = aiutp_worker_sup:new(Parent, Socket,Options),
+                       parent = Parent,socket = Socket} = State)->
+  {ok,Worker} = aiutp_worker_sup:new(Parent,Socket),
   {{value,Req},Syns0} = queue:out(Syns),
   {Remote,SYN} = Req,
   case aiutp_worker:accept(Worker, Caller,Remote, SYN) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
-    {error,_}->
+    Error ->
       Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
       Bin = aiutp_packet:encode(Packet),
       gen_udp:send(Socket,Remote,Bin),
-      accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
-    Error ->
-      logger:error(Error),
-      {noreply,State#state{
-                 acceptors = queue:in(Acceptor,Acceptors),
-                 syns = queue:in(Req,Syns0)},1000}
+      accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
   end.
 pair_incoming(Remote,SYN,
               #state{socket = Socket,

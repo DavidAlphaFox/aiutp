@@ -76,8 +76,13 @@ start_link(Port,Options) ->
 init([Port,Options]) ->
   process_flag(trap_exit, true),
   UDPOptions = proplists:get_value(udp, Options,[]),
+  UDPOptions0 =
+    case proplists:is_defined(binary,UDPOptions) of
+      false -> [binary|UDPOptions];
+      true -> UDPOptions
+    end,
   UTPOptions = proplists:get_value(utp, Options,[]),
-  case gen_udp:open(Port,UDPOptions) of
+  case gen_udp:open(Port,UDPOptions0) of
     {ok,Socket} ->
       ok = inet:setopts(Socket, [{active,once}]),
       {ok, #state{socket = Socket,
@@ -106,7 +111,7 @@ handle_call({add_conn,Remote,ConnId,Worker},_From,State)->
   {Result,State0} = add_conn_inner(Remote,ConnId,Worker,State),
   {reply,Result,State0};
 handle_call({free_conn,Remote,ConnId},_From,State) ->
-  {replay,ok,free_conn_inner(Remote,ConnId,State)};
+  {reply,ok,free_conn_inner(Remote,ConnId,State)};
 
 handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
   {reply,{ok,{Socket,Options}},State};
@@ -225,7 +230,7 @@ add_conn_inner(Remote,ConnId,Worker,
   Key = {Remote,ConnId},
   case maps:is_key(Key, Conns) of
     true -> {exists,State};
-    fasle ->
+    false ->
       Monitor = erlang:monitor(process, Worker),
       Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
       Monitors0 = maps:put(Monitor,Key,Monitors),
@@ -240,7 +245,7 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
       erlang:demonitor(Monitor,[flush]),
       State#state{
         monitors = maps:remove(Monitor, Monitors),
-        conns = mpas:remove(Key,Conns)}
+        conns = maps:remove(Key,Conns)}
   end.
 
 dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR} = Packet,

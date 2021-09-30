@@ -20,6 +20,7 @@ recv(Packet,
                 ack_nr = AckNR,
                 rto  = RTO
                } = PCB)->
+
   InQ0 = aiutp_queue:push_back(Packet#aiutp_packet.payload, InQ),
   PCB1 =
     if (GotFinReached == false) and

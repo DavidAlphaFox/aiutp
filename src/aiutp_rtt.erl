@@ -46,7 +46,7 @@ caculate_delay(Now,MicroNow,
           end,
         CurrentDelaySum0 = CurrentDelaySum + AverageDelaySample,
         if Now > AverageSampleTime ->
-            AverageDelay  = aiutp_util:bit32(CurrentDelaySum0 / (CurrentDelaySamples + 1)),
+            AverageDelay  = math:floor(CurrentDelaySum0 / (CurrentDelaySamples + 1)),
             MinSample = ?MIN(PrevAverageDelay,AverageDelay),
             MaxSample = ?MAX(PrevAverageDelay,AverageDelay),
             Adjust =
@@ -80,12 +80,12 @@ caculate_delay(Now,MicroNow,
   {ActualDelay,PCB0}.
 
 caculate_rtt(RTT,RTTVar,TimeSent)->
-  MicroNow = aiutp_util:microseconds(),
+  MicroNow = aiutp_util:microsecond(),
   ERTT = aiutp_util:bit32((MicroNow - TimeSent) div 1000),
   if RTT == 0 -> {ERTT,ERTT div 2,ERTT};
      true ->
       Delta = RTT - ERTT,
-      RTTVar0 = RTTVar + (math:abs(Delta) - RTTVar) div 4,
+      RTTVar0 = RTTVar + (erlang:abs(Delta) - RTTVar) div 4,
       RTT0 = RTT - RTT div 8 + ERTT div 8,
       {RTT0,RTTVar0,ERTT}
   end.

@@ -18,7 +18,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
 
--export([connect/4,accept/5,incoming/2,
+-export([connect/4,accept/4,incoming/2,
          send/2,recv/2,active/2,close/2,
          controlling_process/2]).
 
@@ -43,8 +43,8 @@
 
 connect(Pid,Caller,Address,Port)->
   gen_server:call(Pid, {connect,Caller,{Address,Port}},infinity).
-accept(Pid,Caller,Remote,Packet,Timing)->
-  gen_server:call(Pid,{accept,Caller,Remote,Packet,Timing},infinity).
+accept(Pid,Caller,Remote,Packet)->
+  gen_server:call(Pid,{accept,Caller,Remote,Packet},infinity).
 send(Pid,Data)->
   gen_server:call(Pid,{send,Data},infinity).
 recv(Pid,Len)->
@@ -138,14 +138,15 @@ handle_call({connect,Control,Remote},From,#state{parent = Parent} = State) ->
                  pcb = PCB,
                  conn_id = ConnId,
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
-    Error -> {reply,Error}
+    Error -> {stop,normal,Error,State}
   end;
 handle_call({accept,Control, Remote, Packet},_From, #state{parent = Parent} = State) ->
+
   {ConnId,PCB} = aiutp_pcb:accept(Packet),
   case aiutp_socket:add_conn(Parent,Remote,ConnId) of
     ok ->
       self() ! swap_socket,
-      {replay,ok,State#state{pcb = PCB,
+      {reply,ok,State#state{pcb = PCB,
                              remote = Remote,
                              controller = Control,
                              controller_monitor = erlang:monitor(process,Control),
@@ -153,8 +154,7 @@ handle_call({accept,Control, Remote, Packet},_From, #state{parent = Parent} = St
                              conn_id = ConnId
                             }};
     Error ->
-      self() ! {stop,Error},
-      {reply,error,Error}
+      {stop,normal,Error,State}
   end;
 handle_call({controlling_process,OldControl,NewControl,Active},_From,
            #state{controller = OldControl,controller_monitor = CMonitor} = State)->
@@ -223,7 +223,7 @@ handle_cast({packet,Packet},
     ?CS_CONNECTED ->
       gen_server:reply(Connector, ok),
       self() ! swap_socket,
-      {noreply,State#state{blocker = undefiend,pcb = PCB0}};
+      {noreply,State#state{blocker = undefined,pcb = PCB0}};
     _ ->
       self() ! swap_socket,
       {noreply,State#state{pcb = PCB0}}
@@ -243,7 +243,11 @@ handle_cast({packet,Packet},
 
 handle_info(swap_socket,#state{socket = Socket,remote = Remote,pcb = PCB} = State)->
   {Buffers,PCB0} = aiutp_pcb:swap_socket(PCB),
-  lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers),
+  if erlang:length(Buffers) > 0 ->
+
+      lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers);
+     true -> ok
+  end,
   {noreply,State#state{pcb = PCB0}};
 handle_info({stop,Reason},
             #state{parent = Parent,parent_monitor = ParentMonitor,
@@ -273,16 +277,17 @@ handle_info({timeout,TRef,{check_interval,_}},
             #state{pcb = PCB,socket = Socket,remote = Remote,
                    tick_timer = {set,TRef}}= State)->
   PCB1 = aiutp_pcb:check_timeouts(PCB),
-  Buffers = aiutp_pcb:swap_socket(PCB1),
+  {Buffers,PCB2} = aiutp_pcb:swap_socket(PCB1),
   lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers),
   %% 检查是否退出
-  case aiutp_pcb:closed(PCB1) of
+  case aiutp_pcb:closed(PCB2) of
     {closed,Reason} ->
+
       self() ! {stop,Reason},
-      {noreply,State#state{tick_timer = undefined,pcb = PCB1}};
+      {noreply,State#state{tick_timer = undefined,pcb = PCB2}};
     not_closed-> {noreply,State#state{
                             tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined),
-                            pcb = PCB1
+                            pcb = PCB2
                            }}
   end;
 %% 端口崩溃了，就没什么好说的了
@@ -410,22 +415,17 @@ active_read(#state{parent = Parent,
                    pcb = PCB,
                    controller = Control,
                    active = true} = State)->
-  case aiutp_pcb:read(PCB) of
-    {undefiend,PCB1} -> State#state{pcb = PCB1};
-    {Payload,PCB1} ->
-      UTPSocket = {utp,Parent,self()},
-      Control ! {utp_data,UTPSocket,Payload},
-      case aiutp_pcb:closed(PCB1) of
-        {closed,Reason} ->
-          self() ! {stop,Reason},
-          State#state{pcb = PCB1};
-        not_closed->
-          PCB2 = aiutp_pcb:flush(PCB1),
-          self() ! swap_socket,
-          State#state{ active = false,pcb = PCB2}
-      end
-  end;
-
+  PCB2 =
+    case aiutp_pcb:read(PCB) of
+      {undefined,PCB1} -> PCB1;
+      {Payload,PCB1} ->
+        UTPSocket = {utp,Parent,self()},
+        Control ! {utp_data,UTPSocket,Payload},
+        PCB1
+    end,
+  PCB3 = aiutp_pcb:flush(PCB2),
+  self() ! swap_socket,
+  State#state{ active = false,pcb = PCB3};
 active_read(State)-> State.
 
 

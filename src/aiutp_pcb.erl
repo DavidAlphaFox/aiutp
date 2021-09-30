@@ -30,8 +30,8 @@ new(ConnIdRecv,ConnIdSend)->
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
              max_window = ?AIUTP_MTU_DEF,
-             inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE + 1),
-             outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE + 1),
+             inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
+             outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
              outque = aiutp_queue:new()}.
 
@@ -44,11 +44,13 @@ closed(#aiutp_pcb{state = State,
                         fin_sent = FinSent,
                         fin_sent_acked = FinSentAcked,
                         got_fin = GotFin,
-                        got_fin_reached = GotFinReached
+                        got_fin_reached = GotFinReached,
+                        cur_window_packets = CurWindowPackets
                        })
   when State == ?CS_DESTROY->
   if (FinSent and FinSentAcked) or
      (GotFin and GotFinReached) -> {closed,normal};
+     FinSent and CurWindowPackets == 1 -> {closed,normal};
      (FinSent == false) and
      (GotFin == false)-> {closed,timeout};
      true -> {closed,crash}
@@ -64,7 +66,7 @@ closed(#aiutp_pcb{got_fin = GotFin,
      
 
 
-process(Packet,PCB)-> process(Packet#aiutp_packet.type,Packet,PCB).
+process(Packet,PCB)-> aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,PCB)).
 
 process(_,_,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
@@ -115,7 +117,7 @@ process(_,
   end.
 
 process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
-               #aiutp_pcb{state = State,ack_nr = AckNR} = PCB)->
+               #aiutp_pcb{state = State} = PCB)->
   Now = aiutp_util:millisecond(),
   MicroNow = aiutp_util:microsecond(),
   PCB0 =
@@ -127,15 +129,14 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
        true -> PCB#aiutp_pcb{last_got_packet = Now,time = {Now,MicroNow}}
     end,
   %% 处理超出reorder范围的Packet
-  DiffSeqNR =  aiutp_util:bit16(PktSeqNR - AckNR -1),
+  DiffSeqNR =  aiutp_util:bit16(PktSeqNR - PCB0#aiutp_pcb.ack_nr -1),
 % seqnr is the number of packets past the expected
 % packet this is. ack_nr is the last acked, seq_nr is the
 % current. Subtracring 1 makes 0 mean "this is the next
 % expected packet".
-
   if DiffSeqNR >= ?REORDER_BUFFER_MAX_SIZE ->
       if (DiffSeqNR >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
-         PktType /= ?ST_STATE -> aiutp_net:send_ack(PCB0);
+         PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
       end;
      true -> process_packet_1(Packet,PCB0)
@@ -305,7 +306,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
   OurHist = PCB#aiutp_pcb.our_hist,
   OurHistValue = aiutp_delay:value(OurHist),
   OurHist0 =
-    if OurHistValue > RTT -> aiutp_deplay:shift(OurHistValue - RTT,OurHist);
+    if OurHistValue > RTT -> aiutp_delay:shift(OurHistValue - RTT,OurHist);
        true -> OurHist
     end,
   PCB2 =
@@ -323,10 +324,10 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
        (State == ?CS_SYN_RECV) -> ?CS_CONNECTED;
        true -> State
     end,
-  {State1,FinSentAcked0} =
+    {State1,FinSentAcked0} =
     if (PktType == ?ST_STATE) and
-       (State0 == ?CS_SYN_SENT) -> ?CS_CONNECTED;
-       FinSent and PCB2#aiutp_pcb.cur_window_packets == 0 ->
+       (State0 == ?CS_SYN_SENT) -> {?CS_CONNECTED,false};
+       (FinSent == true) and (PCB2#aiutp_pcb.cur_window_packets == 0) ->
         if CloseRequested -> {?CS_DESTROY,true};
            true -> {State0,true}
         end;
@@ -344,7 +345,6 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
                        fast_resend_seq_nr = FastResendSeqNR0,
                        zerowindow_time = ZeroWindowTime0
                       }, AckedPackets),
-
   PCB4 =
     if PCB3#aiutp_pcb.cur_window_packets == 1 ->
         aiutp_net:send_packet(aiutp_buffer:head(PCB3#aiutp_pcb.outbuf),PCB3);
@@ -367,19 +367,20 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
 process_packet_3(#aiutp_packet{type = PktType} = Packet,
                  #aiutp_pcb{state = State} = PCB)->
 
-  {ISFull,PCB0} = aiutp_net:is_full(0,PCB),
+  {ISFull,PCB0} = aiutp_net:is_full(-1,PCB),
   PCB1 =
     if (ISFull == false) and
        (State == ?CS_CONNECTED_FULL) -> PCB0#aiutp_pcb{state = ?CS_CONNECTED};
        true -> PCB0
     end,
   if PktType == ?ST_STATE-> PCB1;
-     (State /= ?CS_CONNECTED)  or (State /= ?CS_CONNECTED_FULL)-> PCB1;
+     (State /= ?CS_CONNECTED)  and (State /= ?CS_CONNECTED_FULL)-> PCB1;
      true -> process_packet_4(Packet, PCB1)
 end.
 
 process_packet_4(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
                  #aiutp_pcb{got_fin = GotFin} = PCB)->
+
   PCB0 =
     if (PktType == ?ST_FIN) and (GotFin == false)->
         PCB#aiutp_pcb{got_fin = true,eof_pkt = PktSeqNR};
@@ -418,7 +419,7 @@ check_timeouts_0(#aiutp_pcb{time ={ Now,_ },
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      {ISFull,PCB2} = aiutp_net:is_full(0,PCB1),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
@@ -455,10 +456,26 @@ mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf) ->
 check_timeouts_1(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
   {fasle,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+check_timeouts_1(#aiutp_pcb{fin_sent = FinSent,
+                            close_requested = CloseRequested,
+                            cur_window_packets = CurWindowPackets} = PCB)
+  when (FinSent == true),(CurWindowPackets == 1) ->
+  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
+  end;
 check_timeouts_1(#aiutp_pcb{state = State,
                             close_requested = CloseRequested,
                             retransmit_count = RetransmitCount} = PCB)
-  when (RetransmitCount >= 4) or ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
+  when (RetransmitCount >= 4);
+       ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
+  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
+  end;
+check_timeouts_1(#aiutp_pcb{state = State,
+                            close_requested = CloseRequested,
+                            retransmit_count = RetransmitCount} = PCB)
+  when (RetransmitCount >= 4);
+       ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
@@ -472,13 +489,14 @@ check_timeouts_1(#aiutp_pcb{time={Now,_},
                             retransmit_count = RetransmitCount
                            } = PCB) ->
   NewTimeout = RetransmitTimeout * 2,
+
   PCB0 =
     if (CurWindowPackets == 0) and
        (MaxWindow > ?PACKET_SIZE) ->
-        PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + retransmit_timeout,
+        PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
                       max_window = ?MAX((MaxWindow * 2 div 3), ?PACKET_SIZE)};
-       true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + retransmit_timeout,
+       true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
                                 max_window = ?PACKET_SIZE,slow_start = true}
     end,
@@ -496,7 +514,7 @@ check_timeouts_1(#aiutp_pcb{time={Now,_},
      true -> {true,PCB0}
   end.
 write(_,#aiutp_pcb{state = State} = PCB)
-  when (State /= ?CS_CONNECTED);
+  when (State /= ?CS_CONNECTED),
        (State /= ?CS_CONNECTED_FULL) -> {{error,not_connected},PCB};
 write(_,#aiutp_pcb{fin_sent = FinSent} = PCB)
   when FinSent == true -> {{error,closed},PCB};
@@ -504,6 +522,7 @@ write(Data,PCB) -> aiutp_tx:in(Data,PCB).
 
 close(#aiutp_pcb{state = State } = PCB)
   when State == ?CS_UNINITIALIZED;
+       State == ?CS_IDLE;
        State == ?CS_DESTROY -> PCB#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{state = State,rto = RTO} = PCB)
   when State == ?CS_SYN_SENT ->
@@ -511,12 +530,12 @@ close(#aiutp_pcb{state = State,rto = RTO} = PCB)
     rto_timeout = ?MIN(RTO * 2, 60) + aiutp_util:millisecond(),
     state = ?CS_DESTROY};
 close(#aiutp_pcb{state = State} = PCB)
-  when State == ?CS_SYN_RECV;
-       State == ?CS_IDLE->
+  when State == ?CS_SYN_RECV ->
   PCB#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{fin_sent_acked = FinSentAcked,fin_sent = FinSent} = PCB)->
   PCB0 = PCB#aiutp_pcb{read_shutdown = true,close_requested = true},
-  if FinSent == false -> aiutp_net:send_fin(PCB0#aiutp_pcb{fin_sent = true});
+  if FinSent == false ->
+      aiutp_net:send_fin(PCB0#aiutp_pcb{fin_sent = true});
      FinSentAcked == true -> PCB0#aiutp_pcb{state = ?CS_DESTROY};
      true -> PCB0
   end.
