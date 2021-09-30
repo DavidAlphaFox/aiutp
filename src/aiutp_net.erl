@@ -90,7 +90,9 @@ send_ack(#aiutp_pcb{time = {Now,_},
   PCB#aiutp_pcb{last_sent_packet = Now,last_rcv_win = WindowSize,
                 socket = [aiutp_packet:encode(Packet0)|Acc]}.
 
-send_keep_alive(#aiutp_pcb{ack_nr = AckNR} = PCB)-> send_ack(PCB#aiutp_pcb{ack_nr = AckNR -1}).
+send_keep_alive(#aiutp_pcb{ack_nr = AckNR} = PCB)->
+  PCB0 = send_ack(PCB#aiutp_pcb{ack_nr = AckNR -1}),
+  PCB0#aiutp_pcb{ack_nr = AckNR}.
 
 update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
   #aiutp_packet_wrap{

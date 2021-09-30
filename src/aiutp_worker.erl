@@ -32,10 +32,8 @@
                 remote :: tuple(),
                 pcb,
                 tick_timer :: reference(),
-                connector,
-                closer,
+                blocker,
                 conn_id,
-                process,
                 active = false
                }).
 
@@ -82,7 +80,7 @@ incoming(Pid,Packet)->
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(),port(),list()) -> {ok, Pid :: pid()} |
+-spec start_link(pid(),port()) -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
@@ -127,35 +125,36 @@ init([Parent,Socket]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call({connect,Control,Remote},From,
-            #state{net = Net} = State)->
-  case register_conn(Remote) of
-    {ok,ConnID} ->
-      Net0 = ai_utp_net:connect(Net#utp_net{remote = Remote},ConnID),
+handle_call({connect,Control,Remote},From,State) ->
+  case add_conn(Remote) of
+    {ok,ConnId} ->
+      PCB = aiutp_pcb:connect(ConnId),
+      self() ! swap_socket,
       {noreply,State#state{
                  remote = Remote,
                  controller = Control,
                  controller_monitor = erlang:monitor(process,Control),
-                 connector = From,
-                 net = Net0,
-                 conn_id = ConnID,
-                 tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)}};
-    _ -> {reply,{error,eagain},0}
+                 blocker = From,
+                 pcb = PCB,
+                 conn_id = ConnId,
+                 tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
+    Error -> {reply,Error}
   end;
-handle_call({accept,Control, Remote, Packet,Timing},From,
-           #state{net = Net} = State)->
-  {Net0,ConnID} = ai_utp_net:accept(Net#utp_net{remote = Remote},Packet,Timing),
-  case ai_utp_conn:alloc(Remote, ConnID) of
-    ok -> {reply,ok,State#state{
-                      remote = Remote,
-                      net = Net0,controller = Control,
-                      controller_monitor = erlang:monitor(process,Control),
-                      conn_id = ConnID,
-                      tick_timer = start_tick_timer(?TIMER_TIMEOUT, undefined)
-                     }};
+handle_call({accept,Control, Remote, Packet},From, State) ->
+  {ConnId,PCB} = aiutp_pcb:accept(Packet),
+  case aiutp_socket:add_conn(Remote,ConnId) of
+    ok ->
+      self() ! swap_socket,
+      {replay,ok,State#state{pcb = PCB,
+                             remote = Remote,
+                             controller = Control,
+                             controller_monitor = erlang:monitor(process,Control),
+                             tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined),
+                             conn_id = ConnId
+                            }};
     Error ->
-      gen_server:reply(From, Error),
-      handle_info(timeout, State#state{net = Net0,controller = undefined})
+      self() ! {stop,Error},
+      {reply,error,Error}
   end;
 handle_call({controlling_process,OldControl,NewControl,Active},_From,
            #state{controller = OldControl,controller_monitor = CMonitor} = State)->
@@ -164,42 +163,34 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
   {reply,ok,active_read(State#state{controller = NewControl,
                                     active = Active,
                                     controller_monitor = CMonitor0})};
-handle_call({send,Data},From,
-            #state{process = Proc,net = Net} = State)->
-  Proc0 = ai_utp_process:enqueue_sender(From, Data, Proc),
-  {Net0,Proc1} = ai_utp_net:do_send(Net, Proc0),
-  Proc2 =
-    case ai_utp_net:state(Net0) of
-      ?CLOSED ->
-        Proc3 = ai_utp_process:error_all(Proc1, closed),
-        timer:sleep(100),
-        self() ! timeout,
-        Proc3;
-      _ -> Proc1
-    end,
-  {noreply,active_read(State#state{net = Net0,process = Proc2})};
+handle_call({send,Data},_From,#state{pcb = PCB} = State) ->
+  case aiutp_pcb:write(Data, PCB) of
+    {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
+    PCB1 ->
+      self() ! swap_socket,
+      {reply,ok,active_read(State#state{pcb = PCB1})}
+  end;
 
-handle_call({active,true},_From,State) ->
-  {reply,ok,active_read(State#state{active = true})};
+handle_call({active,Active},_From,State) ->
+  {reply,ok,active_read(State#state{active = Active})};
 handle_call(controller,_From,#state{controller = Controller} = State)->
   {reply,{ok,Controller},State};
 handle_call(active,_From,#state{active = Active}=State) ->
   {reply,{ok,Active},State};
 handle_call({close,Controll},From,#state{controller = Controll,
-                                         process = Proc,
-                                         net = Net} = State) ->
-  Net0 = ai_utp_net:close(Net,Proc),
-  case ai_utp_net:state(Net0) of
-    ?CLOSED ->
-      gen_server:reply(From, ok),
-      timer:sleep(100),
-      self() ! timeout,
-      {reply,ok,State#state{active = false,net = Net0,
-                            process = ai_utp_process:new()}};
-    _ ->
-      {noreply,State#state{net = Net0,closer = From,active = false,
-                           process = ai_utp_process:new()}}
-  end;
+                                         controller_monitor = CMonitor,
+                                         pcb = PCB} = State) ->
+  if CMonitor /= undefiend -> erlang:demonitor(CMonitor,[flush]);
+     true -> ok
+  end,
+  PCB1 = aiutp_pcb:close(PCB),
+  self() ! swap_socket,
+  {reply,ok,State#state{
+              pcb = PCB1,
+              controller = undefined,
+              controller_monitor = undefined
+             }};
+
 handle_call({close,_},_From,State) ->
   {reply,{error,not_owner},State}.
 
@@ -219,51 +210,23 @@ handle_call({close,_},_From,State) ->
 
 %% 已经链接了
 handle_cast({packet,Packet},
-            #state{pcb = PCB,connector = undefined} = State)->
+            #state{pcb = PCB,blocker = undefined} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
-  {Buffers,PCB1} = aiutp_pcb:swap_socket(PCB0),
+  self() ! swap_socket,
+  {noreply,active_read(State#state{pcb = PCB})};
 
-  case ai_utp_net:state(Net0) of
-     ?CLOSED ->
-      cancle_tick_timer(Timer),
-      if Closer /= undefined ->
-          self() ! timeout,
-          gen_server:reply(Closer, ok);
-         true -> ok
-      end,
-      {noreply,active_read(State#state{net = Net0,
-                                       tick_timer = undefined,
-                                       closer = undefined,
-                                       process = Proc0})};
-    _ ->
-      {noreply,active_read(State#state{process = Proc0,net = Net0})}
-  end;
 %% 正在进行链接
-handle_cast({packet,Packet,Timing},
-            #state{net = Net,connector = Connector,
-                   tick_timer = Timer,process = Proc} = State)->
-  cancle_tick_timer(Timer),
-  {Net0,Proc0} = ai_utp_net:process_incoming(Net,Packet, Timing,Proc),
-  case ai_utp_net:state(Net0) of
-    ?CLOSED ->
-      gen_server:reply(Connector,
-                       {error,ai_utp_net:net_error(Net0)}),
-      handle_info(timeout,
-                  State#state{connector = undefined,
-                              controller = undefined,
-                              tick_timer = undefined,
-                              net = Net0,
-                              process = Proc0});
-    ?ESTABLISHED ->
+handle_cast({packet,Packet},
+            #state{pcb = PCB,blocker = Connector} = State)->
+  PCB0 = aiutp_pcb:process(Packet, PCB),
+  case aiutp_pcb:state(PCB0) of
+    ?CS_CONNECTED ->
       gen_server:reply(Connector, ok),
-      {noreply,State#state{net = Net0,connector = undefined,process = Proc0,
-                           tick_timer = start_tick_timer(?TIMER_TIMEOUT,undefined)}};
+      self() ! swap_socket,
+      {noreply,State#state{blocker = undefiend,pcb = PCB0}};
     _ ->
-      gen_server:reply(Connector, {error,econnaborted}),
-      handle_info(timeout,State#state{connector = undefined,
-                                      controller = undefined,
-                                      tick_timer = undefined,
-                                      net = Net0,process = Proc0})
+      self() ! swap_socket,
+      {noreply,State#state{pcb = PCB0}}
   end.
 
 %%--------------------------------------------------------------------
@@ -277,80 +240,95 @@ handle_cast({packet,Packet,Timing},
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
-handle_info(timeout,#state{parent_monitor = ParentMonitor,
-                           tick_timer = Timer,
-                           conn_id = ConnID,
-                           remote = Remote,
-                           process = Proc,
-                           net = Net,
-                           controller_monitor = CMonitor} =  State)->
-  if ParentMonitor /= undefined ->
-      erlang:demonitor(ParentMonitor,[flush]);
+
+handle_info(swap_socket,#state{socket = Socket,remote = Remote,pcb = PCB} = State)->
+  {Buffers,PCB0} = aiutp_pcb:swap_socket(PCB),
+  lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers),
+  {noreply,State#state{pcb = PCB0}};
+handle_info({stop,Reason},
+            #state{parent = Parent,parent_monitor = ParentMonitor,
+                   controller = Controller,controller_monitor = ControlMonitor,
+                   blocker = Blocker,tick_timer = Timer,
+                   conn_id = ConnId,remote = Remote,
+                   active = Active} = State)->
+  if ParentMonitor /= undefined -> erlang:demonitor(ParentMonitor,[flush]);
      true -> ok
   end,
-  if CMonitor /= undefined ->
-      erlang:demonitor(ParentMonitor,[flush]);
+  if ControlMonitor /= undefined -> erlang:demonitor(ControlMonitor,[flush]);
      true -> ok
   end,
   cancle_tick_timer(Timer),
-  Reason =
-    case ai_utp_net:net_error(Net) of
-      normal -> closed;
-      R -> R
-    end,
-  Proc0 = ai_utp_process:error_all(Proc, Reason),
-  ai_utp_conn:free(Remote, ConnID),
-  {stop,normal,State#state{parent_monitor = undefined,
-                           process = Proc0,
-                           controller_monitor = undefined}};
+  %% 如果是connector存在，直接报错
+  if Blocker /= undefined -> gen_server:reply(Blocker, {error,Reason});
+     (Active == true) and
+     (Controller /= undefined) ->  Controller ! {utp_closed,{utp,Parent,self()},Reason};
+     true -> ok
+  end,
+  if ConnId /= undefined -> aiutp_socket:remove_conn(Remote,ConnId);
+     true -> ok
+  end,
+  {stop,normal,undefined};
+
 handle_info({timeout,TRef,{check_interval,N}},
-            #state{pcb = PCB,tick_timer = {set,TRef}}= State)->
+            #state{pcb = PCB,socket = Socket,remote = Remote,
+                   tick_timer = {set,TRef}}= State)->
   PCB1 = aiutp_pcb:check_timeouts(PCB),
   Buffers = aiutp_pcb:swap_socket(PCB1),
-
-
-%% 端口崩溃了，就什么好说的了
+  lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers),
+  %% 检查是否退出
+  case aiutp_pcb:closed(PCB1) of
+    {closed,Reason} ->
+      self() ! {stop,Reason},
+      {noreply,State#state{tick_timer = undefined,pcb = PCB1}};
+    not_closed-> {noreply,State#state{
+                            tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined),
+                            pcb = PCB1
+                           }}
+  end;
+%% 端口崩溃了，就没什么好说的了
 handle_info({'DOWN', MRef, process, Parent, _Reason},
             #state{parent = Parent,
                    parent_monitor = MRef,
+                   controller = Controller,
                    controller_monitor = CMonitor,
-                   connector = Connector,
-                   process = Proc,
-                   net = Net
+                   blocker = Blocker,
+                   active = Active,
+                   tick_timer = Timer
                   } = State)->
-  State0 =
-    if Connector == undefined ->
-        State#state{net = ai_utp_net:close(Net),
-                    process = ai_utp_process:error_all(Proc, econnaborted)};
-       true ->
-        gen_server:reply(Connector, {error,eagain}),
-        if CMonitor == undefined -> State;
-           true -> erlang:demonitor(CMonitor,[flush])
-        end,
-        State#state{connector = undefined,controller = undefined,
-                    controller_monitor = undefined}
-    end,
-  handle_info(timeout,State0#state{parent = undefined,
-                                  parent_monitor = undefined});
+  if CMonitor /= undefined -> erlang:demonitor(CMonitor,[flush]);
+     true -> ok
+  end,
+  cancle_tick_timer(Timer),
+  if Blocker /= undefined ->
+      gen_server:reply(Blocker, {error,crash});
+     (Controller /= undefined) and
+     (Active == true) ->
+      Controller ! {utp_closed,{utp,Parent,self()},crash};
+     true -> ok
+  end,
+  {stop,crash,undefiend};
+
 %% 控制进程崩溃了，那么快速失败吧
 handle_info({'DOWN', MRef, process, Control, _Reason},
             #state{controller = Control,
                    controller_monitor = MRef,
-                   net = Net,process = Proc
+                   pcb = PCB,
+                   tick_timer = Timer,
+                   conn_id = ConnId
                   } = State)->
-  case ai_utp_net:state(Net) of
-    ?CLOSED -> ok;
-    _ ->
-      %%其它状态
-      ai_utp_process:error_all(Proc, econnaborted),
-      ai_utp_net:close(Net)
-  end,
-  handle_info(timeout,State#state{
-                        controller = undefined,
-                        process = ai_utp_process:new(),
-                        controller_monitor = undefined
-                       });
-
+  PCB0 = aiutp_pcb:close(PCB),
+  if Timer == undefined ->
+      %% 此处不应当发生
+      %% contrller被monitor的时候，timer也同步建立了
+      if ConnId /= undefined -> aiutp_socket:remove_conn(Remote,ConnId);
+         true -> ok
+      end,
+      {stop,normal,undefined};
+     true -> handle_info(swap_socket,
+                         State#state{controller = undefined,
+                                     controller_monitor = undefined,
+                                     blocker = undefined,pcb = PCB0})
+  end;
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -365,19 +343,7 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(_Reason, #state{controller = undefined})-> ok;
-terminate(_Reason, #state{controller = Control,active = Active,
-                          parent = Parent,net = Net}) ->
-  if Active == true ->
-      Self = self(),
-      UTPSocket = {utp,Parent,Self},
-      case ai_utp_net:state(Net) of
-        ?CLOSED -> Control ! {utp_close, UTPSocket, ai_utp_net:net_error(Net)};
-        _ -> Control ! {utp_close,UTPSocket,econnaborted}
-      end;
-     true -> ok
-  end,
-  ok.
+terminate(_Reason, _State)-> ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -408,13 +374,14 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-register_conn(Remote)-> register_conn(Remote,3).
-register_conn(_,0)-> {error,exist};
-register_conn(Remote,N)->
-  ConnID = ai_utp_util:bit16_random(),
-  case ai_utp_conn:alloc(Remote, ConnID) of
+
+add_conn(Remote) -> add_conn(Remote,3).
+add_conn(_,0)-> {error,eagain};
+add_conn(Remote,N)->
+  ConnID = aiutp_util:bit16_random(),
+  case aiutp_socket:add_conn(Remote, ConnID) of
     ok -> {ok,ConnID};
-    _ -> register_conn(Remote,N-1)
+    _ -> add_conn(Remote,N-1)
   end.
 
 
@@ -437,76 +404,40 @@ cancle_tick_timer({set,Ref}) ->
   erlang:cancel_timer(Ref),
   undefined.
 
-on_tick(NetState,_,#state{net = Net,
-                          process = Proc,
-                          closer = Closer,
-                          connector = Connector,
-                          controller_monitor = CMonitor
-                         } = State) ->
-  
-  {Net0,Proc0} = ai_utp_net:on_tick(NetState,Net,Proc),
-  NetState0 = ai_utp_net:state(Net0),
-  State0 =
-    if (NetState0 == ?CLOSED) and (Closer /= undefined)->
-        self() ! timeout,
-        gen_server:reply(Closer,ok),
-        State#state{tick_timer = undefined};
-       (NetState0 == ?CLOSED) and (Connector /= undefined)->
-        erlang:demonitor(CMonitor,[flush]),
-        self() ! timeout,
-        gen_server:reply(Connector, {error,etimeout}),
-        State#state{controller_monitor = undefined,
-                    controller = undefined,
-                    connector = undefined,
-                    tick_timer = undefined};
-       true -> State
-    end,
-  Timer =
-    if NetState0 == ?CLOSED -> undefined;
-       true -> start_tick_timer(?TIMER_TIMEOUT,undefined)
-    end,
-  Proc1 =
-    if NetState0 == ?CLOSED->
-        Error = ai_utp_net:net_error(Net0),
-        ai_utp_process:error_all(Proc0, Error);
-       true -> Proc0
-    end,
-  {noreply,
-   active_read(State0#state{tick_timer = Timer,net = Net0,
-                            process = Proc1})}.
 
 active_read(#state{parent = Parent,
-                   net = Net,
+                   pcb = PCB,
                    controller = Control,
-                   process = Proc,
                    active = true} = State)->
-  Self = self(),
-  case ai_utp_net:do_read(Net) of
-    {Net0,Buffer} ->
-      Control ! {utp,{utp,Parent,Self},Buffer},
-      State#state{net = Net0,active = false};
-     _ ->
-      Proc0 =
-        case ai_utp_net:state(Net) of
-          ?CLOSED ->
-            Self ! timeout,
-            ai_utp_process:error_all(Proc, ai_utp_net:net_error(Net));
-          _ -> Proc
-        end,
-      State#state{process = Proc0}
+  case aiutp_pcb:read(PCB) of
+    {undefiend,PCB1} -> State#state{pcb = PCB1};
+    {Payload,PCB1} ->
+      UTPSocket = {utp,Parent,self()},
+      Control ! {utp_data,UTPSocket,Payload},
+      case aiutp_pcb:closed(PCB1) of
+        {closed,Reason} ->
+          self() ! {stop,Reason},
+          State#state{pcb = PCB1};
+        not_closed->
+          PCB2 = aiutp_pcb:flush(PCB1),
+          self() ! swap_socket,
+          State#state{ active = false,pcb = PCB2}
+      end
   end;
+
 active_read(State)-> State.
 
 
 
 sync_input(Socket,NewOwner,Flag)->
   receive
-    {utp,Socket,_} = M ->
+    {utp_data,Socket,_} = M ->
       NewOwner ! M,
       sync_input(Socket,NewOwner,Flag);
-    {utp_close,Socket,_} = M->
+    {utp_closed,Socket,_} = M->
       NewOwner ! M,
       sync_input(Socket,NewOwner,true)
   after 0 ->
       Flag
   end.
+

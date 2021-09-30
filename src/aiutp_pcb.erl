@@ -9,7 +9,10 @@
          write/2,
          close/1,
          read/1,
-         connect/1]).
+         connect/2,
+         accept/1,
+         closed/1,
+         flush/1]).
 
 new(ConnIdRecv,ConnIdSend)->
   CurMilli = aiutp_util:millisecond(),
@@ -34,6 +37,27 @@ new(ConnIdRecv,ConnIdSend)->
 state(#aiutp_pcb{state = State}) -> State.
 swap_socket(#aiutp_pcb{socket = Acc} = PCB) ->
   {lists:reverse(Acc),PCB#aiutp_pcb{socket = []}}.
+closed(#aiutp_pcb{state = State})
+  when State == ?CS_RESET -> {closed,reset};
+closed(#aiutp_pcb{state = State,
+                        fin_sent = FinSent,
+                        fin_sent_acked = FinSentAcked,
+                        got_fin = GotFin,
+                        got_fin_reached = GotFinReached
+                       })
+  when State == ?CS_DESTROY->
+  if (FinSent and FinSentAcked) or
+     (GotFind and GotFinReached) -> {closed,normal};
+     (FinSet == false) and
+     (GotFin == false)-> {closed,timeout};
+     (GotFin == true) and
+     (GotFinReached == false) -> not_closed;
+     true -> {closed,crash}
+  end;
+closed(_) -> not_closed.
+
+
+     
 
 
 process(Packet,PCB)-> process(Packet#aiutp_packet.type,Packet,PCB).
@@ -476,7 +500,7 @@ write(Data,PCB) -> aiutp_tx:in(Data,PCB).
 
 close(#aiutp_pcb{state = State } = PCB)
   when State == ?CS_UNINITIALIZED;
-       State == ?CS_DESTROY -> PCB;
+       State == ?CS_DESTROY -> PCB#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{state = State,rto = RTO} = PCB)
   when State == ?CS_SYN_SENT ->
   PCB#aiutp_pcb{
@@ -506,12 +530,18 @@ read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
         end;
        true -> PCB
     end,
-  {lists:foldl(
-     fun(Bin,Acc) -> <<Acc/binary,Bin/binar>> end,
-     <<>>,L),PCB0#aiutp_pcb{inque = aiutp_queue:new()}}.
+  if aiutp_queue:size(InQue) > 0 ->
+      {lists:foldl(
+         fun(Bin,Acc) -> <<Acc/binary,Bin/binar>> end,
+         <<>>,L),PCB0#aiutp_pcb{inque = aiutp_queue:new()}};
+     true -> {undefined,PCB0}
+  end.
 
-connect(#aiutp_pcb{max_window = MaxWindow,inbuf = InBuf,
-                   conn_id_recv = ConnId,outbuf = OutBuf} = PCB)->
+connect(ConnIdRecv)->
+  ConnIdSend = aiutp_util:bit16(ConnIdRecv + 1),
+  PCB = new(ConnIdRecv,ConnIdSend),
+  #aiutp_pcb{max_window = MaxWindow,inbuf = InBuf,
+             conn_id_recv = ConnId,outbuf = OutBuf} = PCB
   Now = aiutp_util:millisecond(),
   MicroNow = aiutp_util:microsecond(),
   SeqNR = aiutp_util:bit16_random(),
@@ -530,3 +560,11 @@ connect(#aiutp_pcb{max_window = MaxWindow,inbuf = InBuf,
                        outbuf = OutBuf0, cur_window_packets = 1,
                        seq_nr = SeqNR + 1},
   aiutp_net:send_packet(Iter, PCB0).
+
+accept(#aiutp_packet{conn_id = ConnIdSend} = Packet)->
+  ConnIdRecv = aiutp_util:bit16(ConnIdSend + 1),
+  PCB = new(ConnIdRecv,ConnIdSend),
+  PCB1 = process(Packet,PCB),
+  {ConnIdRecv,PCB1}.
+
+flush(PCB)-> aiutp_net:flush_queue(PCB).

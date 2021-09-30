@@ -6,61 +6,59 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_conn).
+-module(aiutp_socket).
 
 -behaviour(gen_server).
-
+-include("aiutp.hrl").
 %% API
--export([start_link/0]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
-
--export([alloc/2,free/2,lookup/2]).
+-export([incoming/3,connect/3,listen/2,accept/1]).
 
 -define(SERVER, ?MODULE).
--define(TAB,?MODULE).
 
--record(state, {}).
+-record(state, {socket,
+                conns,
+                monitors,
+                acceptor = closed,
+                options}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-%%% C: ConnectionID = 1, ReceiverID = ConnectionID, SenderID = ConnectionID + 1
-%%% S: ConnectionID = 2, ReceiverID = ConnectionID, SenderID = ConnectionID - 1
--spec alloc({inet:ip_address() ,inet:port_number()},integer())->
-        ok | {error,exist}.
-alloc(Remote,ConnectionID)->
-  Socket = self(),
-  gen_server:call(?SERVER,{alloc,Socket,Remote,ConnectionID}).
-
-
--spec free({inet:ip_address() ,inet:port_number()},integer())-> ok.
-free(Remote,ConnectionID)->
-  Socket = self(),
-  gen_server:call(?SERVER,{free,Socket,Remote,ConnectionID}).
-
--spec lookup({inet:ip_address(),inet:port_number()},integer())->
-        {ok,pid()} | {error,not_exist}.
-lookup(Remote,ConnectionID)->
-  Conn = conn(ConnectionID,Remote),
-  case ets:lookup(?TAB, Conn) of
-    [] -> {error,not_exist};
-    [{Conn,{socket,Socket}}] -> {ok,Socket}
+connect(UTPSocket,Address,Port)->
+  {ok,{Socket,_}} = gen_server:call(UTPSocket,socket),
+  {ok,Worker} = aiutp_worker_sup:new(UTPSocket, Socket),
+  Address0 = aiutp_util:getaddr(Address),
+  Caller = self(),
+  case ai_utp_worker:connect(Worker,Caller,Address0, Port) of
+    ok -> {ok,{utp,UTPSocket,Worker}};
+    Error -> Error
   end.
 
+listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
+accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
+incoming(Socket,Remote,#aiutp_packet{type = Type} = Packet)->
+  case Type of
+    ?ST_REST -> ok;
+    ?ST_SYN -> gen_server:cast(Socket,{syn,Remote,Packet});
+    _ ->
+      gen_server:cast(Socket,{reset,Remote,Packet})
+  end.
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() -> {ok, Pid :: pid()} |
+-spec start_link(integer(),list()) -> {ok, Pid :: pid()} |
         {error, Error :: {already_started, pid()}} |
         {error, Error :: term()} |
         ignore.
-start_link() ->
-  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Port,Options) ->
+  gen_server:start_link(?MODULE, [Port,Options], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -77,9 +75,20 @@ start_link() ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([]) ->
-  ?TAB = ets:new(?TAB, [ordered_set, protected, named_table]),
-  {ok, #state{}}.
+init([Port,Options]) ->
+  process_flag(trap_exit, true),
+  Parent = self(),
+  UDPOptions = proplists:get_value(udp, Options,[]),
+  UTPOptions = proplists:get_value(utp, Options,[]),
+  case gen_udp:open(Port,UDPOptions) of
+    {ok,Socket} ->
+      ok = inet:setopts(Socket, [{active,once}]),
+      {ok, #state{socket = Socket,
+                  conns = maps:new(),
+                  monitors = maps:new(),
+                  options = UTPOptions}};
+    {error,Reason} -> {stop,Reason}
+  end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -96,14 +105,25 @@ init([]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-
-handle_call({free,Socket,Remote,ConnectionID},_From,State)->
-  Reply = free(Socket,Remote,ConnectionID),
-  {reply,Reply,State};
-handle_call({alloc,Socket,Remote,ConnectionID},_From,State)->
-  Reply = alloc(Socket,Remote,ConnectionID),
+handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
+  {reply,{ok,{Socket,Options}},State};
+handle_call({listen,Options},_From,
+            #state{socket = Socket,acceptor = closed,
+                   options = UTPOptions} = State)->
+  Parent = self(),
+  {ok,Acceptor} = aiutp_acceptor:start_link(Parent,Socket,Options,UTPOptions),
+  {reply,ok,State#state{acceptor = Acceptor}};
+handle_call({listen,_},_From,State) ->
+  {reply,{error,listening},State};
+handle_call(accept,_From,#state{acceptor = closed} = State)->
+  {reply,{error,not_listening},State};
+handle_call(accept,From,#state{acceptor = Acceptor} = State)->
+  aiutp_acceptor:accept(Acceptor,From),
+  {noreply,State};
+handle_call(_Request, _From, State) ->
+  Reply = ok,
   {reply, Reply, State}.
-  
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -130,9 +150,20 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
 
-handle_info({'DOWN', MonitorRef, process, _Pid, _Info}, S) ->
-  close(MonitorRef),
-  {noreply, S};
+handle_info({'EXIT',Acceptor,Reason},
+            #state{acceptor = Acceptor} = State) ->
+  {stop,Reason,State};
+handle_info({udp, Socket, IP, Port, Payload},
+            #state{socket = Socket} = State)->
+  case aiutp_packet:decode(Payloay) of
+    {ok,Packet} -> dispatch({IP,Port}, Packet, State);
+    _ -> ok
+    %{error,_Reason}->
+      %error_logger:info_report([decode_error,Reason]),
+     % ok
+  end,
+  ok = inet:setopts(Socket, [{active,once}]),
+  {noreply,State};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -147,7 +178,9 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(_Reason, _State) ->
+terminate(_Reason,#state{socket = undefined})-> ok;
+terminate(_Reason, #state{socket = Socket }) ->
+  gen_udp:close(Socket),
   ok.
 
 %%--------------------------------------------------------------------
@@ -179,47 +212,42 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-alloc(Socket,Remote,ConnectionID)->
-  Conn = conn(ConnectionID,Remote),
-  case ets:member(?TAB,Conn) of
-    true -> {error,exist};
-    false ->
-      try
-        true = ets:insert(?TAB, {Conn,{socket,Socket}}),
-        Ref = erlang:monitor(process, Socket),
-        RefSocket = {ref, Socket},
-        true = ets:insert(?TAB, {RefSocket, Ref}),
-        true = ets:insert(?TAB, {{ref, Ref}, Socket}),
-        ok
-      catch
-        _:Reason -> {error,Reason}
-      end
+reset_conn(Socket,Remote,ConnID,AckNR)->
+  Packet = aiutp_packet:reset(ConnID, AckNR),
+  Bin = aiutp_packet:encode(Packet),
+  gen_udp:send(Socket,Remote,Bin).
+
+add_conn(Remote,ConnId,Worker,
+         #state{conns = Conns,monitors = Monitors} = State)->
+  Key = {Remote,ConnId},
+  case maps:is_key(Key, Conns) of
+    true -> {exists,State};
+    fasle ->
+      Monitor = erlang:monitor(process, Worker),
+      Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
+      Monitors0 = maps:put(Monitor,Key,Monitors),
+      {ok,State#state{conns = Conns0,monitors = Monitors0}}
+  end.
+free_conn(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
+  Key = {Remote,ConnId},
+  case maps:is_key(Key,Conns) of
+    false -> State;
+    true ->
+      {_,Monitor} = maps:get(Key,Conns),
+      erlang:demonitor(Monitor,[flush]),
+      State#state{
+        monitors = maps:remove(Monitor, Monitors),
+        conns = mpas:remove(Key,Conns)}
   end.
 
-free(Socket,Remote,ConnectionID)->
-  try
-    Conn = conn(ConnectionID,Remote),
-    true = ets:delete(?TAB,Conn),
-    RefSocket = {ref, Socket},
-    [{RefSocket,Ref}] = ets:lookup(?TAB, RefSocket),
-    erlang:demonitor(Ref, [flush]),
-    true = ets:delete(?TAB, {ref, Ref}),
-    true = ets:delete(?TAB, RefSocket),
-    ok
-  catch _:_ ->
-      ok
+dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR} = Packet,
+         #state{socket = Socket,conns = Conns,acceptor = Acceptor} = State)->
+  Key = {Remote,ConnId},
+  case maps:get(Key,Conns,undefined) of
+    undefined ->
+      if (PktType == ?ST_SYN) and
+         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, Remote,Packet);
+         true -> reset_conn(Socket, Remote, ConnId, AckNR)
+      end;
+    {Worker,_}-> aiutp_worker:incoming(Worker, Packet)
   end.
-  
-close(Ref) ->
-  [{{ref, Ref}, Socket}] = ets:lookup(?TAB, {ref, Ref}),
-  ets:delete(?TAB,{ref,Ref}),
-  ets:delete(?TAB,{ref,Socket}),
-  case [Conn || [Conn] <-  ets:match(?TAB, {'$1', {socket,Socket}})] of
-    [ConnKey] ->
-      ets:delete(?TAB, ConnKey);
-     _-> ok
-  end.
-
-
-
-conn(ConnectionID,Remote)-> {conn,ConnectionID,Remote}.
