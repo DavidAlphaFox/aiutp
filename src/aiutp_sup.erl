@@ -11,25 +11,19 @@ init([]) ->
   SupFlags = #{strategy => one_for_all,
                intensity => 1,
                period => 5},
-  ConnManager = #{id => ai_utp_conn,
-                  start => {ai_utp_conn,start_link,[]},
-                  restart => transient,
-                  shutdown => 5000,
-                  type => worker,
-                  modules => [ai_utp_conn]
-                 },
-  SocketSup = #{id => ai_utp_socket_sup,
-                start => {ai_utp_socket_sup,start_link,[]},
+
+  SocketSup = #{id => aiutp_socket_sup,
+                start => {aiutp_socket_sup,start_link,[]},
                 restart => transient,
                 shutdown => 5000,
                 type => supervisor,
-                modules => [ai_utp_socket_sup]
+                modules => [aiutp_socket_sup]
                },
   WorkerSup = #{id => aiutp_woker_sup,
-                start => {ai_utp_worker_sup,start_link,[]},
+                start => {aiutp_worker_sup,start_link,[]},
                 restart => transient,
                 shutdown => 5000,
                 type => supervisor,
-                modules => [ai_utp_worker_sup]
+                modules => [aiutp_worker_sup]
                },
-  {ok, {SupFlags, [ConnManager,SocketSup,WorkerSup]}}.
+  {ok, {SupFlags, [SocketSup,WorkerSup]}}.

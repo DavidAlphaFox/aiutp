@@ -16,7 +16,8 @@
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/3,connect/3,listen/2,accept/1]).
+-export([connect/3,listen/2,accept/1,
+         add_conn/3,free_conn/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -41,13 +42,8 @@ connect(UTPSocket,Address,Port)->
 
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
-incoming(Socket,Remote,#aiutp_packet{type = Type} = Packet)->
-  case Type of
-    ?ST_REST -> ok;
-    ?ST_SYN -> gen_server:cast(Socket,{syn,Remote,Packet});
-    _ ->
-      gen_server:cast(Socket,{reset,Remote,Packet})
-  end.
+add_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{add_conn,Remote,ConnID},infinity).
+free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnID},infinity).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -77,7 +73,6 @@ start_link(Port,Options) ->
         ignore.
 init([Port,Options]) ->
   process_flag(trap_exit, true),
-  Parent = self(),
   UDPOptions = proplists:get_value(udp, Options,[]),
   UTPOptions = proplists:get_value(utp, Options,[]),
   case gen_udp:open(Port,UDPOptions) of
@@ -105,6 +100,12 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
+handle_call({add_conn,Remote,ConnId},State)->
+  {Result,State0} = add_conn_inner(Remote,ConnId,State),
+  {reply,Result,State0};
+handle_call({free_conn,Remote,ConnId},State) ->
+  {replay,ok,free_conn_inner(Remote,ConnId,State)};
+
 handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
   {reply,{ok,{Socket,Options}},State};
 handle_call({listen,Options},_From,
@@ -217,7 +218,7 @@ reset_conn(Socket,Remote,ConnID,AckNR)->
   Bin = aiutp_packet:encode(Packet),
   gen_udp:send(Socket,Remote,Bin).
 
-add_conn(Remote,ConnId,Worker,
+add_conn_inner(Remote,ConnId,Worker,
          #state{conns = Conns,monitors = Monitors} = State)->
   Key = {Remote,ConnId},
   case maps:is_key(Key, Conns) of
@@ -228,7 +229,7 @@ add_conn(Remote,ConnId,Worker,
       Monitors0 = maps:put(Monitor,Key,Monitors),
       {ok,State#state{conns = Conns0,monitors = Monitors0}}
   end.
-free_conn(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
+free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
   Key = {Remote,ConnId},
   case maps:is_key(Key,Conns) of
     false -> State;

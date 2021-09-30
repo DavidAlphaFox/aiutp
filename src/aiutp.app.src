@@ -1,7 +1,8 @@
 {application, aiutp,
- [{description, "An OTP library"},
+ [{description, "An OTP application of utp protocol"},
   {vsn, "0.1.0"},
   {registered, []},
+  {mod,{aiutp_app,[]}},
   {applications,
    [kernel,
     stdlib

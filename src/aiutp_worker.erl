@@ -125,8 +125,8 @@ init([Parent,Socket]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call({connect,Control,Remote},From,State) ->
-  case add_conn(Remote) of
+handle_call({connect,Control,Remote},From,#state{parent = Parent} = State) ->
+  case add_conn(Parent,Remote) of
     {ok,ConnId} ->
       PCB = aiutp_pcb:connect(ConnId),
       self() ! swap_socket,
@@ -140,7 +140,7 @@ handle_call({connect,Control,Remote},From,State) ->
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
     Error -> {reply,Error}
   end;
-handle_call({accept,Control, Remote, Packet},From, State) ->
+handle_call({accept,Control, Remote, Packet},From, #state{parent = Parent} = State) ->
   {ConnId,PCB} = aiutp_pcb:accept(Packet),
   case aiutp_socket:add_conn(Remote,ConnId) of
     ok ->
@@ -264,7 +264,7 @@ handle_info({stop,Reason},
      (Controller /= undefined) ->  Controller ! {utp_closed,{utp,Parent,self()},Reason};
      true -> ok
   end,
-  if ConnId /= undefined -> aiutp_socket:remove_conn(Remote,ConnId);
+  if ConnId /= undefined -> aiutp_socket:free_conn(Parent,Remote,ConnId);
      true -> ok
   end,
   {stop,normal,undefined};
@@ -375,13 +375,13 @@ format_status(_Opt, Status) ->
 %%% Internal functions
 %%%===================================================================
 
-add_conn(Remote) -> add_conn(Remote,3).
-add_conn(_,0)-> {error,eagain};
-add_conn(Remote,N)->
+add_conn(Parent,Remote) -> add_conn(Parent,Remote,3).
+add_conn(Parent,_,0)-> {error,eagain};
+add_conn(Parent,Remote,N)->
   ConnID = aiutp_util:bit16_random(),
-  case aiutp_socket:add_conn(Remote, ConnID) of
+  case aiutp_socket:add_conn(Parent,Remote, ConnID) of
     ok -> {ok,ConnID};
-    _ -> add_conn(Remote,N-1)
+    _ -> add_conn(Parent,Remote,N-1)
   end.
 
 
