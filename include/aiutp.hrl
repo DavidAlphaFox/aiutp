@@ -57,11 +57,15 @@
 -define(CS_CONNECTED_FULL,'CS_CONNECTED_FULL').
 -define(CS_RESET,'CS_RESET').
 -define(CS_DESTROY,'CS_DESTROY').
--define(ST_DATA,'ST_DATA').
--define(ST_FIN,'ST_FIN').
--define(ST_STATE,'ST_STATE').
--define(ST_RESET,'ST_RESET').
--define(ST_SYN,'ST_SYN').
+
+
+-define(ST_DATA,  0).
+-define(ST_FIN,   1).
+-define(ST_STATE, 2).
+-define(ST_RESET, 3).
+-define(ST_SYN,   4).
+
+
 
 -record(aiutp_packet, {type           :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN,
                        conn_id        :: integer(), % 会话ID
@@ -73,14 +77,14 @@
                        extension = [] :: [{sack, binary()} | {ext_bits, binary()}],
                        payload =  <<>> :: binary()
                     }).
--define(aiutp_packet_wrap,{packet,
+-record(aiutp_packet_wrap,{packet,
                            content = undefined,
                            payload = 0,
                            time_sent = 0, %microsecond
                            transmissions = 0,
                            need_resend = false}).
 
--define(aiutp_pcb,{state = ?CS_UNINITIALIZED,
+-record(aiutp_pcb,{state = ?CS_UNINITIALIZED,
                    socket = [],
                    time = undefined,
                    ida = fasle,

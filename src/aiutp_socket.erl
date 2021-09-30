@@ -42,8 +42,10 @@ connect(UTPSocket,Address,Port)->
 
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
-add_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{add_conn,Remote,ConnID},infinity).
-free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnID},infinity).
+add_conn(UTPSocket,Remote,ConnId) ->
+  Worker = self(),
+  gen_server:call(UTPSocket,{add_conn,Remote,ConnId,Worker},infinity).
+free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnId},infinity).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -100,10 +102,10 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_call({add_conn,Remote,ConnId},State)->
-  {Result,State0} = add_conn_inner(Remote,ConnId,State),
+handle_call({add_conn,Remote,ConnId,Worker},_From,State)->
+  {Result,State0} = add_conn_inner(Remote,ConnId,Worker,State),
   {reply,Result,State0};
-handle_call({free_conn,Remote,ConnId},State) ->
+handle_call({free_conn,Remote,ConnId},_From,State) ->
   {replay,ok,free_conn_inner(Remote,ConnId,State)};
 
 handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
@@ -156,7 +158,7 @@ handle_info({'EXIT',Acceptor,Reason},
   {stop,Reason,State};
 handle_info({udp, Socket, IP, Port, Payload},
             #state{socket = Socket} = State)->
-  case aiutp_packet:decode(Payloay) of
+  case aiutp_packet:decode(Payload) of
     {ok,Packet} -> dispatch({IP,Port}, Packet, State);
     _ -> ok
     %{error,_Reason}->
@@ -242,7 +244,7 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
   end.
 
 dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR} = Packet,
-         #state{socket = Socket,conns = Conns,acceptor = Acceptor} = State)->
+         #state{socket = Socket,conns = Conns,acceptor = Acceptor})->
   Key = {Remote,ConnId},
   case maps:get(Key,Conns,undefined) of
     undefined ->

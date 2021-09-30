@@ -61,8 +61,9 @@ add_sample(Sample,CurMilli,
                         delay_base = DelayBase,
                         cur_delay_hist = CurDelayHist,
                         cur_delay_idx = CurDelayIdx} = Delay) ->
+  SampleDiff = ?WRAPPING_DIFF_32(Sample,array:get(DelayBaseIdx, DelayBaseHist)),
   DelayBaseHist0 =
-    if ?WRAPPING_DIFF_32(Sample,array:get(DelayBaseIdx, DelayBaseHist)) < 0 ->
+    if SampleDiff < 0 ->
         array:set(DelayBaseIdx,Sample,DelayBaseHist);
        true -> DelayBaseHist
     end,

@@ -7,7 +7,7 @@
 %% 迎来计算我们需要从outbuf中移除多少数据包
 count_acked_packet(PktAckNR,#aiutp_pcb{seq_nr = SeqNR,
                          cur_window_packets = CurWindowPackets})->
-  Acks = aiutp_util:bit16(PkgAckNR - (SeqNR - 1 - CurWindowPackets)),
+  Acks = aiutp_util:bit16(PktAckNR - (SeqNR - 1 - CurWindowPackets)),
   if Acks > CurWindowPackets -> 0; % this happens when we receive an old ack nr
      true -> Acks
   end.
@@ -40,7 +40,7 @@ map_sack_to_seq(<<Bits/big-unsigned-integer,Rest/bits>>,Index,Base,Acc) ->
   end.
 map_sack_to_seq([],_) -> [];
 map_sack_to_seq([{sack,Bits}|_],Base)-> map_sack_to_seq(Bits,0,Base,[]);
-map_sack_to_seq([H|T],Base) -> map_sack_to_seq(T,Base).
+map_sack_to_seq([_|T],Base) -> map_sack_to_seq(T,Base).
 
 
 %% 找出所有被收到的ACKNR响应的数据包
@@ -92,7 +92,7 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
         Iter = aiutp_buffer:head(OutBuf),
         pick_acked_packet(MaxSeq,Iter,-1,[],OutBuf)
     end,
-  SAcks = map_sack_to_seqnr(Exts,PktAckNR + 2),
+  SAcks = map_sack_to_seq(Exts,PktAckNR + 2),
   {SAckedPacket,OutBuf1} = pick_sacked_packet(SAcks,OutBuf0),
   {AckedPacket,SAckedPacket,
    PCB#aiutp_pcb{

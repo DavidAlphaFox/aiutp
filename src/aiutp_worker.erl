@@ -140,9 +140,9 @@ handle_call({connect,Control,Remote},From,#state{parent = Parent} = State) ->
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
     Error -> {reply,Error}
   end;
-handle_call({accept,Control, Remote, Packet},From, #state{parent = Parent} = State) ->
+handle_call({accept,Control, Remote, Packet},_From, #state{parent = Parent} = State) ->
   {ConnId,PCB} = aiutp_pcb:accept(Packet),
-  case aiutp_socket:add_conn(Remote,ConnId) of
+  case aiutp_socket:add_conn(Parent,Remote,ConnId) of
     ok ->
       self() ! swap_socket,
       {replay,ok,State#state{pcb = PCB,
@@ -177,7 +177,7 @@ handle_call(controller,_From,#state{controller = Controller} = State)->
   {reply,{ok,Controller},State};
 handle_call(active,_From,#state{active = Active}=State) ->
   {reply,{ok,Active},State};
-handle_call({close,Controll},From,#state{controller = Controll,
+handle_call({close,Controll},_From,#state{controller = Controll,
                                          controller_monitor = CMonitor,
                                          pcb = PCB} = State) ->
   if CMonitor /= undefiend -> erlang:demonitor(CMonitor,[flush]);
@@ -213,7 +213,7 @@ handle_cast({packet,Packet},
             #state{pcb = PCB,blocker = undefined} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
   self() ! swap_socket,
-  {noreply,active_read(State#state{pcb = PCB})};
+  {noreply,active_read(State#state{pcb = PCB0})};
 
 %% 正在进行链接
 handle_cast({packet,Packet},
@@ -250,7 +250,7 @@ handle_info({stop,Reason},
                    controller = Controller,controller_monitor = ControlMonitor,
                    blocker = Blocker,tick_timer = Timer,
                    conn_id = ConnId,remote = Remote,
-                   active = Active} = State)->
+                   active = Active})->
   if ParentMonitor /= undefined -> erlang:demonitor(ParentMonitor,[flush]);
      true -> ok
   end,
@@ -269,7 +269,7 @@ handle_info({stop,Reason},
   end,
   {stop,normal,undefined};
 
-handle_info({timeout,TRef,{check_interval,N}},
+handle_info({timeout,TRef,{check_interval,_}},
             #state{pcb = PCB,socket = Socket,remote = Remote,
                    tick_timer = {set,TRef}}= State)->
   PCB1 = aiutp_pcb:check_timeouts(PCB),
@@ -294,7 +294,7 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
                    blocker = Blocker,
                    active = Active,
                    tick_timer = Timer
-                  } = State)->
+                  })->
   if CMonitor /= undefined -> erlang:demonitor(CMonitor,[flush]);
      true -> ok
   end,
@@ -311,6 +311,7 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
 %% 控制进程崩溃了，那么快速失败吧
 handle_info({'DOWN', MRef, process, Control, _Reason},
             #state{controller = Control,
+                   remote = Remote,
                    controller_monitor = MRef,
                    pcb = PCB,
                    tick_timer = Timer,
@@ -376,7 +377,7 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 
 add_conn(Parent,Remote) -> add_conn(Parent,Remote,3).
-add_conn(Parent,_,0)-> {error,eagain};
+add_conn(_,_,0)-> {error,eagain};
 add_conn(Parent,Remote,N)->
   ConnID = aiutp_util:bit16_random(),
   case aiutp_socket:add_conn(Parent,Remote, ConnID) of

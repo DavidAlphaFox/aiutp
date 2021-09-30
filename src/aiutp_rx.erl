@@ -23,7 +23,7 @@ recv(Packet,
   InQ0 = aiutp_queue:push_back(Packet#aiutp_packet.payload, InQ),
   PCB1 =
     if (GotFinReached == false) and
-       (GotFIn == true) and
+       (GotFin == true) and
        (EOFPkt == AckNR) ->
         PCB0 = PCB#aiutp_pcb {inque = InQ0,
                               got_fin_reached = true,
@@ -79,5 +79,5 @@ recv_reorder(Packet,Iter,Prev,
        };
      true->
       Next = aiutp_buffer:next(Iter, InBuf),
-      recv_reoder(Packet,Next,Iter,PCB)
+      recv_reorder(Packet,Next,Iter,PCB)
   end.

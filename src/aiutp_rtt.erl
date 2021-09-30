@@ -12,7 +12,7 @@ caculate_delay(Now,MicroNow,
                           average_sample_time = AverageSampleTime,
                           average_delay_base = AverageDelayBase} = PCB)->
   TheirDelay =
-    if TS > 0 -> NowMirco - TS;
+    if TS > 0 -> MicroNow - TS;
        true -> 0
     end,
   PrevDelayBase = aiutp_delay:delay_base(TheirHist),
@@ -25,12 +25,12 @@ caculate_delay(Now,MicroNow,
     if (DelayBase /= 0) and
         (?WRAPPING_DIFF_32(DelayBase,PrevDelayBase) < 0) ->
         DelayBaseShift = PrevDelayBase - DelayBase,
-        if DelayBaseShit =< 10000 -> aiutp_delay:shift(DelayBaseShit,OurHist);
+        if DelayBaseShift =< 10000 -> aiutp_delay:shift(DelayBaseShift,OurHist);
            true -> OurHist
         end;
        true -> OurHist
     end,
-  ActualDelay = TSDiff band TIMESTAMP_MASK,
+  ActualDelay = TSDiff band ?TIMESTAMP_MASK,
   PCB0 =
     if ActualDelay /= 0 ->
         OurHist1 = aiutp_delay:add_sample(ActualDelay,Now,OurHist0),
@@ -41,8 +41,8 @@ caculate_delay(Now,MicroNow,
         DistDown = AverageDelayBase0 - ActualDelay,
         DistUp = ActualDelay - AverageDelayBase0,
         AverageDelaySample =
-          if DisDown > DistUp -> DistUp;
-             true -> 0  - DisDown
+          if DistDown > DistUp -> DistUp;
+             true -> 0  - DistDown
           end,
         CurrentDelaySum0 = CurrentDelaySum + AverageDelaySample,
         if Now > AverageSampleTime ->
@@ -60,7 +60,7 @@ caculate_delay(Now,MicroNow,
               end,
             PCB#aiutp_pcb{ reply_micro = TheirDelay,last_measured_delay = Now,
                            their_hist = TheirHist0,our_hist = OurHist1,
-                           clock_drift = AverageDelay - PreAverageDelay,
+                           clock_drift = AverageDelay - PrevAverageDelay,
                            average_delay_base = AverageDelayBase1,
                            average_delay = AverageDelay0,
                            average_sample_time = AverageSampleTime + 5000,
@@ -71,7 +71,7 @@ caculate_delay(Now,MicroNow,
                            their_hist = TheirHist0,our_hist = OurHist1,
                            average_delay_base = AverageDelayBase0,
                            current_delay_sum = CurrentDelaySum0,
-                           crrent_delay_samples = CurrentDelaySamples + 1}
+                           current_delay_samples = CurrentDelaySamples + 1}
         end;
        true ->
         PCB#aiutp_pcb{ reply_micro = TheirDelay,last_measured_delay = Now,

@@ -27,7 +27,7 @@ is_full(Bytes,#aiutp_pcb{time= {Now,_},
   MaxSend = ?MIN(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
-     (CurWindow + Bytes) > MaxSend ->
+     (CurWindow + Bytes0) > MaxSend ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
      true -> {false,PCB}
   end.
@@ -110,7 +110,7 @@ update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
        true -> 0
     end,
   {Payload0,
-   WraPacket#aiutp_packet_wrap{transmissions = Transmission + 1,need_resend = false,
+   WrapPacket#aiutp_packet_wrap{transmissions = Transmission + 1,need_resend = false,
                                time_sent = MicroNow,packet = Packet0,content = Content0},
    Content0}.
 
@@ -120,7 +120,7 @@ send_packet(Pos,#aiutp_pcb{time = {Now,_},
                            socket = Acc,
                            ack_nr = AckNR,cur_window = CurWindow,
                            inbuf = InBuf,max_window = MaxWindow,
-                           outbuf = OutBuf,replay_micro = ReplyMicro} = PCB)->
+                           outbuf = OutBuf,reply_micro = ReplyMicro} = PCB)->
   MicroNow = aiutp_util:microsecond(),
   WrapPacket = aiutp_buffer:data(Pos,OutBuf),
   WindowSize = window_size(MaxWindow, InBuf),
@@ -131,12 +131,12 @@ send_packet(Pos,#aiutp_pcb{time = {Now,_},
                 outbuf = OutBuf0,last_sent_packet = Now}.
 
 
+loop_send(_,_,_,_,Limit,LastSeq,_,PCB) when Limit == 0 -> {LastSeq,PCB};
 loop_send(_,_,_,_,_,LastSeq,-1,PCB) -> {LastSeq,PCB};
-loop_send(_,_,_,_,Limit,LastSeq,-1,PCB) when Limit == 0 -> {LastSeq,PCB};
 loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,Limit,
           LastSeq,Iter,#aiutp_pcb{time = {Now,_},socket = Acc,
                                   ack_nr = AckNR,cur_window = CurWindow,
-                                  outbuf = OutBuf,replay_micro = ReplyMicro} = PCB)  ->
+                                  outbuf = OutBuf,reply_micro = ReplyMicro} = PCB)  ->
 
   WrapPacket = aiutp_buffer:data(Iter,OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
@@ -182,12 +182,12 @@ flush_packets(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB)->
       end
   end.
 
-loop_send_packet(#aiutp_pcb{outqueue = OutQue,outbuf = OutBuf,
+loop_send_packet(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
                             conn_id_send = ConnID,ack_nr = AckNR,seq_nr = SeqNR,
                             cur_window_packets = CurWindowPackets,
-                            max_window = MaxWindow,inbuf = InBuf,
-                            socket = Acc} = PCB)->
-  if aiutp_queue:size(OutQue) == 0 -> PCB;
+                            max_window = MaxWindow,inbuf = InBuf} = PCB)->
+  QueSize = aiutp_queue:size(OutQue),
+  if QueSize == 0 -> PCB;
      true ->
       {Type,Data} = aiutp_queue:front(OutQue),
       Payload = erlang:byte_size(Data),
@@ -204,7 +204,7 @@ loop_send_packet(#aiutp_pcb{outqueue = OutQue,outbuf = OutBuf,
                       #aiutp_packet_wrap{payload = Payload,packet = Packet0},OutBuf),
           Iter = aiutp_buffer:tail(OutBuf0),
           PCB1 = send_packet(Iter,PCB0#aiutp_pcb{cur_window_packets = CurWindowPackets + 1,
-                                                 outqueue = OutQue0,outbuf = OutBuf0,
+                                                 outque = OutQue0,outbuf = OutBuf0,
                                                  seq_nr = SeqNR + 1,last_rcv_win = LastRcvWin}),
           loop_send_packet(PCB1)
       end
