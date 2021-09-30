@@ -247,7 +247,7 @@ dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR} = 
   case maps:get(Key,Conns,undefined) of
     undefined ->
       if (PktType == ?ST_SYN) and
-         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, Remote,Packet);
+         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,Packet});
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
     {Worker,_}-> aiutp_worker:incoming(Worker, Packet)

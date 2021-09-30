@@ -6,11 +6,11 @@
 %%% @end
 %%% Created : 27 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_acceptor).
+-module(aiutp_acceptor).
 
 -behaviour(gen_server).
 
--include("ai_utp.hrl").
+-include("aiutp.hrl").
 %% API
 -export([start_link/4]).
 
@@ -118,8 +118,7 @@ handle_cast({accept,Acceptor},
     SynLen > 0 -> accept_incoming(Acceptor,State);
     true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
   end;
-handle_cast({syn,Remote,Packet,Timing},State)->
-  pair_incoming(Remote,Packet,Timing,State);
+handle_cast({?ST_SYN,Remote,Packet},State)-> pair_incoming(Remote,Packet,State);
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -188,19 +187,17 @@ accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
 accept_incoming({Caller,_} = Acceptor,
                 #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
                        parent = Parent,socket = Socket,options = Options} = State)->
-  {ok,Worker} = ai_utp_worker_sup:new(Parent, Socket,Options),
+  {ok,Worker} = aiutp_worker_sup:new(Parent, Socket,Options),
   {{value,Req},Syns0} = queue:out(Syns),
-  {Remote,Packet,Timing} = Req,
-  case ai_utp_worker:accept(Worker, Caller,Remote, Packet,Timing) of
+  {Remote,SYN} = Req,
+  case aiutp_worker:accept(Worker, Caller,Remote, SYN) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
-    {error,exist}->
-      Exts = proplists:get_value(ext_bits, Packet#utp_packet.extension),
-      ResetPacket = ai_utp_protocol:make_reset_packet(
-                      Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
-      ai_utp_util:send(Socket, Remote,
-                       ResetPacket#utp_packet{extension = [{ext_bits,Exts}]}, 0),
+    {error,_}->
+      Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+      Bin = aiutp_packet:encode(Packet),
+      gen_udp:send(Socket,Remote,Bin),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 });
     Error ->
       logger:error(Error),
@@ -208,40 +205,32 @@ accept_incoming({Caller,_} = Acceptor,
                  acceptors = queue:in(Acceptor,Acceptors),
                  syns = queue:in(Req,Syns0)},1000}
   end.
-pair_incoming(Remote,Packet,_,
+pair_incoming(Remote,SYN,
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
-  Exts = proplists:get_value(ext_bits, Packet#utp_packet.extension),
-  ResetPacket = ai_utp_protocol:make_reset_packet(
-                  Packet#utp_packet.conn_id,Packet#utp_packet.seq_no),
-  ai_utp_util:send(Socket, Remote,
-                   ResetPacket#utp_packet{extension = [{ext_bits,Exts}]}, 0),
+  Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+  Bin = aiutp_packet:encode(Packet),
+  gen_udp:send(Socket,Remote,Bin),
   {noreply,State};
 
-pair_incoming(Remote,Packet,Timing,
-              #state{acceptors = Acceptors,
-                     syns = Syns} = State) ->
+pair_incoming(Remote,Packet,
+              #state{acceptors = Acceptors,syns = Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({Remote0,SYN,_})->
-          if
-            (Remote ==  Remote0) andalso
-            (SYN#utp_packet.conn_id == Packet#utp_packet.conn_id) ->
-              false;
+      fun({Remote0,SYN})->
+          if (Remote ==  Remote0) andalso
+             (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Remote,Packet,Timing},Syns0),
+  Syns1 = queue:in({Remote,Packet},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
-    Empty == true ->
-      {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
+    Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
     true ->
       {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
-      accept_incoming(Acceptor,
-                      State#state{syns = Syns1,
-                                  syn_len = queue:len(Syns1),
-                                  acceptors = Acceptors0
-                                 })
+      accept_incoming(Acceptor,State#state{syns = Syns1,
+                                           syn_len = queue:len(Syns1),
+                                           acceptors = Acceptors0})
   end.
