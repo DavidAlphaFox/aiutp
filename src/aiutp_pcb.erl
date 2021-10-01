@@ -542,19 +542,9 @@ close(#aiutp_pcb{fin_sent_acked = FinSentAcked,fin_sent = FinSent} = PCB)->
      FinSentAcked == true -> PCB0#aiutp_pcb{state = ?CS_DESTROY};
      true -> PCB0
   end.
-read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
-                inbuf = InBuf,last_rcv_win = LastRcvWin} = PCB)->
+read(#aiutp_pcb{inque = InQue} = PCB)->
   L = aiutp_queue:to_list(InQue),
-  WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
-  PCB0 =
-    if WindowSize > LastRcvWin->
-        if LastRcvWin == 0 -> aiutp_net:send_ack(PCB);
-           true ->
-            Now = aiutp_util:millisecond(),
-            PCB#aiutp_pcb{time=Now,ida = true}
-        end;
-       true -> PCB
-    end,
+  PCB0 = aiutp_net:send_ack(PCB),
   QueSize = aiutp_queue:size(InQue),
   if QueSize > 0 ->
       {lists:foldl(
