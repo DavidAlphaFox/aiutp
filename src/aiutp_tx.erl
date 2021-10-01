@@ -49,7 +49,7 @@ pick_acked_packet(MaxSeq,Iter,Prev,Acc,OutBuf)->
   WrapPacket = aiutp_buffer:data(Iter,OutBuf),
   Next = aiutp_buffer:next(Iter,OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
-  if ?WRAPPING_DIFF_16(MaxSeq,Packet#aiutp_packet.seq_nr) > 0  ->
+  if ?WRAPPING_DIFF_16(MaxSeq,Packet#aiutp_packet.seq_nr) >= 0  ->
       OutBuf0 = aiutp_buffer:delete(Iter,Prev,OutBuf),
       pick_acked_packet(MaxSeq,Next,Prev,[WrapPacket|Acc],OutBuf0);
      true -> {Acc,OutBuf}
@@ -77,8 +77,7 @@ pick_sacked_packet([MaxSeq|_] = SAcks,OutBuf) ->
   pick_sacked_packet(SAcks,MaxSeq, Iter,-1,[], OutBuf).
 
 pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
-           #aiutp_pcb{cur_window_packets = CurWindowPackets,
-                      seq_nr = SeqNR,outbuf = OutBuf} = PCB) ->
+           #aiutp_pcb{seq_nr = SeqNR,outbuf = OutBuf} = PCB) ->
 
   %% SeqNR = 6 CurWindowPackets = 5 AckNR = 3
   %% Acks = 3 SeqBase = 1 , MaxSeq = 4
@@ -87,10 +86,8 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
   {AckedPacket,OutBuf0} =
     if Acks == 0 -> {[],OutBuf};
        true ->
-        SeqBase = aiutp_util:bit16(SeqNR - CurWindowPackets),
-        MaxSeq = aiutp_util:bit16(SeqBase + Acks),
         Iter = aiutp_buffer:head(OutBuf),
-        pick_acked_packet(MaxSeq,Iter,-1,[],OutBuf)
+        pick_acked_packet(PktAckNR,Iter,-1,[],OutBuf)
     end,
   SAcks = map_sack_to_seq(Exts,PktAckNR + 2),
   {SAckedPacket,OutBuf1} = pick_sacked_packet(SAcks,OutBuf0),

@@ -6,7 +6,7 @@ in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
    #aiutp_pcb{ack_nr = AckNR} = PCB)->
   DiffSeq  = aiutp_util:bit16(PktSeqNR - AckNR - 1),
   PCB1 =
-    if DiffSeq == 0 -> recv(Packet,PCB#aiutp_pcb{ack_nr = aiutp_util:bit16(AckNR + 1)});
+    if DiffSeq == 0 -> recv(Packet,PCB#aiutp_pcb{ack_nr = PktSeqNR});
        true->  recv_reorder(DiffSeq,Packet,PCB)
     end,
   PCB1#aiutp_pcb{ida = true}.
