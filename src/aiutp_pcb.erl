@@ -219,8 +219,6 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
-  io:format("MaxWindow:~p MaxWindow0:~p,LedbetCwnd: ~p,ScaleGain: ~p, ScaleGain0: ~p~n",
-            [MaxWindow,MaxWindow0,LedbetCwnd,ScaledGain,ScaledGain0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 max_window = MaxWindow0}.
 
@@ -288,7 +286,6 @@ selective_ack_packet([H|_] = SAckedPackets,
   {LastSeq,PCB1} = aiutp_net:send_packet_in_range(MinSeq, MaxSeq, 4, PCB0),
   PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
                         duplicate_ack = erlang:length(SAckedPackets)},
-  io:format("MinSeq: ~p LastSeq: ~p MaxSeq:~p~n",[MinSeq,LastSeq,MaxSeq]),
   if LastSeq == MinSeq -> PCB2;
      true -> maybe_decay_win(PCB2)
   end.
