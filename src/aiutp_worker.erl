@@ -168,7 +168,7 @@ handle_call({send,Data},_From,#state{pcb = PCB} = State) ->
     {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
     PCB1 ->
       self() ! swap_socket,
-      {reply,ok,active_read(State#state{pcb = PCB1})}
+      {reply,ok,State#state{pcb = PCB1}}
   end;
 
 handle_call({active,Active},_From,State) ->
