@@ -167,7 +167,7 @@
                    % the estimated clock drift between our computer
                    % and the endpoint computer. The unit is microseconds
                    % per 5 seconds
-                   ssthresh = 0,
+                   ssthresh = ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE,
                    slow_start = true,
                    inbuf,
                    outbuf,
