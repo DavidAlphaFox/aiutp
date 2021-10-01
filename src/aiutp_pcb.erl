@@ -456,13 +456,14 @@ mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf) ->
 check_timeouts_1(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
   {fasle,PCB#aiutp_pcb{state = ?CS_DESTROY}};
-check_timeouts_1(#aiutp_pcb{fin_sent = FinSent,
-                            close_requested = CloseRequested,
-                            cur_window_packets = CurWindowPackets} = PCB)
-  when (FinSent == true),(CurWindowPackets == 1) ->
+check_timeouts_1(#aiutp_pcb{time = Now,
+                            last_got_packet = LastGotPacket,
+                            close_requested = CloseRequested} = PCB)
+  when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 2) ->
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
+
 check_timeouts_1(#aiutp_pcb{state = State,
                             close_requested = CloseRequested,
                             retransmit_count = RetransmitCount} = PCB)
