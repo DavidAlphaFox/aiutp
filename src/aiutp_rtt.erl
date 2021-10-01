@@ -18,7 +18,7 @@ caculate_delay(Now,MicroNow,
     end,
   PrevDelayBase = aiutp_delay:delay_base(TheirHist),
   TheirHist0 =
-    if TheirDelay > 0 -> aiutp_delay:add_sample(TheirDelay,Now,TheirHist);
+    if TheirDelay /= 0 -> aiutp_delay:add_sample(TheirDelay,Now,TheirHist);
        true -> TheirHist
     end,
   DelayBase = aiutp_delay:delay_base(TheirHist0),
@@ -31,7 +31,10 @@ caculate_delay(Now,MicroNow,
         end;
        true -> OurHist
     end,
-  ActualDelay = TSDiff band ?TIMESTAMP_MASK,
+  ActualDelay =
+    if (TSDiff band ?TIMESTAMP_MASK == ?TIMESTAMP_MASK) -> 0;
+       true -> TSDiff band ?TIMESTAMP_MASK
+    end,
   PCB0 =
     if ActualDelay /= 0 ->
         OurHist1 = aiutp_delay:add_sample(ActualDelay,Now,OurHist0),
