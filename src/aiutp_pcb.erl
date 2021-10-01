@@ -217,8 +217,9 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
+  io:format("SlowStart: ~p, MaxWindow: ~p ScaledGain: ~p~n",[SlowStart0,MaxWindow0,ScaledGain0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
-                max_window = MaxWindow0}.
+                max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 
 ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
@@ -459,7 +460,7 @@ check_timeouts_1(#aiutp_pcb{state = State} = PCB)
 check_timeouts_1(#aiutp_pcb{time = Now,
                             last_got_packet = LastGotPacket,
                             close_requested = CloseRequested} = PCB)
-  when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 2) ->
+  when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 1.5) ->
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
