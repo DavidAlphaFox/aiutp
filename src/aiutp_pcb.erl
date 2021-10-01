@@ -191,11 +191,11 @@ cc_control(Now,AckedBytes,RTT,
   OurHistValue = aiutp_delay:value(OurHist),
   OurDelay = ?MIN(RTT,OurHistValue),
   Target =
-    if TargetDelay =<0 -> 100000;
+    if TargetDelay =< 0 -> 100000;
        true -> TargetDelay
     end,
   Penalty =
-    if ClockDrift <  -200000 -> (200000 - ClockDrift) div 7;
+    if ClockDrift <  -200000 -> (200000 + ClockDrift) div 7;
        true -> 0
     end,
   OurDelay0 = OurDelay + Penalty,
