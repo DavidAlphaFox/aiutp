@@ -11,8 +11,10 @@
          send_packet/2,
          send_packet_in_range/4]).
 
-window_size(MaxWindow,InBuf) ->
-  ?MIN(((?OUTGOING_BUFFER_MAX_SIZE - aiutp_buffer:size(InBuf)) * ?PACKET_SIZE),MaxWindow).
+window_size(_MaxWindow,InBuf) ->
+  (?OUTGOING_BUFFER_MAX_SIZE - aiutp_buffer:size(InBuf)) * ?PACKET_SIZE.
+
+
 
 is_full(Bytes,#aiutp_pcb{time= {Now,_},
                          max_window = MaxWindow,
