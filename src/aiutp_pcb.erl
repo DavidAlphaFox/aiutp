@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?PACKET_SIZE,
+             max_window = ?PACKET_SIZE * 10 ,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -503,7 +503,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                       max_window = math:ceil(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = ?PACKET_SIZE,slow_start = true}
+                                max_window = ?PACKET_SIZE * 10 ,slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
