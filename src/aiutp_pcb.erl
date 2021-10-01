@@ -345,7 +345,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     if ?WRAPPING_DIFF_16(FastResendSeqNR,((PktAckNR + 1) band 16#FFFF)) < 0 -> ((PktAckNR + 1) band 16#FFFF);
        true -> FastResendSeqNR
     end,
-  PCB3 = lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
+  PCB3 = lists:foldr(fun(I,AccPCB) -> ack_packet(RecvTime,I,AccPCB) end,
                      PCB2#aiutp_pcb{
                        max_window_user = PktMaxWindowUser,
                        state = State1,
@@ -366,7 +366,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
         end;
        true-> PCB4
     end,
-  PCB6  = selective_ack_packet(SAckedPackets,MicroNow,PCB5),
+  PCB6  = selective_ack_packet(SAckedPackets,RecvTime,PCB5),
   process_packet_3(Packet, PCB6).
 
 
