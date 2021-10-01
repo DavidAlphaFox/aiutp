@@ -303,17 +303,17 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
                             fin_sent_acked = FinSentAcked} = PCB)->
   MicroNow = aiutp_util:microsecond(),
   {AckedPackets,SAckedPackets,PCB0} = aiutp_tx:pick_acked(Packet,PCB),
-  {AckedBytes,RTT} = caculate_acked_bytes({0,?RTT_MAX},Now,AckedPackets,SAckedPackets),
+  {AckedBytes,MinRTT} = caculate_acked_bytes({0,?RTT_MAX},Now,AckedPackets,SAckedPackets),
   {ActualDelay,PCB1} = aiutp_rtt:caculate_delay(Now,MicroNow,Packet,PCB0),
   OurHist = PCB#aiutp_pcb.our_hist,
   OurHistValue = aiutp_delay:value(OurHist),
   OurHist0 =
-    if OurHistValue > RTT -> aiutp_delay:shift(OurHistValue - RTT,OurHist);
+    if OurHistValue > MinRTT -> aiutp_delay:shift(aiutp_util:bit32(OurHistValue - MinRTT),OurHist);
        true -> OurHist
     end,
   PCB2 =
     if (ActualDelay /= 0) and (AckedBytes > 0) ->
-        cc_control(Now,AckedBytes,RTT,PCB1#aiutp_pcb{our_hist = OurHist0});
+        cc_control(Now,AckedBytes,MinRTT,PCB1#aiutp_pcb{our_hist = OurHist0});
        true-> PCB1#aiutp_pcb{our_hist = OurHist0}
     end,
 
