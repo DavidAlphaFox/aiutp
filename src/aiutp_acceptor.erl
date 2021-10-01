@@ -186,22 +186,22 @@ format_status(_Opt, Status) ->
 accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
   {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
 accept_incoming({Caller,_} = Acceptor,
-                #state{acceptors = Acceptors, syns = Syns,syn_len = SynLen,
+                #state{ syns = Syns,syn_len = SynLen,
                        parent = Parent,socket = Socket} = State)->
   {ok,Worker} = aiutp_worker_sup:new(Parent,Socket),
   {{value,Req},Syns0} = queue:out(Syns),
-  {Remote,SYN} = Req,
-  case aiutp_worker:accept(Worker, Caller,Remote, SYN) of
+  {Remote,{SYN,_} = Payload} = Req,
+  case aiutp_worker:accept(Worker, Caller,Remote, Payload) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
-    Error ->
+    _ ->
       Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
       Bin = aiutp_packet:encode(Packet),
       gen_udp:send(Socket,Remote,Bin),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
   end.
-pair_incoming(Remote,SYN,
+pair_incoming(Remote,{SYN,_},
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
@@ -210,17 +210,17 @@ pair_incoming(Remote,SYN,
   gen_udp:send(Socket,Remote,Bin),
   {noreply,State};
 
-pair_incoming(Remote,Packet,
+pair_incoming(Remote,{Packet,_} = Payload,
               #state{acceptors = Acceptors,syns = Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({Remote0,SYN})->
+      fun({Remote0,{SYN,_}})->
           if (Remote ==  Remote0) andalso
              (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Remote,Packet},Syns0),
+  Syns1 = queue:in({Remote,Payload},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
     Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};

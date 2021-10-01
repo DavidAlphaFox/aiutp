@@ -88,6 +88,7 @@
                    retransmit_count = 0,
                    socket = [],
                    time = undefined,
+                   recv_time = undefined,
                    ida = fasle,
                    reorder_count = 0,
                    duplicate_ack = 0,
