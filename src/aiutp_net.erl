@@ -27,8 +27,6 @@ is_full(Bytes,#aiutp_pcb{time= {Now,_},
            end,
 
   MaxSend = ?MIN(MaxWindow, MaxWindowUser),
-  io:format("MaxSend: ~p,MaxWindow: ~p, MaxWindowUSer: ~p, CurWindow: ~p Bytes: ~p~n",
-            [MaxSend,MaxWindow,MaxWindowUser,CurWindow,Bytes0]),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
      (CurWindow + Bytes0) > MaxSend ->

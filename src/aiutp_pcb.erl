@@ -219,6 +219,8 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
+  io:format("MaxWindow:~p MaxWindow0:~p,LedbetCwnd: ~p,ScaleGain: ~p, ScaleGain0: ~p~n",
+            [MaxWindow,MaxWindow0,LedbetCwnd,ScaledGain,ScaledGain0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 max_window = MaxWindow0}.
 
