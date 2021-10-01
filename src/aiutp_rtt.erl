@@ -1,7 +1,7 @@
 -module(aiutp_rtt).
 -include("aiutp.hrl").
 -export([caculate_delay/4,
-         caculate_rtt/3]).
+         caculate_rtt/4]).
 
 caculate_delay(Now,MicroNow,
                #aiutp_packet{tv_usec = TS, reply_micro = TSDiff},
@@ -83,13 +83,12 @@ caculate_delay(Now,MicroNow,
     end,
   {ActualDelay,PCB0}.
 
-caculate_rtt(RTT,RTTVar,TimeSent)->
-  MicroNow = aiutp_util:microsecond(),
+caculate_rtt(RTT,RTTVar,TimeSent,MicroNow)->
   ERTT = aiutp_util:bit32((MicroNow - TimeSent) div 1000),
   if RTT == 0 -> {ERTT,ERTT div 2,ERTT};
      true ->
-      Delta = RTT - ERTT,
-      RTTVar0 = RTTVar + (erlang:abs(Delta) - RTTVar) div 4,
+      Delta = erlang:abs(RTT - ERTT),
+      RTTVar0 = RTTVar + (Delta - RTTVar) div 4,
       RTT0 = RTT - RTT div 8 + ERTT div 8,
       {RTT0,RTTVar0,ERTT}
   end.

@@ -223,7 +223,7 @@ cc_control(Now,AckedBytes,RTT,
                 max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 
-ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
+ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
                               time_sent = TimeSent,
                          need_resend = NeedResend,payload = Payload},
                  #aiutp_pcb{time = Now,
@@ -232,7 +232,7 @@ ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
                             rtt_var = RTTVar,rtt_hist = RTTHist} = PCB)->
   {RTT1,RTTVar1,RTO0,RTTHist1} =
     if Transmissions == 1 ->
-        {RTT0,RTTVar0,ERTT} = aiutp_rtt:caculate_rtt(RTT,RTTVar,TimeSent),
+        {RTT0,RTTVar0,ERTT} = aiutp_rtt:caculate_rtt(RTT,RTTVar,TimeSent,MicroNow),
         RTTHist0 =
           if RTT /= 0 -> aiutp_delay:add_sample(ERTT,Now,RTTHist);
              true -> RTTHist
@@ -273,12 +273,14 @@ maybe_decay_win(#aiutp_pcb {time = Now,
 
 %% 此处实现和C++版本有差异，会浪费带宽，但是不是Bug
 %% 需要在后期进行优化
-selective_ack_packet(_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB)
+selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB)
   when CurWindowPackets  == 0-> PCB;
-selective_ack_packet([],PCB)-> PCB;
+selective_ack_packet([],_,PCB)-> PCB;
 selective_ack_packet([H|_] = SAckedPackets,
+                     MicroNow,
                      #aiutp_pcb{fast_resend_seq_nr = MinSeq} = PCB)->
-  PCB0 = lists:foldr(fun ack_packet/2, PCB, SAckedPackets),
+
+  PCB0 = lists:foldr(fun(I,Acc) -> ack_packet(MicroNow,I,Acc) end, PCB, SAckedPackets),
   Packet = H#aiutp_packet_wrap.packet,
   SeqNR = Packet#aiutp_packet.seq_nr,
   %% 计算出重发最大的序列号
@@ -340,7 +342,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     if ?WRAPPING_DIFF_16(FastResendSeqNR,((PktAckNR + 1) band 16#FFFF)) < 0 -> ((PktAckNR + 1) band 16#FFFF);
        true -> FastResendSeqNR
     end,
-  PCB3 = lists:foldr(fun ack_packet/2,
+  PCB3 = lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
                      PCB2#aiutp_pcb{
                        max_window_user = PktMaxWindowUser,
                        state = State1,
@@ -361,7 +363,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
         end;
        true-> PCB4
     end,
-  PCB6  = selective_ack_packet(SAckedPackets,PCB5),
+  PCB6  = selective_ack_packet(MicroNow,SAckedPackets,PCB5),
   process_packet_3(Packet, PCB6).
 
 
