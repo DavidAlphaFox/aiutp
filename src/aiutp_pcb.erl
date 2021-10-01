@@ -241,7 +241,7 @@ ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
        true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
-    if NeedResend -> CurWindow - Payload;
+    if NeedResend == false -> CurWindow - Payload;
        true -> CurWindow
     end,
   PCB#aiutp_pcb{
@@ -286,6 +286,7 @@ selective_ack_packet([H|_] = SAckedPackets,
   {LastSeq,PCB1} = aiutp_net:send_packet_in_range(MinSeq, MaxSeq, 4, PCB0),
   PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
                         duplicate_ack = erlang:length(SAckedPackets)},
+  io:format("MinSeq: ~p LastSeq: ~p MaxSeq:~p~n",[MinSeq,LastSeq,MaxSeq]),
   if LastSeq == MinSeq -> PCB2;
      true -> maybe_decay_win(PCB2)
   end.
