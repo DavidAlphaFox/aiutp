@@ -189,7 +189,7 @@ cc_control(Now,AckedBytes,RTT,
                       last_maxed_out_window = LastMaxedOutWindow,
                       slow_start = SlowStart,ssthresh = SSThresh} = PCB)->
   OurHistValue = aiutp_delay:value(OurHist),
-  OurDelay = ?MIN(RTT,OurHistValue),
+  OurDelay = ?MIN(aiutp_util:bit32(RTT),OurHistValue),
   Target =
     if TargetDelay =< 0 -> 100000;
        true -> TargetDelay
@@ -200,6 +200,7 @@ cc_control(Now,AckedBytes,RTT,
     end,
   OurDelay0 = OurDelay + Penalty,
   OffTarget = Target - OurDelay0,
+  io:format("OurDelay: ~p,OurDelay0: ~p,Traget: ~p ~n",[OurDelay,OurDelay0,Target]),
   Win0 = ?MIN(AckedBytes,MaxWindow),
   Win1 = ?MAX(AckedBytes,MaxWindow),
   WindowFactor = Win0 / Win1,
