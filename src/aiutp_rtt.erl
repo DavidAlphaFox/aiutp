@@ -22,7 +22,7 @@ caculate_delay(Now,MicroNow,
     end,
   DelayBase = aiutp_delay:delay_base(TheirHist0),
   OurHist0 =
-    if (DelayBase /= 0) and
+    if (PrevDelayBase /= 0) and
         (?WRAPPING_DIFF_32(DelayBase,PrevDelayBase) < 0) ->
         DelayBaseShift = PrevDelayBase - DelayBase,
         if DelayBaseShift =< 10000 -> aiutp_delay:shift(DelayBaseShift,OurHist);
