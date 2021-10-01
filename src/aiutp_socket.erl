@@ -158,9 +158,6 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
 
-handle_info({'EXIT',Acceptor,Reason},
-            #state{acceptor = Acceptor} = State) ->
-  {stop,Reason,State};
 handle_info({udp, Socket, IP, Port, Payload},
             #state{socket = Socket} = State)->
   case aiutp_packet:decode(Payload) of
@@ -172,6 +169,20 @@ handle_info({udp, Socket, IP, Port, Payload},
   end,
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
+handle_info({'DOWN',MRef,process,_Worker,_Reason},
+            #state{monitors = Monitors,conns = Conns} = State)->
+  case maps:get(MRef,Monitors,undefined) of
+    undefined -> {noreply,State};
+    Key -> {noreply,
+            State#state{monitors = maps:remove(MRef, Monitors),
+                        conns = maps:remove(Key,Conns)}}
+  end;
+handle_info({'EXIT',Acceptor,Reason},
+            #state{acceptor = Acceptor,socket = Socket} = State) ->
+  if Socket /= undefined -> gen_udp:close(Socket);
+     true -> ok
+  end,
+  {stop,Reason,State#state{socket = undefined}};
 handle_info(_Info, State) ->
   {noreply, State}.
 
