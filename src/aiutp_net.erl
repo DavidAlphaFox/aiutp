@@ -11,8 +11,7 @@
          send_packet/2,
          send_packet_in_range/4]).
 
-window_size(_MaxWindow,InBuf) ->
-  (?OUTGOING_BUFFER_MAX_SIZE - aiutp_buffer:size(InBuf)) * ?PACKET_SIZE.
+window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 
 
 

@@ -10,7 +10,9 @@
          insert/3,
          append/2,
          pop/1,
-         size/1]).
+         size/1,
+         used/1,
+         unused/1]).
 
 -define(LAST_INDEX, -1).
 -record(aiutp_buffer,{data,
@@ -38,6 +40,9 @@ init_index(Index, Cur, Last) ->
 
 
 size(#aiutp_buffer{size = Size}) ->Size.
+used(#aiutp_buffer{size = Size, unused = Unused}) -> Size - Unused.
+unused(#aiutp_buffer{unused = Unused}) ->  Unused.
+
 
 head(#aiutp_buffer{used = Used}) -> Used.
 next(Prev, #aiutp_buffer{index = Index}) -> array:get(Prev, Index).
