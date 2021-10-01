@@ -29,7 +29,7 @@ new(ConnIdRecv,ConnIdSend)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?AIUTP_MTU_DEF * 4,
+             max_window = ?PACKET_SIZE,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
