@@ -44,7 +44,7 @@ recv(Packet,
       NextAckNR = aiutp_util:bit16(AckNR + 1),
       if Packet0#aiutp_packet.seq_nr == NextAckNR ->
           recv(Packet0,PCB1#aiutp_pcb{
-                         inbuf = aiutp_buffer:pop(Iter, InBuf),
+                         inbuf = aiutp_buffer:pop(InBuf),
                          reorder_count = ReorderCount -1 ,
                          ack_nr  = NextAckNR
                         });
