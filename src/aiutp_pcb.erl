@@ -200,7 +200,6 @@ cc_control(Now,AckedBytes,RTT,
     end,
   OurDelay0 = OurDelay + Penalty,
   OffTarget = Target - OurDelay0,
-  io:format("OurDelay: ~p,OurDelay0: ~p,Traget: ~p ~n",[OurDelay,OurDelay0,Target]),
   Win0 = ?MIN(AckedBytes,MaxWindow),
   Win1 = ?MAX(AckedBytes,MaxWindow),
   WindowFactor = Win0 / Win1,
@@ -220,6 +219,7 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
+  io:format("OurDelay: ~p,OurDelay0: ~p,Traget: ~p Win:~p Win0:~p ~n",[OurDelay,OurDelay0,Target,MaxWindow,MaxWindow0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 max_window = MaxWindow0}.
 
