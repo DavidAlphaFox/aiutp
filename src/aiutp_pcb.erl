@@ -85,9 +85,11 @@ process(?ST_RESET,
 process(?ST_SYN,
         #aiutp_packet{seq_nr = AckNR},
         #aiutp_pcb{state = ?CS_IDLE} = PCB) ->
+  SeqNR = aiutp_util:bit16_random(),
   PCB0 = PCB#aiutp_pcb{state = ?CS_SYN_RECV,
                        ack_nr = AckNR,
-                       seq_nr = aiutp_util:bit16_random(),
+                       seq_nr = SeqNR,
+                       fast_resend_seq_nr = SeqNR,
                        last_got_packet = aiutp_util:millisecond()},
   aiutp_net:send_ack(PCB0);
 process(?ST_SYN,
@@ -217,7 +219,6 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
-  io:format("SlowStart: ~p, MaxWindow: ~p ScaledGain: ~p~n",[SlowStart0,MaxWindow0,ScaledGain0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
@@ -340,7 +341,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
        true -> FastResendSeqNR
     end,
   PCB3 = lists:foldl(fun ack_packet/2,
-                     PCB1#aiutp_pcb{
+                     PCB2#aiutp_pcb{
                        max_window_user = PktMaxWindowUser,
                        state = State1,
                        fin_sent_acked = FinSentAcked0,
