@@ -217,7 +217,6 @@ cc_control(Now,AckedBytes,RTT,
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
-  io:format("OurDelay: ~p,OurDelay0: ~p,Traget: ~p Win:~p Win0:~p ~n",[OurDelay,OurDelay0,Target,MaxWindow,MaxWindow0]),
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 max_window = MaxWindow0}.
 
@@ -233,7 +232,7 @@ ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
     if Transmissions == 1 ->
         {RTT0,RTTVar0,ERTT} = aiutp_rtt:caculate_rtt(RTT,RTTVar,TimeSent),
         RTTHist0 =
-          if RTT == 0 -> aiutp_delay:add_sample(ERTT,Now,RTTHist);
+          if RTT /= 0 -> aiutp_delay:add_sample(ERTT,Now,RTTHist);
              true -> RTTHist
           end,
         {RTT0,RTTVar0,?MAX((RTT0 + RTTVar0 * 4),1000),RTTHist0};
