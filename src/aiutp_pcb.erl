@@ -308,7 +308,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
                             recv_time = RecvTime} = PCB)->
   MicroNow = aiutp_util:microsecond(),
   {AckedPackets,SAckedPackets,PCB0} = aiutp_tx:pick_acked(Packet,PCB),
-  {AckedBytes,MinRTT} = caculate_acked_bytes({0,?RTT_MAX},Now,AckedPackets,SAckedPackets),
+  {AckedBytes,MinRTT} = caculate_acked_bytes({0,?RTT_MAX},MicroNow,AckedPackets,SAckedPackets),
   {ActualDelay,PCB1} = aiutp_rtt:caculate_delay(Now,RecvTime,Packet,PCB0),
   OurHist = PCB1#aiutp_pcb.our_hist,
   OurHistValue = aiutp_delay:value(OurHist),
