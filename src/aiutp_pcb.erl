@@ -278,7 +278,7 @@ selective_ack_packet(_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB)
 selective_ack_packet([],PCB)-> PCB;
 selective_ack_packet([H|_] = SAckedPackets,
                      #aiutp_pcb{fast_resend_seq_nr = MinSeq} = PCB)->
-  PCB0 = lists:foldl(fun ack_packet/2, PCB, SAckedPackets),
+  PCB0 = lists:foldr(fun ack_packet/2, PCB, SAckedPackets),
   Packet = H#aiutp_packet_wrap.packet,
   SeqNR = Packet#aiutp_packet.seq_nr,
   %% 计算出重发最大的序列号
@@ -340,7 +340,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     if ?WRAPPING_DIFF_16(FastResendSeqNR,((PktAckNR + 1) band 16#FFFF)) < 0 -> ((PktAckNR + 1) band 16#FFFF);
        true -> FastResendSeqNR
     end,
-  PCB3 = lists:foldl(fun ack_packet/2,
+  PCB3 = lists:foldr(fun ack_packet/2,
                      PCB2#aiutp_pcb{
                        max_window_user = PktMaxWindowUser,
                        state = State1,
@@ -542,9 +542,19 @@ close(#aiutp_pcb{fin_sent_acked = FinSentAcked,fin_sent = FinSent} = PCB)->
      FinSentAcked == true -> PCB0#aiutp_pcb{state = ?CS_DESTROY};
      true -> PCB0
   end.
-read(#aiutp_pcb{inque = InQue} = PCB)->
+read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
+                inbuf = InBuf,last_rcv_win = LastRcvWin} = PCB)->
   L = aiutp_queue:to_list(InQue),
-  PCB0 = aiutp_net:send_ack(PCB),
+  WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
+  PCB0 =
+    if WindowSize > LastRcvWin->
+        if LastRcvWin == 0 -> aiutp_net:send_ack(PCB);
+           true ->
+            Now = aiutp_util:millisecond(),
+            PCB#aiutp_pcb{time=Now,ida = true}
+        end;
+       true -> PCB
+    end,
   QueSize = aiutp_queue:size(InQue),
   if QueSize > 0 ->
       {lists:foldl(
