@@ -13,8 +13,6 @@
 
 window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 
-
-
 is_full(Bytes,#aiutp_pcb{time= Now,
                          max_window = MaxWindow,
                          max_window_user = MaxWindowUser,
@@ -187,7 +185,7 @@ flush_packets(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB)->
       end
   end.
 
-loop_send_packet(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
+send_packet_in_queue(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
                             conn_id_send = ConnId,ack_nr = AckNR,seq_nr = SeqNR,
                             cur_window_packets = CurWindowPackets,
                             max_window = MaxWindow,inbuf = InBuf} = PCB)->
@@ -212,7 +210,7 @@ loop_send_packet(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
           PCB1 = send_packet(Iter,PCB0#aiutp_pcb{cur_window_packets = CurWindowPackets + 1,
                                                  outque = OutQue0,outbuf = OutBuf0,
                                                  seq_nr = SeqNR + 1,last_rcv_win = LastRcvWin}),
-          loop_send_packet(PCB1)
+          send_packet_in_queue(PCB1)
       end
   end.
 
@@ -223,7 +221,7 @@ flush_queue(#aiutp_pcb{time = Now,cur_window_packets = CurWindowPackets,rto = RT
                        rto_timeout = Now + RTO};
        true -> PCB
     end,
-  loop_send_packet(PCB0).
+  send_packet_in_queue(PCB0).
 
 schedule_ack(#aiutp_pcb{ida = false} = PCB) -> PCB;
 schedule_ack(PCB) -> send_ack(PCB#aiutp_pcb{ida = false}).
