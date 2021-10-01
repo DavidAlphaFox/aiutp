@@ -228,7 +228,7 @@ ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
                          need_resend = NeedResend,payload = Payload},
                  #aiutp_pcb{time = {Now,_},
                             cur_window = CurWindow,
-                            rtt = RTT,
+                            rtt = RTT,rto = RTO,
                             rtt_var = RTTVar,rtt_hist = RTTHist} = PCB)->
   {RTT1,RTTVar1,RTO0,RTTHist1} =
     if Transmissions == 1 ->
@@ -237,7 +237,8 @@ ack_packet(#aiutp_packet_wrap{transmissions = Transmissions,
           if RTT == 0 -> aiutp_delay:add_sample(ERTT,Now,RTTHist);
              true -> RTTHist
           end,
-        {RTT0,RTTVar0,?MAX((RTT0 + RTTVar0 * 4),1000),RTTHist0}
+        {RTT0,RTTVar0,?MAX((RTT0 + RTTVar0 * 4),1000),RTTHist0};
+       true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
     if NeedResend -> CurWindow - Payload;
