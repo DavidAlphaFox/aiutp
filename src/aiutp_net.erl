@@ -9,7 +9,7 @@
          send_fin/1,
          send_keep_alive/1,
          send_packet/2,
-         send_packet_in_range/4]).
+         send_n_packets/4]).
 
 window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 
@@ -136,36 +136,36 @@ send_packet(Pos,#aiutp_pcb{time = Now,
                 outbuf = OutBuf0,last_sent_packet = Now}.
 
 
-loop_send(_,_,_,_,Limit,LastSeq,_,PCB) when Limit == 0 -> {LastSeq,PCB};
-loop_send(_,_,_,_,_,LastSeq,-1,PCB) -> {LastSeq,PCB};
-loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,Limit,
-          LastSeq,Iter,#aiutp_pcb{time = Now,socket = Acc,
-                                  ack_nr = AckNR,cur_window = CurWindow,
-                                  outbuf = OutBuf,reply_micro = ReplyMicro} = PCB)  ->
 
+send_n_packets(MinSeq,_,Limit,Iter,PCB)
+  when Limit == 0;
+       Iter == -1 -> {Limit,MinSeq,PCB};
+send_n_packets(MinSeq,MaxSeq,Limit,
+               Iter,#aiutp_pcb{time = Now,socket = Acc,
+                               max_window = MaxWindow,outbuf = OutBuf,
+                               cur_window = CurWindow,inbuf = InBuf,
+                               reply_micro = ReplyMicro,ack_nr = AckNR}  = PCB)->
   WrapPacket = aiutp_buffer:data(Iter,OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
-
   if (?WRAPPING_DIFF_16(MaxSeq, Packet#aiutp_packet.seq_nr) > 0) and
      (?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MinSeq) >= 0) ->
+      MicroNow = aiutp_util:microsecond(),
+      WindowSize = window_size(MaxWindow, InBuf),
       Next = aiutp_buffer:next(Iter, OutBuf),
-        {SendBytes,WrapPacket0,Content1} = update_wrap_packet(MicroNow,ReplyMicro,
-                                                        WindowSize,AckNR,WrapPacket),
+      {SendBytes,WrapPacket0,Content1} = update_wrap_packet(MicroNow,ReplyMicro,
+                                                            WindowSize,AckNR,WrapPacket),
       OutBuf0 = aiutp_buffer:replace(Iter,WrapPacket0,OutBuf),
-      loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,Limit -1,Packet#aiutp_packet.seq_nr,
-                Next,PCB#aiutp_pcb{cur_window = CurWindow + SendBytes,outbuf = OutBuf0,
+      send_n_packets(Packet#aiutp_packet.seq_nr,MaxSeq,Limit -1,Next,
+                     PCB#aiutp_pcb{cur_window = CurWindow + SendBytes,outbuf = OutBuf0,
                                    socket = [Content1|Acc],last_sent_packet = Now});
-     true -> {LastSeq,PCB}
+     true -> {Limit,MinSeq,PCB}
   end.
 
-send_packet_in_range(MinSeq,MaxSeq,Limit,
-                     #aiutp_pcb{max_window = MaxWindow,outbuf = OutBuf,inbuf = InBuf }  = PCB)->
-  MicroNow = aiutp_util:microsecond(),
-  WindowSize = window_size(MaxWindow, InBuf),
+
+send_n_packets(MinSeq,MaxSeq,Limit,#aiutp_pcb{outbuf = OutBuf}  = PCB)->
   Iter = aiutp_buffer:head(OutBuf),
-  if Limit > 0 -> loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,Limit,MinSeq,Iter,PCB);
-     true -> loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,-1,MinSeq,Iter,PCB)
-  end.
+  {Remain,LastSeq,PCB0} = send_n_packets(MinSeq,MaxSeq,Limit,Iter,PCB),
+  {Limit - Remain,LastSeq,PCB0}.
 
 
 flush_packets(#aiutp_pcb{outbuf = OutBuf} = PCB)->

@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?PACKET_SIZE * 10 ,
+             max_window = ?PACKET_SIZE  ,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -59,11 +59,6 @@ closed(#aiutp_pcb{got_fin = GotFin,
   if (GotFin and GotFinReached) -> {closed,normal};
      true -> not_closed
   end.
-
-
-
-     
-
 
 process(Packet,PCB)-> aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,PCB)).
 
@@ -276,22 +271,28 @@ maybe_decay_win(#aiutp_pcb {time = Now,
 selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB)
   when CurWindowPackets  == 0-> PCB;
 selective_ack_packet([],_,PCB)-> PCB;
-selective_ack_packet([H|_] = SAckedPackets,
+selective_ack_packet(SAckedPackets,
                      MicroNow,
                      #aiutp_pcb{fast_resend_seq_nr = MinSeq} = PCB)->
-
   PCB0 = lists:foldr(fun(I,Acc) -> ack_packet(MicroNow,I,Acc) end, PCB, SAckedPackets),
-  Packet = H#aiutp_packet_wrap.packet,
-  SeqNR = Packet#aiutp_packet.seq_nr,
+  SSAckeds = erlang:length(SAckedPackets),
   %% 计算出重发最大的序列号
-  MaxSeq = aiutp_util:bit16(SeqNR - ?DUPLICATE_ACKS_BEFORE_RESEND),
-  {LastSeq,PCB1} = aiutp_net:send_packet_in_range(MinSeq, MaxSeq, 4, PCB0),
-  PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
-                        duplicate_ack = erlang:length(SAckedPackets)},
-  if LastSeq == MinSeq -> PCB2;
-     true -> maybe_decay_win(PCB2)
+  MaxSeq =
+    if SSAckeds > ?DUPLICATE_ACKS_BEFORE_RESEND ->
+        El = lists:nth(?DUPLICATE_ACKS_BEFORE_RESEND, SAckedPackets),
+        Packet = El#aiutp_packet_wrap.packet,
+        Packet#aiutp_packet.seq_nr;
+       true -> MinSeq
+    end,
+  if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > 0 ->
+      {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
+      PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
+                            duplicate_ack = SSAckeds},
+      if Sent > 0 -> maybe_decay_win(PCB2);
+         true ->  PCB2
+      end;
+     true -> PCB0
   end.
-
 
 %% 流控和重传
 process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
@@ -503,7 +504,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                       max_window = math:ceil(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = ?PACKET_SIZE * 10 ,slow_start = true}
+                                max_window = ?PACKET_SIZE ,slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
