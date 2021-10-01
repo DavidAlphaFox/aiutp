@@ -10,6 +10,7 @@ caculate_delay(Now,MicroNow,
                           current_delay_samples = CurrentDelaySamples,
                           average_delay = PrevAverageDelay,
                           average_sample_time = AverageSampleTime,
+                          clock_drift = ClockDrift,
                           average_delay_base = AverageDelayBase} = PCB)->
   TheirDelay =
     if TS > 0 -> MicroNow - TS;
@@ -60,7 +61,7 @@ caculate_delay(Now,MicroNow,
               end,
             PCB#aiutp_pcb{ reply_micro = TheirDelay,last_measured_delay = Now,
                            their_hist = TheirHist0,our_hist = OurHist1,
-                           clock_drift = AverageDelay - PrevAverageDelay,
+                           clock_drift = (ClockDrift * 7 +  AverageDelay - PrevAverageDelay) div 8,
                            average_delay_base = AverageDelayBase1,
                            average_delay = AverageDelay0,
                            average_sample_time = AverageSampleTime + 5000,
