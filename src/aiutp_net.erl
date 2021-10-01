@@ -35,12 +35,15 @@ is_full(Bytes,#aiutp_pcb{time= {Now,_},
   end.
 
 
-build_sack(0,Acc,_,_,_)->
+build_sack(Size,Acc,_,Iter,_)
+  when Size == 0 ;
+       Iter == -1 ->
   lists:foldl(
     fun(BI,BAcc)->
         Bits = maps:get(BI,Acc),
         <<BAcc/binary,Bits/big-unsigned-integer>>
     end, <<>>, lists:seq(0, 3));
+
 
 build_sack(Size,Acc,Base,Iter,InBuf) ->
   Packet = aiutp_buffer:data(Iter,InBuf),
