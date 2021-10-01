@@ -415,17 +415,17 @@ active_read(#state{parent = Parent,
                    pcb = PCB,
                    controller = Control,
                    active = true} = State)->
-  PCB2 =
+  {Active,PCB2} =
     case aiutp_pcb:read(PCB) of
-      {undefined,PCB1} -> PCB1;
+      {undefined,PCB1} -> {true,PCB1};
       {Payload,PCB1} ->
         UTPSocket = {utp,Parent,self()},
         Control ! {utp_data,UTPSocket,Payload},
-        PCB1
+        {false,PCB1}
     end,
   PCB3 = aiutp_pcb:flush(PCB2),
   self() ! swap_socket,
-  State#state{ active = false,pcb = PCB3};
+  State#state{ active = Active,pcb = PCB3};
 active_read(State)-> State.
 
 
