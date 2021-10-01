@@ -35,7 +35,7 @@ connect(UTPSocket,Address,Port)->
   {ok,Worker} = aiutp_worker_sup:new(UTPSocket, Socket),
   Address0 = aiutp_util:getaddr(Address),
   Caller = self(),
-  case ai_utp_worker:connect(Worker,Caller,Address0, Port) of
+  case aiutp_worker:connect(Worker,Caller,Address0, Port) of
     ok -> {ok,{utp,UTPSocket,Worker}};
     Error -> Error
   end.
