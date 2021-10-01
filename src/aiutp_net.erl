@@ -15,7 +15,7 @@ window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 
 
 
-is_full(Bytes,#aiutp_pcb{time= {Now,_},
+is_full(Bytes,#aiutp_pcb{time= Now,
                          max_window = MaxWindow,
                          max_window_user = MaxWindowUser,
                          cur_window_packets = CurWindowPackets,
@@ -70,7 +70,7 @@ build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
 send_fin(#aiutp_pcb{outque = OutQue} = PCB)->
   OutQue0 = aiutp_queue:push_back({?ST_FIN,<<>>}, OutQue),
   flush_queue(PCB#aiutp_pcb{outque = OutQue0}).
-send_ack(#aiutp_pcb{time = {Now,_},
+send_ack(#aiutp_pcb{time = Now,
                     socket = Acc,
                     conn_id_send = ConnIdSend,
                     seq_nr = SeqNR, ack_nr = AckNR,
@@ -121,7 +121,7 @@ update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
 
 
 send_packet(-1,PCB)->PCB;
-send_packet(Pos,#aiutp_pcb{time = {Now,_},
+send_packet(Pos,#aiutp_pcb{time = Now,
                            socket = Acc,
                            ack_nr = AckNR,cur_window = CurWindow,
                            inbuf = InBuf,max_window = MaxWindow,
@@ -139,7 +139,7 @@ send_packet(Pos,#aiutp_pcb{time = {Now,_},
 loop_send(_,_,_,_,Limit,LastSeq,_,PCB) when Limit == 0 -> {LastSeq,PCB};
 loop_send(_,_,_,_,_,LastSeq,-1,PCB) -> {LastSeq,PCB};
 loop_send(MicroNow,WindowSize,MinSeq,MaxSeq,Limit,
-          LastSeq,Iter,#aiutp_pcb{time = {Now,_},socket = Acc,
+          LastSeq,Iter,#aiutp_pcb{time = Now,socket = Acc,
                                   ack_nr = AckNR,cur_window = CurWindow,
                                   outbuf = OutBuf,reply_micro = ReplyMicro} = PCB)  ->
 
@@ -216,7 +216,7 @@ loop_send_packet(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
       end
   end.
 
-flush_queue(#aiutp_pcb{time = {Now,_},cur_window_packets = CurWindowPackets,rto = RTO} = PCB)->
+flush_queue(#aiutp_pcb{time = Now,cur_window_packets = CurWindowPackets,rto = RTO} = PCB)->
   PCB0 =
     if CurWindowPackets == 0 ->
         PCB#aiutp_pcb{ retransmit_timeout = RTO,

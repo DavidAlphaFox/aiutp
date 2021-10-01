@@ -12,7 +12,7 @@ in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
   PCB1#aiutp_pcb{ida = true}.
 
 recv(Packet,
-     #aiutp_pcb{time={Now,_},
+     #aiutp_pcb{time=Now,
                 inque = InQ,
                 got_fin_reached = GotFinReached,
                 got_fin = GotFin,
