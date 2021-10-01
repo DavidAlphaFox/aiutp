@@ -498,7 +498,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
        (MaxWindow > ?PACKET_SIZE) ->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = ?MAX((MaxWindow * 2 div 3), ?PACKET_SIZE)};
+                      max_window = math:ceil(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
                                 max_window = ?PACKET_SIZE,slow_start = true}
