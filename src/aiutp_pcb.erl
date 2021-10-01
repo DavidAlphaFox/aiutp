@@ -29,7 +29,7 @@ new(ConnIdRecv,ConnIdSend)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?AIUTP_MTU_DEF,
+             max_window = ?AIUTP_MTU_DEF * 4,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -183,7 +183,7 @@ caculate_acked_bytes(Acc,Now,AckedPackets,SAckedPackets)->
   lists:foldl(Fun, Acc0, SAckedPackets).
 
 
-cc_control(Now,AckedBytes,ActualDelay,RTT,
+cc_control(Now,AckedBytes,RTT,
            #aiutp_pcb{our_hist = OurHist,target_delay = TargetDelay,
                       clock_drift = ClockDrift,max_window = MaxWindow,
                       last_maxed_out_window = LastMaxedOutWindow,
@@ -209,10 +209,10 @@ cc_control(Now,AckedBytes,ActualDelay,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 1000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = ?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0)),
+  LedbetCwnd = math:ceil(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
-        SSCwnd = MaxWindow + WindowFactor* (?AIUTP_MTU_DEF - ?UTP_HEADER_SIZE),
+        SSCwnd = math:ceil(MaxWindow + WindowFactor* ?PACKET_SIZE),
         if SSCwnd > SSThresh-> {false,SSThresh,MaxWindow};
            OurDelay0  > Target * 0.9 -> {false,MaxWindow,MaxWindow};
            true -> {SlowStart,SSThresh,?MAX(SSCwnd,LedbetCwnd)}
@@ -257,7 +257,7 @@ maybe_decay_win(#aiutp_pcb {time = {Now,_},
                            } = PCB)->
   if (Now - LastRWinDecay) < ?MAX_WINDOW_DECAY -> PCB;
      true ->
-      MaxWindow0 = math:floor(MaxWindow * 0.5),
+      MaxWindow0 = math:ceil(MaxWindow * 0.5),
       MaxWindow1 =
         if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
            true -> MaxWindow0
@@ -312,7 +312,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     end,
   PCB2 =
     if (ActualDelay /= 0) and (AckedBytes > 0) ->
-        cc_control(Now,AckedBytes,ActualDelay,RTT,PCB1#aiutp_pcb{our_hist = OurHist0});
+        cc_control(Now,AckedBytes,RTT,PCB1#aiutp_pcb{our_hist = OurHist0});
        true-> PCB1#aiutp_pcb{our_hist = OurHist0}
     end,
 
@@ -341,6 +341,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     end,
   PCB3 = lists:foldl(fun ack_packet/2,
                      PCB1#aiutp_pcb{
+                       max_window_user = PktMaxWindowUser,
                        state = State1,
                        fin_sent_acked = FinSentAcked0,
                        fast_resend_seq_nr = FastResendSeqNR0,

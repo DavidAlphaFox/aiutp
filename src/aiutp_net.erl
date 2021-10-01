@@ -27,6 +27,8 @@ is_full(Bytes,#aiutp_pcb{time= {Now,_},
            end,
 
   MaxSend = ?MIN(MaxWindow, MaxWindowUser),
+  io:format("MaxSend: ~p,MaxWindow: ~p, MaxWindowUSer: ~p, CurWindow: ~p Bytes: ~p~n",
+            [MaxSend,MaxWindow,MaxWindowUser,CurWindow,Bytes0]),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
      (CurWindow + Bytes0) > MaxSend ->
@@ -208,6 +210,7 @@ loop_send_packet(#aiutp_pcb{outque = OutQue,outbuf = OutBuf,
           OutBuf0 = aiutp_buffer:append(
                       #aiutp_packet_wrap{payload = Payload,packet = Packet0},OutBuf),
           Iter = aiutp_buffer:tail(OutBuf0),
+
           PCB1 = send_packet(Iter,PCB0#aiutp_pcb{cur_window_packets = CurWindowPackets + 1,
                                                  outque = OutQue0,outbuf = OutBuf0,
                                                  seq_nr = SeqNR + 1,last_rcv_win = LastRcvWin}),
