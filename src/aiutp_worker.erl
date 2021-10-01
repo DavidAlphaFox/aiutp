@@ -426,7 +426,10 @@ active_read(#state{parent = Parent,
   PCB3 = aiutp_pcb:flush(PCB2),
   self() ! swap_socket,
   State#state{ active = Active,pcb = PCB3};
-active_read(State)-> State.
+active_read(#state{pcb = PCB} = State)->
+  PCB1 = aiutp_pcb:flush(PCB),
+  self() ! swap_socket,
+  State#state{pcb = PCB1}.
 
 
 
