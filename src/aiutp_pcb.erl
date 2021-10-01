@@ -363,7 +363,7 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
         end;
        true-> PCB4
     end,
-  PCB6  = selective_ack_packet(MicroNow,SAckedPackets,PCB5),
+  PCB6  = selective_ack_packet(SAckedPackets,MicroNow,PCB5),
   process_packet_3(Packet, PCB6).
 
 
