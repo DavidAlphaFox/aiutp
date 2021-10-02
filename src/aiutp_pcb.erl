@@ -204,10 +204,10 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 1000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = math:ceil(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
-        SSCwnd = math:ceil(MaxWindow + WindowFactor* ?PACKET_SIZE),
+        SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?PACKET_SIZE),
         if SSCwnd > SSThresh-> {false,SSThresh,MaxWindow};
            OurDelay0  > Target * 0.9 -> {false,MaxWindow,MaxWindow};
            true -> {SlowStart,SSThresh,?MAX(SSCwnd,LedbetCwnd)}
@@ -215,7 +215,7 @@ cc_control(Now,AckedBytes,RTT,
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
-                target_delay = math:ceil(Target * 0.8 + 0.2 * OurDelay0),
+                target_delay = math:trunc(Target * 0.8 + 0.2 * OurDelay0),
                 max_window = aiutp_util:clamp(MaxWindow0,?PACKET_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
@@ -233,7 +233,7 @@ ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
        true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
-    if NeedResend == false -> math:ceil(CurWindow - Payload);
+    if NeedResend == false -> erlang:trunc(CurWindow - Payload);
        true -> CurWindow
     end,
   {Now,CurWindow0,RTT1,RTO0,RTTVar1,RTTHist1}.
@@ -245,7 +245,7 @@ maybe_decay_win(#aiutp_pcb {time = Now,
                            } = PCB)->
   if (Now - LastRWinDecay) < ?MAX_WINDOW_DECAY -> PCB;
      true ->
-      MaxWindow0 = math:ceil(MaxWindow * 0.5),
+      MaxWindow0 = erlang:trunc(MaxWindow * 0.5),
       MaxWindow1 =
         if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
            true -> MaxWindow0
@@ -508,7 +508,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
        (MaxWindow > ?PACKET_SIZE) ->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = math:ceil(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
+                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
                                 max_window = ?PACKET_SIZE * 2 ,slow_start = true}
