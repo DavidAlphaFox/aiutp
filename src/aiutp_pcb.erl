@@ -345,9 +345,9 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
         end;
        true -> {State0,FinSentAcked}
     end,
-
+  PktAckNR0 = aiutp_util:bit16(PktAckNR + 1),
   FastResendSeqNR0 =
-    if ?WRAPPING_DIFF_16(FastResendSeqNR,((PktAckNR + 1) band 16#FFFF)) < 0 -> ((PktAckNR + 1) band 16#FFFF);
+    if ?WRAPPING_DIFF_16(FastResendSeqNR,PktAckNR0) < 0 -> PktAckNR0;
        true -> FastResendSeqNR
     end,
 
@@ -375,7 +375,8 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     if FastTimeout ->
         if ?WRAPPING_DIFF_16(PCB4#aiutp_pcb.seq_nr, PCB4#aiutp_pcb.cur_window_packets) /= FastResendSeqNR0 ->
             PCB4#aiutp_pcb{fast_timeout = false};
-           true -> aiutp_net:send_packet(aiutp_buffer:head(PCB4#aiutp_pcb.outbuf),PCB4)
+           true -> aiutp_net:send_packet(aiutp_buffer:head(PCB4#aiutp_pcb.outbuf),
+                                         PCB4#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(FastResendSeqNR0 +1)})
         end;
        true-> PCB4
     end,
