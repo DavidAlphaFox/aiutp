@@ -3,7 +3,7 @@
 
 -export([new/2,
          state/1,
-         swap_socket/1,
+         swap_socket/2,
          process/2,
          check_timeouts/1,
          write/2,
@@ -35,8 +35,7 @@ new(ConnIdRecv,ConnIdSend)->
              outque = aiutp_queue:new()}.
 
 state(#aiutp_pcb{state = State}) -> State.
-swap_socket(#aiutp_pcb{socket = Acc} = PCB) ->
-  {lists:reverse(Acc),PCB#aiutp_pcb{socket = []}}.
+swap_socket(Socket,PCB) -> PCB#aiutp_pcb{socket = Socket}.
 closed(#aiutp_pcb{state = State})
   when State == ?CS_RESET -> {closed,reset};
 closed(#aiutp_pcb{state = State,

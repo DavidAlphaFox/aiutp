@@ -101,44 +101,7 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
     }}.
 
 
-split(<<Bin:?PACKET_SIZE/binary,Rest/binary>>,Q)->
-  if erlang:byte_size(Rest) > ?PACKET_SIZE -> split(Rest,aiutp_queue:push_back({?ST_DATA,Bin}, Q));
-     true ->
-      Q0 = aiutp_queue:push_back({?ST_DATA,Bin}, Q),
-      aiutp_queue:push_back({?ST_DATA,Rest}, Q0)
-  end.
-
 
 in(Data,#aiutp_pcb{outque = OutQue} = PCB) ->
-  QueSize = aiutp_queue:size(OutQue),
-  DataSize = erlang:byte_size(Data),
-  {OutQue1,Data0} =
-    if QueSize > 0 ->
-        case aiutp_queue:back(OutQue) of
-          {?ST_DATA,OldData} ->
-            OldSize = erlang:byte_size(OldData),
-            if (OldSize < ?PACKET_SIZE) and
-               (DataSize > ?PACKET_SIZE - OldSize) ->
-                Diff = ?PACKET_SIZE - OldSize,
-                <<Append: Diff/binary,Rest/binary>> = Data,
-                OutQue0 = aiutp_queue:pop_back(OutQue),
-                {aiutp_queue:push_back({?ST_SYN,<<OldData/binary,Append/binary>>}, OutQue0),Rest};
-               (OldSize < ?PACKET_SIZE) and
-               (DataSize =< ?PACKET_SIZE - OldSize) ->
-                OutQue0 = aiutp_queue:pop_back(OutQue),
-                {aiutp_queue:push_back({?ST_SYN,<<OldData/binary,Data/binary>>}, OutQue0),undefined};
-               true ->  {OutQue,Data}
-            end;
-          {?ST_FIN,_} -> {OutQue,undefined};
-          _ -> {OutQue,Data}
-        end;
-       true -> {OutQue,Data}
-    end,
-  OutQue2 =
-  if Data0 == undefined -> OutQue1;
-     true ->
-      if erlang:byte_size(Data0) > ?PACKET_SIZE -> split(Data0,OutQue);
-         true -> aiutp_queue:push_back({?ST_DATA,Data0}, OutQue)
-      end
-  end,
-  aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue2}).
+  OutQue0 = aiutp_queue:push_back({?ST_DATA,Data}, OutQue),
+  aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue0}).

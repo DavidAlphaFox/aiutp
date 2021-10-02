@@ -86,7 +86,7 @@
 
 -record(aiutp_pcb,{state = ?CS_UNINITIALIZED,
                    retransmit_count = 0,
-                   socket = [],
+                   socket,
                    time = undefined,
                    recv_time = undefined,
                    ida = fasle,
