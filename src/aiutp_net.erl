@@ -248,7 +248,7 @@ send_data_in_queue(Type,Bin,Size,PCB)->
       PCB0 = send_new_packet(Type, Bin, BinSize, PCB),
       send_data_in_queue(PCB0);
      true ->
-      io:format("send ~p bytes from queue~n",[Size0]),
+      %io:format("send ~p bytes from queue~n",[Size0]),
       <<Data:Size0/binary,Rest/binary>> = Bin,
       PCB0 = send_new_packet(Type, Data, Size0, PCB),
       send_data_in_queue(Type,Rest,Size - Size0, PCB0)

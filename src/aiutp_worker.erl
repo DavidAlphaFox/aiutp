@@ -262,11 +262,11 @@ handle_info({stop,Reason},
 handle_info({timeout,TRef,{check_interval,_}},
             #state{pcb = PCB,tick_timer = {set,TRef}}= State)->
   PCB2 = aiutp_pcb:check_timeouts(PCB),
-  OutQue = PCB2#aiutp_pcb.outque,
-  io:format("RTT: ~p RTTVar: ~p RTO: ~p MaxWindow: ~p CurWindowPackets: ~p CurWindow: ~p  OutQueSize: ~p ~n",
-            [PCB2#aiutp_pcb.rtt, PCB2#aiutp_pcb.rtt_var,PCB2#aiutp_pcb.rto,
-             PCB2#aiutp_pcb.max_window,PCB2#aiutp_pcb.cur_window_packets,PCB2#aiutp_pcb.cur_window,
-            aiutp_queue:size(OutQue)]),
+  %OutQue = PCB2#aiutp_pcb.outque,
+  %io:format("RTT: ~p RTTVar: ~p RTO: ~p MaxWindow: ~p CurWindowPackets: ~p CurWindow: ~p  OutQueSize: ~p ~n",
+%            [PCB2#aiutp_pcb.rtt, PCB2#aiutp_pcb.rtt_var,PCB2#aiutp_pcb.rto,
+%             PCB2#aiutp_pcb.max_window,PCB2#aiutp_pcb.cur_window_packets,PCB2#aiutp_pcb.cur_window,
+%            aiutp_queue:size(OutQue)]),
   %% 检查是否退出
   case aiutp_pcb:closed(PCB2) of
     {closed,Reason} ->

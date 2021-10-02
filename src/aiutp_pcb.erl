@@ -250,7 +250,7 @@ maybe_decay_win(#aiutp_pcb {time = Now,
         if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
            true -> MaxWindow0
         end,
-      io:format("decay win to ~p~n",[MaxWindow1]),
+      %io:format("decay win to ~p~n",[MaxWindow1]),
       PCB#aiutp_pcb{
         slow_start = false,
         ssthresh = MaxWindow1,
@@ -287,7 +287,7 @@ selective_ack_packet(SAckedPackets,
        true -> MinSeq
     end,
   if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > 0 ->
-      io:format("selective ack packet: ~p ~p~n",[MinSeq,MaxSeq]),
+      %io:format("selective ack packet: ~p ~p~n",[MinSeq,MaxSeq]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
                             duplicate_ack = SSAckeds},
