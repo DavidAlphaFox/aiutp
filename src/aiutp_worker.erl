@@ -166,9 +166,7 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
 handle_call({send,Data},_From,#state{pcb = PCB} = State) ->
   case aiutp_pcb:write(Data, PCB) of
     {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
-    PCB1 ->
-      self() ! swap_socket,
-      {reply,ok,State#state{pcb = PCB1}}
+    PCB1 -> {reply,ok,State#state{pcb = swap_socket(PCB1)}}
   end;
 
 handle_call({active,Active},_From,State) ->
@@ -212,8 +210,7 @@ handle_call({close,_},_From,State) ->
 handle_cast({packet,Packet},
             #state{pcb = PCB,blocker = undefined} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
-  self() ! swap_socket,
-  {noreply,active_read(State#state{pcb = PCB0})};
+  {noreply,active_read(State#state{pcb = swap_socket(PCB0)})};
 
 %% 正在进行链接
 handle_cast({packet,Packet},
@@ -222,11 +219,8 @@ handle_cast({packet,Packet},
   case aiutp_pcb:state(PCB0) of
     ?CS_CONNECTED ->
       gen_server:reply(Connector, ok),
-      self() ! swap_socket,
-      {noreply,State#state{blocker = undefined,pcb = PCB0}};
-    _ ->
-      self() ! swap_socket,
-      {noreply,State#state{pcb = PCB0}}
+      {noreply,State#state{blocker = undefined,pcb = swap_socket(PCB0)}};
+    _ -> {noreply,State#state{pcb = swap_socket(PCB0)}}
   end.
 
 %%--------------------------------------------------------------------
@@ -242,13 +236,7 @@ handle_cast({packet,Packet},
         {stop, Reason :: normal | term(), NewState :: term()}.
 
 handle_info(swap_socket,#state{socket = Socket,remote = Remote,pcb = PCB} = State)->
-  {Buffers,PCB0} = aiutp_pcb:swap_socket(PCB),
-  if erlang:length(Buffers) > 0 ->
-
-      lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers);
-     true -> ok
-  end,
-  {noreply,State#state{pcb = PCB0}};
+  {noreply,State#state{pcb = swap_socket(PCB)}};
 handle_info({stop,Reason},
             #state{parent = Parent,parent_monitor = ParentMonitor,
                    controller = Controller,controller_monitor = ControlMonitor,
@@ -428,12 +416,10 @@ active_read(#state{parent = Parent,
         {false,PCB1}
     end,
   PCB3 = aiutp_pcb:flush(PCB2),
-  self() ! swap_socket,
-  State#state{ active = Active,pcb = PCB3};
+  State#state{ active = Active,pcb = swap_socket(PCB3)};
 active_read(#state{pcb = PCB} = State)->
   PCB1 = aiutp_pcb:flush(PCB),
-  self() ! swap_socket,
-  State#state{pcb = PCB1}.
+  State#state{pcb = swap_socket(PCB1)}.
 
 
 
@@ -449,3 +435,9 @@ sync_input(Socket,NewOwner,Flag)->
       Flag
   end.
 
+swap_socket(PCB)->
+  {Buffers,PCB0} = aiutp_pcb:swap_socket(PCB),
+  if erlang:length(Buffers) > 0 -> lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers);
+     true -> ok
+  end,
+  PCB0.
