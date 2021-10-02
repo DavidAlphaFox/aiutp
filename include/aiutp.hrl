@@ -102,7 +102,7 @@
                    % that are marked as needing to be re-sent (due to a timeout)
                    % don't count either
                    max_window = 0, % maximum window size in bytes,
-                   target_delay = 100000, % mircoseconds
+                   target_delay = 300000, % mircoseconds
                    got_fin = false, %% is a FIN packet in reassembly buffer
                    got_fin_reached = false, %% Have we reached the FIN
                    fin_sent = false, % Have we sent our FIN

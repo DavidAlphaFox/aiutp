@@ -77,7 +77,7 @@ pick_sacked_packet([MaxSeq|_] = SAcks,OutBuf) ->
   pick_sacked_packet(SAcks,MaxSeq, Iter,-1,[], OutBuf).
 
 pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
-           #aiutp_pcb{seq_nr = SeqNR,outbuf = OutBuf} = PCB) ->
+           #aiutp_pcb{seq_nr = SeqNR,outbuf = OutBuf,cur_window_packets = CurWindowPackets} = PCB) ->
 
   %% SeqNR = 6 CurWindowPackets = 5 AckNR = 3
   %% Acks = 3 SeqBase = 1 , MaxSeq = 4
@@ -90,7 +90,10 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
         pick_acked_packet(PktAckNR,Iter,-1,[],OutBuf)
     end,
   SAcks = map_sack_to_seq(Exts,PktAckNR + 2),
-  {SAckedPacket,OutBuf1} = pick_sacked_packet(SAcks,OutBuf0),
+  {SAckedPacket,OutBuf1} =
+    if Acks == CurWindowPackets -> {[],OutBuf0};
+       true -> pick_sacked_packet(SAcks,OutBuf0)
+    end,
   {AckedPacket,SAckedPacket,
    PCB#aiutp_pcb{
      cur_window_packets = caculate_cur_window_packets(SeqNR, OutBuf1),
