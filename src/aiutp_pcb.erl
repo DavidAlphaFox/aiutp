@@ -498,14 +498,12 @@ check_timeouts_1(#aiutp_pcb{state = State,
   end;
 
 check_timeouts_1(#aiutp_pcb{time=Now,
-                            conn_id_recv= ConnId,
                             retransmit_timeout = RetransmitTimeout,
                             cur_window_packets = CurWindowPackets,
                             cur_window = CurWindow,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
-                            rto_timeout = RTOTimeout,
                             retransmit_count = RetransmitCount} = PCB) ->
 
   NewTimeout = RetransmitTimeout * 2,
@@ -516,9 +514,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
                       max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
-       true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
-                                duplicate_ack = 0,
-                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),slow_start = true}
+       true -> aiutp_net:send_ack(PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
+                                                duplicate_ack = 0,
+                                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),
+                                                slow_start = true})
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
