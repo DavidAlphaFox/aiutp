@@ -156,6 +156,9 @@ send_n_packets(MinSeq,MaxSeq,Limit,
       send_n_packets(Packet#aiutp_packet.seq_nr,MaxSeq,Limit -1,Next,
                      PCB#aiutp_pcb{cur_window = CurWindow + SendBytes,outbuf = OutBuf0,
                                    socket = [Content1|Acc],last_sent_packet = Now});
+     ?WRAPPING_DIFF_16(MinSeq, Packet#aiutp_packet.seq_nr) > 0 ->
+      Next = aiutp_buffer:next(Iter, OutBuf),
+      send_n_packets(MinSeq,MaxSeq,Limit,Next,PCB);
      true -> {Limit,MinSeq,PCB}
   end.
 
