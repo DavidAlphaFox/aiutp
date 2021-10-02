@@ -279,9 +279,11 @@ handle_info({timeout,TRef,{check_interval,_}},
   PCB1 = aiutp_pcb:check_timeouts(PCB),
   {Buffers,PCB2} = aiutp_pcb:swap_socket(PCB1),
   lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers),
-  io:format("RTT: ~p RTTVar: ~p RTO: ~p MaxWindow: ~p CurWindowPackets: ~p CurWindow: ~p ~n",
+  OutQue = PCB2#aiutp_pcb.outque,
+  io:format("RTT: ~p RTTVar: ~p RTO: ~p MaxWindow: ~p CurWindowPackets: ~p CurWindow: ~p  OutQueSize: ~p ~n",
             [PCB2#aiutp_pcb.rtt, PCB2#aiutp_pcb.rtt_var,PCB2#aiutp_pcb.rto,
-             PCB2#aiutp_pcb.max_window,PCB2#aiutp_pcb.cur_window_packets,PCB2#aiutp_pcb.cur_window]),
+             PCB2#aiutp_pcb.max_window,PCB2#aiutp_pcb.cur_window_packets,PCB2#aiutp_pcb.cur_window,
+            aiutp_queue:size(OutQue)]),
   %% 检查是否退出
   case aiutp_pcb:closed(PCB2) of
     {closed,Reason} ->
