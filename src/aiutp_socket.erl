@@ -86,7 +86,6 @@ init([Port,Options]) ->
   case gen_udp:open(Port,UDPOptions0) of
     {ok,Socket} ->
       ok = inet:setopts(Socket, [{active,once},
-                                 {delay_send,true},
                                  {high_msgq_watermark,6553500}]),
       {ok, #state{socket = Socket,
                   conns = maps:new(),

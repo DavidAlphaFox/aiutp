@@ -505,8 +505,8 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
-                            retransmit_count = RetransmitCount
-                           } = PCB) ->
+                            retransmit_count = RetransmitCount,
+                            reorder_count = ReorderCount} = PCB) ->
   NewTimeout = RetransmitTimeout * 2,
 
   PCB0 =
@@ -519,7 +519,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                                 duplicate_ack = 0,
                                 max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),slow_start = true}
     end,
-  PCB1 = aiutp_net:send_ack(PCB0),
+  PCB1 =
+    if ReorderCount > 0 ->  aiutp_net:send_ack(PCB0);
+       true -> PCB0
+    end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
       {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
