@@ -238,15 +238,19 @@ reset_conn(Socket,Remote,ConnID,AckNR)->
   gen_udp:send(Socket,Remote,Bin).
 
 add_conn_inner(Remote,ConnId,Worker,
-         #state{conns = Conns,monitors = Monitors} = State)->
+         #state{conns = Conns,monitors = Monitors,max_conns = MaxConns} = State)->
   Key = {Remote,ConnId},
   case maps:is_key(Key, Conns) of
     true -> {exists,State};
     false ->
-      Monitor = erlang:monitor(process, Worker),
-      Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
-      Monitors0 = maps:put(Monitor,Key,Monitors),
-      {ok,State#state{conns = Conns0,monitors = Monitors0}}
+      ConnsSize = maps:size(Conns),
+      if ConnsSize > MaxConns -> {overflow,State};
+         true ->
+          Monitor = erlang:monitor(process, Worker),
+          Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
+          Monitors0 = maps:put(Monitor,Key,Monitors),
+          {ok,State#state{conns = Conns0,monitors = Monitors0}}
+      end
   end.
 free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
   Key = {Remote,ConnId},
