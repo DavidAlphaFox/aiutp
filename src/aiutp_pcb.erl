@@ -204,10 +204,10 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:trunc(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
-        SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?PACKET_SIZE),
+        SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?MIN_WINDOW_SIZE),
         if SSCwnd > SSThresh-> {false,SSThresh,MaxWindow};
            OurDelay0  > Target * 0.9 -> {false,MaxWindow,MaxWindow};
            true -> {SlowStart,SSThresh,?MAX(SSCwnd,LedbetCwnd)}
@@ -439,7 +439,8 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1),
+      PCB1_1 = aiutp_net:schedule_ack(PCB1),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1_1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
@@ -513,10 +514,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
        (MaxWindow > ?PACKET_SIZE)->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
+                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
        true -> aiutp_net:send_ack(PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                                 duplicate_ack = 0,
-                                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),
+                                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),
                                                 slow_start = true})
     end,
   if CurWindowPackets > 0 ->

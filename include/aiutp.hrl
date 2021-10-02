@@ -15,7 +15,7 @@
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE,1024).
 -define(PACKET_SIZE,1453).
--define(MIN_WINDOW_SIZE,10).
+-define(MIN_WINDOW_SIZE,2906).
 %-define(MIN_WINDOW_SIZE,7265).
 % this is the minimum max_window value. It can never drop below this
 -define(DUPLICATE_ACKS_BEFORE_RESEND,4).
