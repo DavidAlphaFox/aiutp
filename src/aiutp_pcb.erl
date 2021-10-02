@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend,Socket)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?MIN_WINDOW_SIZE,
+             max_window = ?PACKET_SIZE,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -204,7 +204,7 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = erlang:trunc(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
         SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?PACKET_SIZE),
@@ -233,7 +233,7 @@ ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
        true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
-    if NeedResend == false -> erlang:trunc(CurWindow - Payload);
+    if NeedResend == false -> CurWindow - Payload;
        true -> CurWindow
     end,
   {Now,CurWindow0,RTT1,RTO0,RTTVar1,RTTHist1}.
@@ -507,17 +507,17 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             seq_nr = SeqNR,
                             retransmit_count = RetransmitCount
                            } = PCB) ->
-  NewTimeout = RetransmitTimeout * 1.5,
+  NewTimeout = RetransmitTimeout * 2,
 
   PCB0 =
     if (CurWindowPackets == 0) and
-       (MaxWindow > ?MIN_WINDOW_SIZE) ->
+       (MaxWindow > ?PACKET_SIZE) ->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
+                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),slow_start = true}
+                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),slow_start = true}
     end,
   PCB1 = aiutp_net:send_ack(PCB0),
   if CurWindowPackets > 0 ->
