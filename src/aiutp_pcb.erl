@@ -519,19 +519,19 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                                 duplicate_ack = 0,
                                 max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),slow_start = true}
     end,
-
+  PCB1 = aiutp_net:send_ack(PCB0),
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
       {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
-      PCB1 = PCB0#aiutp_pcb{
+      PCB2 = PCB1#aiutp_pcb{
                cur_window = CurWindow0,
                outbuf = OutBuf0,
                retransmit_count = RetransmitCount + 1,
                fast_timeout = true,
                timeout_seq_nr = SeqNR
               },
-      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};
-     true -> {true,aiutp_net:flush_queue(PCB0)}
+      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB2)};
+     true -> {true,aiutp_net:flush_queue(PCB1)}
   end.
 write(_,#aiutp_pcb{state = State} = PCB)
   when (State /= ?CS_CONNECTED),
