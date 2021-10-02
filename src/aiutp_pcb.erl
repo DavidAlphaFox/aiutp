@@ -196,7 +196,7 @@ cc_control(Now,AckedBytes,RTT,
        true -> 0
     end,
   OurDelay0 = OurDelay + Penalty,
-  OffTarget = Target - OurDelay0,
+  OffTarget = Target - OurDelay,
   Win0 = ?MIN(AckedBytes,MaxWindow),
   Win1 = ?MAX(AckedBytes,MaxWindow),
   WindowFactor = Win0 / Win1,
