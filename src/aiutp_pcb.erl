@@ -60,8 +60,9 @@ closed(#aiutp_pcb{got_fin = GotFin,
      true -> not_closed
   end.
 
-process({Packet,RecvTime},PCB)->
-  aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,PCB#aiutp_pcb{recv_time = RecvTime})).
+process(Packet,PCB)->
+  aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,
+                                 PCB#aiutp_pcb{recv_time = aiutp_util:microsecond()})).
 
 process(_,_,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
@@ -306,9 +307,8 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
                             fin_sent = FinSent,close_requested = CloseRequested,
                             fin_sent_acked = FinSentAcked,
                             recv_time = RecvTime} = PCB)->
-  MicroNow = aiutp_util:microsecond(),
   {AckedPackets,SAckedPackets,PCB0} = aiutp_tx:pick_acked(Packet,PCB),
-  {AckedBytes,MinRTT} = caculate_acked_bytes({0,?RTT_MAX},MicroNow,AckedPackets,SAckedPackets),
+  {AckedBytes,MinRTT} = caculate_acked_bytes({0,?RTT_MAX},RecvTime,AckedPackets,SAckedPackets),
   {ActualDelay,PCB1} = aiutp_rtt:caculate_delay(Now,RecvTime,Packet,PCB0),
   OurHist = PCB1#aiutp_pcb.our_hist,
   OurHistValue = aiutp_delay:value(OurHist),
@@ -591,7 +591,7 @@ connect(ConnIdRecv)->
                        seq_nr = SeqNR + 1},
   aiutp_net:send_packet(Iter, PCB0).
 
-accept({#aiutp_packet{conn_id = ConnIdSend},_} = Packet)->
+accept(#aiutp_packet{conn_id = ConnIdSend} = Packet)->
   ConnIdRecv = aiutp_util:bit16(ConnIdSend + 1),
   PCB = new(ConnIdRecv,ConnIdSend),
   PCB1 = process(Packet,PCB),

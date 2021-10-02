@@ -120,7 +120,7 @@ handle_cast({accept,Acceptor},
   end;
 handle_cast({?ST_SYN,Remote,Packet},State)->
   pair_incoming(Remote,Packet,State);
-handle_cast(Request, State) ->
+handle_cast(_, State) ->
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -190,8 +190,8 @@ accept_incoming({Caller,_} = Acceptor,
                        parent = Parent,socket = Socket} = State)->
   {ok,Worker} = aiutp_worker_sup:new(Parent,Socket),
   {{value,Req},Syns0} = queue:out(Syns),
-  {Remote,{SYN,_} = Payload} = Req,
-  case aiutp_worker:accept(Worker, Caller,Remote, Payload) of
+  {Remote,SYN} = Req,
+  case aiutp_worker:accept(Worker, Caller,Remote, SYN) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
@@ -201,7 +201,7 @@ accept_incoming({Caller,_} = Acceptor,
       gen_udp:send(Socket,Remote,Bin),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
   end.
-pair_incoming(Remote,{SYN,_},
+pair_incoming(Remote,SYN,
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
@@ -210,17 +210,17 @@ pair_incoming(Remote,{SYN,_},
   gen_udp:send(Socket,Remote,Bin),
   {noreply,State};
 
-pair_incoming(Remote,{Packet,_} = Payload,
+pair_incoming(Remote,Packet,
               #state{acceptors = Acceptors,syns = Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({Remote0,{SYN,_}})->
+      fun({Remote0,SYN})->
           if (Remote ==  Remote0) andalso
              (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Remote,Payload},Syns0),
+  Syns1 = queue:in({Remote,Packet},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
     Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};

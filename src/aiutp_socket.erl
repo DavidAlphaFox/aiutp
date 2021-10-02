@@ -161,8 +161,7 @@ handle_cast(_Request, State) ->
 handle_info({udp, Socket, IP, Port, Payload},
             #state{socket = Socket} = State)->
   case aiutp_packet:decode(Payload) of
-    {ok,Packet} -> dispatch({IP,Port},
-                            {Packet,aiutp_util:microsecond()}, State);
+    {ok,Packet} -> dispatch({IP,Port},Packet, State);
     _ -> ok
     %{error,_Reason}->
       %error_logger:info_report([decode_error,Reason]),
@@ -260,8 +259,7 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
         conns = maps:remove(Key,Conns)}
   end.
 
-dispatch(Remote,
-         {#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR},_} = Packet,
+dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
          #state{socket = Socket,conns = Conns,acceptor = Acceptor})->
   Key = {Remote,ConnId},
   case maps:get(Key,Conns,undefined) of
