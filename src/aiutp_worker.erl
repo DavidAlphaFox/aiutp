@@ -32,6 +32,8 @@
                 remote :: tuple(),
                 pcb,
                 tick_timer :: reference(),
+                connecting = false,
+                closing = false,
                 blocker,
                 conn_id,
                 active = false
@@ -137,6 +139,7 @@ handle_call({connect,Control,Remote},From,
                  blocker = From,
                  pcb = PCB,
                  conn_id = ConnId,
+                 connecting = true,
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
     Error -> {stop,normal,Error,State}
   end;
@@ -175,18 +178,25 @@ handle_call(controller,_From,#state{controller = Controller} = State)->
   {reply,{ok,Controller},State};
 handle_call(active,_From,#state{active = Active}=State) ->
   {reply,{ok,Active},State};
-handle_call({close,Controll},_From,#state{controller = Controll,
-                                          controller_monitor = CMonitor,
-                                          pcb = PCB} = State) ->
-  if CMonitor /= undefiend -> erlang:demonitor(CMonitor,[flush]);
-     true -> ok
-  end,
+handle_call({close,Controll},From,#state{pcb = PCB,controller = Controll,
+                                         controller_monitor = ControlMonitor} = State) ->
   PCB1 = aiutp_pcb:close(PCB),
-  {reply,ok,State#state{
-              pcb = PCB1,
-              controller = undefined,
-              controller_monitor = undefined
-             }};
+  case aiutp_pcb:state(PCB1) of
+    PCBState when
+        (PCBState == ?CS_DESTROY);
+        (PCBState == ?CS_RESET)->
+      self() ! {stop,normal},
+      if ControlMonitor /= undefined -> erlang:demonitor(ControlMonitor,[flush]);
+         true -> ok
+      end,
+      {reply,ok,State#state{controller = undefiend,
+                            controller_monitor = undefined}};
+    _ ->
+      {reply,ok,State#state{
+                  pcb = PCB1,
+                  blocker = From,
+                  closing = true}}
+  end;
 
 handle_call({close,_},_From,State) ->
   {reply,{error,not_owner},State}.
@@ -207,7 +217,7 @@ handle_call({close,_},_From,State) ->
 
 %% 已经链接了
 handle_cast({packet,Packet},
-            #state{pcb = PCB,blocker = undefined} = State)->
+            #state{pcb = PCB,connecting = false} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
   {noreply,active_read(State#state{pcb = PCB0})};
 
@@ -218,7 +228,7 @@ handle_cast({packet,Packet},
   case aiutp_pcb:state(PCB0) of
     ?CS_CONNECTED ->
       gen_server:reply(Connector, ok),
-      {noreply,State#state{blocker = undefined,pcb =PCB0}};
+      {noreply,State#state{blocker = undefined,connecting = false,pcb =PCB0}};
     _ -> {noreply,State#state{pcb = PCB0}}
   end.
 
@@ -240,6 +250,7 @@ handle_info({stop,Reason},
                    controller = Controller,controller_monitor = ControlMonitor,
                    blocker = Blocker,tick_timer = Timer,
                    conn_id = ConnId,remote = Remote,
+                   connecting = Connecting,closing = Closing,
                    active = Active})->
   if ParentMonitor /= undefined -> erlang:demonitor(ParentMonitor,[flush]);
      true -> ok
@@ -249,7 +260,10 @@ handle_info({stop,Reason},
   end,
   cancle_tick_timer(Timer),
   %% 如果是connector存在，直接报错
-  if Blocker /= undefined -> gen_server:reply(Blocker, {error,Reason});
+  if (Blocker /= undefined) and
+     (Connecting == true) -> gen_server:reply(Blocker, {error,Reason});
+     (Blocker /= undefined) and
+     (Closing == true) -> gen_server:reply(Blocker, ok);
      (Active == true) and
      (Controller /= undefined) ->  Controller ! {utp_closed,{utp,Parent,self()},Reason};
      true -> ok
