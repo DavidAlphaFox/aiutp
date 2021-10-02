@@ -290,7 +290,7 @@ selective_ack_packet(SAckedPackets,
       %io:format("selective ack packet: ~p ~p~n",[MinSeq,MaxSeq]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
-                            duplicate_ack = SSAckeds}
+                            duplicate_ack = SSAckeds},
       if Sent > 0 ->
           io:format("should od decay~n"),
           PCB2;
