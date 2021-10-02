@@ -85,7 +85,7 @@ init([Port,Options]) ->
   UTPOptions = proplists:get_value(utp, Options,[]),
   case gen_udp:open(Port,UDPOptions0) of
     {ok,Socket} ->
-      ok = inet:setopts(Socket, [{active,once},{delay_send,false}]),
+      ok = inet:setopts(Socket, [{active,once},{high_msgq_watermark,6553500}]),
       {ok, #state{socket = Socket,
                   conns = maps:new(),
                   monitors = maps:new(),
