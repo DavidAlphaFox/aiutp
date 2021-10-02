@@ -84,11 +84,11 @@ caculate_delay(Now,MicroNow,
   {ActualDelay,PCB0}.
 
 caculate_rtt(RTT,RTTVar,TimeSent,MicroNow)->
-  ERTT = aiutp_util:bit32((MicroNow - TimeSent) div 1000),
+  ERTT = aiutp_util:bit32(MicroNow - TimeSent) div 1000,
   if RTT == 0 -> {ERTT,ERTT div 2,ERTT};
      true ->
-      Delta = erlang:abs(RTT - ERTT),
-      RTTVar0 = RTTVar * 3 div 4 + (Delta - RTTVar) div 4,
-      RTT0 = RTT - RTT div 8 + ERTT div 8,
+      Delta = RTT - ERTT,
+      RTTVar0 = RTTVar + (erlang:abs(Delta) - RTTVar) div 4,
+      RTT0 = RTT - Delta div 8,
       {RTT0,RTTVar0,ERTT}
   end.
