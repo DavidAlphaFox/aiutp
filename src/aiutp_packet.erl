@@ -51,7 +51,7 @@ decode(Packet) ->
   end.
 
 decode_packet(Packet) ->
-  <<$u:8/big-integer,Ty:4/big-integer,2:4/big-integer,
+  <<Ty:4/big-integer,2:4/big-integer,
     Extension:8/big-integer, ConnectionId:16/big-integer,
     TS:32/big-integer,TSDiff:32/big-integer,
     WindowSize:32/big-integer,SeqNR:16/big-integer,
@@ -100,7 +100,7 @@ encode(#aiutp_packet{type = Type,
                       extension = ExtList,
                       payload = Payload}) ->
   {Extension, ExtBin} = encode_extensions(ExtList),
-  <<$u:8/big-integer,Type:4/big-integer,2:4/big-integer,
+  <<Type:4/big-integer,2:4/big-integer,
     Extension:8/big-integer, ConnId:16/big-integer,
     TS:32/big-integer,TSDiff:32/big-integer,
     WSize:32/big-integer,

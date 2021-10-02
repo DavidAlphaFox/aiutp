@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend,Socket)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = ?MIN_WINDOW_SIZE,
+             max_window = ?PACKET_SIZE,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -204,7 +204,7 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = erlang:trunc(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
         SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?PACKET_SIZE),
@@ -216,7 +216,7 @@ cc_control(Now,AckedBytes,RTT,
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 target_delay = erlang:trunc(Target * 0.8 + 0.2 * OurDelay0),
-                max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
+                max_window = aiutp_util:clamp(MaxWindow0,?PACKET_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
                               time_sent = TimeSent,
@@ -267,15 +267,16 @@ selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB
 selective_ack_packet([],_,PCB)-> PCB;
 selective_ack_packet(SAckedPackets,
                      MicroNow,
-                     #aiutp_pcb{time = Now,fast_resend_seq_nr = MinSeq} = PCB)->
+                     #aiutp_pcb{fast_resend_seq_nr = MinSeq} = PCB)->
+  Now0 = aiutp_util:millisecond(),
   {_,CurWindow0,RTT0,RTO0,RTTVar0,RTTHist0} =
     lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
-                {Now,PCB#aiutp_pcb.cur_window,PCB#aiutp_pcb.rtt,PCB#aiutp_pcb.rto,
+                {Now0,PCB#aiutp_pcb.cur_window,PCB#aiutp_pcb.rtt,PCB#aiutp_pcb.rto,
                  PCB#aiutp_pcb.rtt_var,PCB#aiutp_pcb.rtt_hist}, SAckedPackets),
   PCB0 = PCB#aiutp_pcb{cur_window = CurWindow0,
                       rtt = RTT0,rtt_var = RTTVar0,
                       rtt_hist = RTTHist0, rto = RTO0,retransmit_count = 0,
-                      retransmit_timeout = RTO0, rto_timeout = RTO0 + Now},
+                      retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
   SSAckeds = erlang:length(SAckedPackets),
   %% 计算出重发最大的序列号
@@ -355,15 +356,16 @@ process_packet_2(#aiutp_packet{type = PktType,ack_nr = PktAckNR,
     lists:foldr(fun(I,AccPCB) -> ack_packet(RecvTime,I,AccPCB) end,
                 {Now,PCB2#aiutp_pcb.cur_window,PCB2#aiutp_pcb.rtt,PCB2#aiutp_pcb.rto,
                  PCB2#aiutp_pcb.rtt_var,PCB2#aiutp_pcb.rtt_hist}, AckedPackets),
+  Now0 = aiutp_util:millisecond(),
   PCB3 = PCB2#aiutp_pcb{max_window_user = PktMaxWindowUser,
-                      state = State1,
-                      fin_sent_acked = FinSentAcked0,
-                      fast_resend_seq_nr = FastResendSeqNR0,
-                      zerowindow_time = ZeroWindowTime0,
-                      cur_window = CurWindow0,
-                      rtt = RTT0,rtt_var = RTTVar0,
-                      rtt_hist = RTTHist0, rto = RTO0,retransmit_count = 0,
-                      retransmit_timeout = RTO0, rto_timeout = RTO0 + Now},
+                        state = State1,
+                        fin_sent_acked = FinSentAcked0,
+                        fast_resend_seq_nr = FastResendSeqNR0,
+                        zerowindow_time = ZeroWindowTime0,
+                        cur_window = CurWindow0,
+                        rtt = RTT0,rtt_var = RTTVar0,
+                        rtt_hist = RTTHist0, rto = RTO0,retransmit_count = 0,
+                        retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
   PCB4 =
     if PCB3#aiutp_pcb.cur_window_packets == 1 ->
         aiutp_net:send_packet(aiutp_buffer:head(PCB3#aiutp_pcb.outbuf),PCB3);
@@ -504,17 +506,17 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             seq_nr = SeqNR,
                             retransmit_count = RetransmitCount
                            } = PCB) ->
-  NewTimeout = RetransmitTimeout * 2,
+  NewTimeout = RetransmitTimeout * 1.5,
 
   PCB0 =
     if (CurWindowPackets == 0) and
        (MaxWindow > ?PACKET_SIZE) ->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
+                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = ?MIN_WINDOW_SIZE ,slow_start = true}
+                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
@@ -534,7 +536,7 @@ write(_,#aiutp_pcb{state = State} = PCB)
        (State /= ?CS_CONNECTED_FULL) -> {{error,not_connected},PCB};
 write(_,#aiutp_pcb{fin_sent = FinSent} = PCB)
   when FinSent == true -> {{error,closed},PCB};
-write(Data,PCB) -> aiutp_tx:in(Data,PCB).
+write(Data,PCB) -> aiutp_tx:in(Data,PCB#aiutp_pcb{time = aiutp_util:millisecond()}).
 
 close(#aiutp_pcb{state = State } = PCB)
   when State == ?CS_UNINITIALIZED;
@@ -559,14 +561,13 @@ read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
                 inbuf = InBuf,last_rcv_win = LastRcvWin} = PCB)->
   L = aiutp_queue:to_list(InQue),
   WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
+  Now = aiutp_util:millisecond(),
   PCB0 =
     if WindowSize > LastRcvWin->
-        if LastRcvWin == 0 -> aiutp_net:send_ack(PCB);
-           true ->
-            Now = aiutp_util:millisecond(),
-            PCB#aiutp_pcb{time=Now,ida = true}
+        if LastRcvWin == 0 -> aiutp_net:send_ack(PCB#aiutp_pcb{time = Now});
+           true -> PCB#aiutp_pcb{time=Now,ida = true}
         end;
-       true -> PCB
+       true -> PCB#aiutp_pcb{time = Now}
     end,
   QueSize = aiutp_queue:size(InQue),
   if QueSize > 0 ->

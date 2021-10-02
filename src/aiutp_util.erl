@@ -19,8 +19,8 @@ getaddr(S) when is_list(S) ->
     CAddr;
 getaddr({_, _, _, _} = Addr) ->
     Addr.
-microsecond()-> os:system_time(microsecond).
-millisecond()-> os:system_time(millisecond).
+microsecond()-> erlang:system_time(microsecond).
+millisecond()-> erlang:system_time(millisecond).
 
 
 bit16_random() ->
