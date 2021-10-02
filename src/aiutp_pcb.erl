@@ -215,7 +215,7 @@ cc_control(Now,AckedBytes,RTT,
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
-                target_delay = math:trunc(Target * 0.8 + 0.2 * OurDelay0),
+                target_delay = erlang:trunc(Target * 0.8 + 0.2 * OurDelay0),
                 max_window = aiutp_util:clamp(MaxWindow0,?PACKET_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
