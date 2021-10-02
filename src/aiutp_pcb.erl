@@ -514,7 +514,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                       max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = ?PACKET_SIZE * 2 ,slow_start = true}
+                                max_window = erlang:trunc(?MAX(?PACKET_SIZE * 2,(MaxWindow div 2))) ,slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
