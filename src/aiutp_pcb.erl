@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend,Socket)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = 2 * ?PACKET_SIZE,
+             max_window = ?MIN_WINDOW_SIZE,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -204,7 +204,7 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:trunc(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
         SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?PACKET_SIZE),
@@ -216,7 +216,7 @@ cc_control(Now,AckedBytes,RTT,
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
                 target_delay = erlang:trunc(Target * 0.8 + 0.2 * OurDelay0),
-                max_window = aiutp_util:clamp(MaxWindow0,?PACKET_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
+                max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
                               time_sent = TimeSent,
@@ -511,10 +511,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
        (MaxWindow > ?PACKET_SIZE) ->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
+                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                                 duplicate_ack = 0,
-                                max_window = erlang:trunc(?MAX(?PACKET_SIZE * 2,(MaxWindow div 2))) ,slow_start = true}
+                                max_window = ?MIN_WINDOW_SIZE ,slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
