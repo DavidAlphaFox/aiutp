@@ -89,6 +89,6 @@ caculate_rtt(RTT,RTTVar,TimeSent,MicroNow)->
      true ->
       Delta = RTT - ERTT,
       RTTVar0 = RTTVar + (erlang:abs(Delta) - RTTVar) div 4,
-      RTT0 = RTT - Delta div 8,
+      RTT0 = RTT - RTT div 8 + ERTT div 8,
       {RTT0,RTTVar0,ERTT}
   end.

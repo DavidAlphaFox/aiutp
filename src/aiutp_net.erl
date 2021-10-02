@@ -17,31 +17,31 @@ max_send(#aiutp_pcb{max_window = MaxWindow,
                     max_window_user = MaxWindowUser,
                     cur_window = CurWindow,
                     cur_window_packets = CurWindowPackets})->
-  %MaxSend = ?MIN(MaxWindow, MaxWindowUser),
+  MaxSend = ?MIN(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?REORDER_BUFFER_MAX_SIZE - 1) -> 0;
-%     MaxSend > CurWindow ->
-%      Remain = MaxSend - CurWindow,
-%      if Remain < ?PACKET_SIZE -> ?PACKET_SIZE;
-%         true -> Remain
-%      end;
+     MaxSend > CurWindow ->
+      Remain = MaxSend - CurWindow,
+      if Remain < ?PACKET_SIZE -> ?PACKET_SIZE;
+         true -> Remain
+      end;
      true -> 0
   end.
 
-is_full(_Bytes,#aiutp_pcb{time= Now,
-  %                       max_window = MaxWindow,
-  %                       max_window_user = MaxWindowUser,
-  %                       cur_window = CurWindow,
+is_full(Bytes,#aiutp_pcb{time= Now,
+                         max_window = MaxWindow,
+                         max_window_user = MaxWindowUser,
+                         cur_window = CurWindow,
                          cur_window_packets = CurWindowPackets } = PCB)->
-  %Bytes0 = if Bytes > ?PACKET_SIZE -> ?PACKET_SIZE;
- %             Bytes < 0 -> ?PACKET_SIZE;
- %             true -> Bytes
- %          end,
+  Bytes0 = if Bytes > ?PACKET_SIZE -> ?PACKET_SIZE;
+              Bytes < 0 -> ?PACKET_SIZE;
+              true -> Bytes
+           end,
 
- % MaxSend = ?MIN(MaxWindow, MaxWindowUser),
+  MaxSend = ?MIN(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
-%     (CurWindow + Bytes0) > MaxSend ->
-%      {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
+     (CurWindow + Bytes0) > MaxSend ->
+      {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
      true -> {false,PCB}
   end.
 
