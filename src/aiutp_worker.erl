@@ -190,7 +190,8 @@ handle_call({close,Controll},From,#state{pcb = PCB,controller = Controll,
          true -> ok
       end,
       {reply,ok,State#state{controller = undefiend,
-                            controller_monitor = undefined}};
+                            controller_monitor = undefined,
+                            active = false}};
     _ ->
       {reply,ok,State#state{
                   pcb = PCB1,
@@ -299,17 +300,19 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
                    controller_monitor = CMonitor,
                    blocker = Blocker,
                    active = Active,
-                   tick_timer = Timer
-                  })->
+                   tick_timer = Timer,
+                   connecting = Connecting,
+                   closing = Closing})->
   if CMonitor /= undefined -> erlang:demonitor(CMonitor,[flush]);
      true -> ok
   end,
   cancle_tick_timer(Timer),
-  if Blocker /= undefined ->
-      gen_server:reply(Blocker, {error,crash});
+  if (Blocker /= undefined) and
+     (Connecting == true)-> gen_server:reply(Blocker, {error,crash});
+     (Blocker /= undefined) and
+     (Closing == true)-> gen_server:reply(Blocker, {error,crash});
      (Controller /= undefined) and
-     (Active == true) ->
-      Controller ! {utp_closed,{utp,Parent,self()},crash};
+     (Active == true) -> Controller ! {utp_closed,{utp,Parent,self()},crash};
      true -> ok
   end,
   {stop,crash,undefiend};
@@ -333,8 +336,8 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
       {stop,normal,undefined};
      true ->
       {noreply,State#state{controller = undefined,
-                                     controller_monitor = undefined,
-                                     blocker = undefined,pcb = PCB0}}
+                           controller_monitor = undefined,
+                           blocker = undefined,pcb = PCB0}}
   end;
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -411,7 +414,7 @@ cancle_tick_timer({set,Ref}) ->
   erlang:cancel_timer(Ref),
   undefined.
 
-
+active_read(#state{controller = undefined} = State)-> State;
 active_read(#state{parent = Parent,
                    pcb = PCB,
                    controller = Control,
