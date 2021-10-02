@@ -28,7 +28,7 @@ new(ConnIdRecv,ConnIdSend,Socket)->
              our_hist = aiutp_delay:new(CurMilli),
              their_hist = aiutp_delay:new(CurMilli),
              rtt_hist = aiutp_delay:new(CurMilli),
-             max_window = 5 * ?PACKET_SIZE,
+             max_window = 2 * ?PACKET_SIZE,
              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
              inque = aiutp_queue:new(),
@@ -290,8 +290,11 @@ selective_ack_packet(SAckedPackets,
       %io:format("selective ack packet: ~p ~p~n",[MinSeq,MaxSeq]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
-                            duplicate_ack = SSAckeds},
-      if Sent > 0 -> maybe_decay_win(PCB2);
+                            duplicate_ack = SSAckeds}
+      if Sent > 0 ->
+          io:format("should od decay~n"),
+          PCB2;
+          %maybe_decay_win(PCB2);
          true ->  PCB2
       end;
      true -> PCB0
