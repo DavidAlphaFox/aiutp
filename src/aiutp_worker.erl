@@ -135,7 +135,7 @@ handle_call({connect,Control,Remote},From,
                  controller = Control,
                  controller_monitor = erlang:monitor(process,Control),
                  blocker = From,
-                 pcb = swap_socket(Socket,PCB),
+                 pcb = swap_socket(Socket,Remote,PCB),
                  conn_id = ConnId,
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
     Error -> {stop,normal,Error,State}
@@ -146,7 +146,7 @@ handle_call({accept,Control, Remote, Packet},_From,
   {ConnId,PCB} = aiutp_pcb:accept(Packet),
   case aiutp_socket:add_conn(Parent,Remote,ConnId) of
     ok ->
-      {reply,ok,State#state{pcb = swap_socket(Socket,PCB),
+      {reply,ok,State#state{pcb = swap_socket(Socket,Remote,PCB),
                              remote = Remote,
                              controller = Control,
                              controller_monitor = erlang:monitor(process,Control),
@@ -163,10 +163,10 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
   {reply,ok,active_read(State#state{controller = NewControl,
                                     active = Active,
                                     controller_monitor = CMonitor0})};
-handle_call({send,Data},_From,#state{pcb = PCB,socket = Socket} = State) ->
+handle_call({send,Data},_From,#state{pcb = PCB,socket = Socket,remote = Remote} = State) ->
   case aiutp_pcb:write(Data, PCB) of
     {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
-    PCB1 -> {reply,ok,State#state{pcb = swap_socket(Socket,PCB1)}}
+    PCB1 -> {reply,ok,State#state{pcb = swap_socket(Socket,Remote,PCB1)}}
   end;
 
 handle_call({active,Active},_From,State) ->
@@ -178,13 +178,14 @@ handle_call(active,_From,#state{active = Active}=State) ->
 handle_call({close,Controll},_From,#state{controller = Controll,
                                           controller_monitor = CMonitor,
                                           socket = Socket,
-                                         pcb = PCB} = State) ->
+                                          remote = Remote,
+                                          pcb = PCB} = State) ->
   if CMonitor /= undefiend -> erlang:demonitor(CMonitor,[flush]);
      true -> ok
   end,
   PCB1 = aiutp_pcb:close(PCB),
   {reply,ok,State#state{
-              pcb = swap_socket(Socket,PCB1),
+              pcb = swap_socket(Socket,Remote,PCB1),
               controller = undefined,
               controller_monitor = undefined
              }};
@@ -208,19 +209,19 @@ handle_call({close,_},_From,State) ->
 
 %% 已经链接了
 handle_cast({packet,Packet},
-            #state{pcb = PCB,blocker = undefined,socket = Socket} = State)->
+            #state{pcb = PCB,blocker = undefined,socket = Socket,remote = Remote} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
-  {noreply,active_read(State#state{pcb = swap_socket(Socket,PCB0)})};
+  {noreply,active_read(State#state{pcb = swap_socket(Socket,Remote,PCB0)})};
 
 %% 正在进行链接
 handle_cast({packet,Packet},
-            #state{pcb = PCB,blocker = Connector,socket = Socket} = State)->
+            #state{pcb = PCB,blocker = Connector,socket = Socket, remote = Remote} = State)->
   PCB0 = aiutp_pcb:process(Packet, PCB),
   case aiutp_pcb:state(PCB0) of
     ?CS_CONNECTED ->
       gen_server:reply(Connector, ok),
-      {noreply,State#state{blocker = undefined,pcb = swap_socket(Socket,PCB0)}};
-    _ -> {noreply,State#state{pcb = swap_socket(Socket,PCB0)}}
+      {noreply,State#state{blocker = undefined,pcb = swap_socket(Socket,Remote,PCB0)}};
+    _ -> {noreply,State#state{pcb = swap_socket(Socket,Remote,PCB0)}}
   end.
 
 %%--------------------------------------------------------------------
@@ -236,7 +237,7 @@ handle_cast({packet,Packet},
         {stop, Reason :: normal | term(), NewState :: term()}.
 
 handle_info(swap_socket,#state{socket = Socket,remote = Remote,pcb = PCB} = State)->
-  {noreply,State#state{pcb = swap_socket(PCB)}};
+  {noreply,State#state{pcb = swap_socket(Socket,Remote,PCB)}};
 handle_info({stop,Reason},
             #state{parent = Parent,parent_monitor = ParentMonitor,
                    controller = Controller,controller_monitor = ControlMonitor,
@@ -406,6 +407,7 @@ cancle_tick_timer({set,Ref}) ->
 active_read(#state{parent = Parent,
                    pcb = PCB,
                    socket = Socket,
+                   remote = Remote,
                    controller = Control,
                    active = true} = State)->
   {Active,PCB2} =
@@ -417,10 +419,10 @@ active_read(#state{parent = Parent,
         {false,PCB1}
     end,
   PCB3 = aiutp_pcb:flush(PCB2),
-  State#state{ active = Active,pcb = swap_socket(Socket,PCB3)};
-active_read(#state{socket = Socket,pcb = PCB} = State)->
+  State#state{ active = Active,pcb = swap_socket(Socket,Remote,PCB3)};
+active_read(#state{socket = Socket,remote = Remote,pcb = PCB} = State)->
   PCB1 = aiutp_pcb:flush(PCB),
-  State#state{pcb = swap_socket(Socket,PCB1)}.
+  State#state{pcb = swap_socket(Socket,Remote,PCB1)}.
 
 
 
@@ -436,7 +438,7 @@ sync_input(Socket,NewOwner,Flag)->
       Flag
   end.
 
-swap_socket(Socket,PCB)->
+swap_socket(Socket,Remote,PCB)->
   {Buffers,PCB0} = aiutp_pcb:swap_socket(PCB),
   if erlang:length(Buffers) > 0 -> lists:foreach(fun(I) -> ok = gen_udp:send(Socket,Remote,I) end, Buffers);
      true -> ok
