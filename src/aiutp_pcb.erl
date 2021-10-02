@@ -201,7 +201,7 @@ cc_control(Now,AckedBytes,RTT,
   DelayFactor = OffTarget / Target,
   ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
   ScaledGain0 =
-    if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 1000) -> 0;
+    if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
        true -> ScaledGain
     end,
   LedbetCwnd = erlang:trunc(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
