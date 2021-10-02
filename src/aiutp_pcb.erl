@@ -60,9 +60,9 @@ closed(#aiutp_pcb{got_fin = GotFin,
      true -> not_closed
   end.
 
-process(Packet,PCB)->
+process({Packet,TS},PCB)->
   aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,
-                                 PCB#aiutp_pcb{recv_time = aiutp_util:microsecond()})).
+                                 PCB#aiutp_pcb{recv_time = TS})).
 
 process(_,_,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
@@ -601,7 +601,7 @@ connect(ConnIdRecv)->
                        seq_nr = SeqNR + 1},
   aiutp_net:send_packet(Iter, PCB0).
 
-accept(#aiutp_packet{conn_id = ConnIdSend} = Packet)->
+accept({#aiutp_packet{conn_id = ConnIdSend},_} = Packet)->
   ConnIdRecv = aiutp_util:bit16(ConnIdSend + 1),
   PCB = new(ConnIdRecv,ConnIdSend),
   PCB1 = process(Packet,PCB),

@@ -262,11 +262,12 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
 dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
          #state{socket = Socket,conns = Conns,acceptor = Acceptor})->
   Key = {Remote,ConnId},
+  RecvTime = aiutp_util:microsecond(),
   case maps:get(Key,Conns,undefined) of
     undefined ->
       if (PktType == ?ST_SYN) and
-         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,Packet});
+         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}});
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
-    {Worker,_}-> aiutp_worker:incoming(Worker, Packet)
+    {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
   end.

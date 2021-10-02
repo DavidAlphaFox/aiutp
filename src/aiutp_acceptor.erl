@@ -201,7 +201,7 @@ accept_incoming({Caller,_} = Acceptor,
       gen_udp:send(Socket,Remote,Bin),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
   end.
-pair_incoming(Remote,SYN,
+pair_incoming(Remote,{SYN,_},
               #state{socket = Socket,
                      syn_len = SynLen,
                      max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
@@ -210,17 +210,17 @@ pair_incoming(Remote,SYN,
   gen_udp:send(Socket,Remote,Bin),
   {noreply,State};
 
-pair_incoming(Remote,Packet,
+pair_incoming(Remote,{Packet,_} = P,
               #state{acceptors = Acceptors,syns = Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({Remote0,SYN})->
+      fun({Remote0,{SYN,_}})->
           if (Remote ==  Remote0) andalso
              (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Remote,Packet},Syns0),
+  Syns1 = queue:in({Remote,P},Syns0),
   Empty = queue:is_empty(Acceptors),
   if
     Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
