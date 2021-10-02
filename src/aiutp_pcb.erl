@@ -439,7 +439,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      PCB1_1 = aiutp_net:schedule_ack(PCB1),
+      PCB1_1 = aiutp_net:send_ack(PCB1),
       {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1_1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
@@ -515,10 +515,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
                       max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
-       true -> aiutp_net:send_ack(PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
-                                                duplicate_ack = 0,
-                                                max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),
-                                                slow_start = true})
+       true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
+                             duplicate_ack = 0,
+                             max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),
+                             slow_start = true}
     end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
