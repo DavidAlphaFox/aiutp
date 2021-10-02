@@ -129,13 +129,13 @@ handle_call({connect,Control,Remote},From,
             #state{parent = Parent,socket = Socket} = State) ->
   case add_conn(Parent,Remote) of
     {ok,ConnId} ->
-      PCB = aiutp_pcb:connect(ConnId),
+      PCB = aiutp_pcb:connect({Socket,Remote},ConnId),
       {noreply,State#state{
                  remote = Remote,
                  controller = Control,
                  controller_monitor = erlang:monitor(process,Control),
                  blocker = From,
-                 pcb = aiutp_pcb:swap_socket({Socket,Remote},PCB),
+                 pcb = PCB,
                  conn_id = ConnId,
                  tick_timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL, undefined)}};
     Error -> {stop,normal,Error,State}
@@ -143,10 +143,10 @@ handle_call({connect,Control,Remote},From,
 handle_call({accept,Control, Remote, Packet},_From,
             #state{parent = Parent,socket = Socket} = State) ->
 
-  {ConnId,PCB} = aiutp_pcb:accept(Packet),
+  {ConnId,PCB} = aiutp_pcb:accept({Socket,Remote},Packet),
   case aiutp_socket:add_conn(Parent,Remote,ConnId) of
     ok ->
-      {reply,ok,State#state{pcb = aiutp_pcb:swap_socket({Socket,Remote},PCB),
+      {reply,ok,State#state{pcb = PCB,
                              remote = Remote,
                              controller = Control,
                              controller_monitor = erlang:monitor(process,Control),

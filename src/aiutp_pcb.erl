@@ -1,7 +1,7 @@
 -module(aiutp_pcb).
 -include("aiutp.hrl").
 
--export([new/2,
+-export([new/3,
          state/1,
          swap_socket/2,
          process/2,
@@ -9,15 +9,16 @@
          write/2,
          close/1,
          read/1,
-         connect/1,
-         accept/1,
+         connect/2,
+         accept/2,
          closed/1,
          flush/1]).
 
-new(ConnIdRecv,ConnIdSend)->
+new(ConnIdRecv,ConnIdSend,Socket)->
   CurMilli = aiutp_util:millisecond(),
   #aiutp_pcb{time = CurMilli,
              state = ?CS_IDLE,
+             socket = Socket,
              conn_id_send = ConnIdSend,
              conn_id_recv = ConnIdRecv,
              last_got_packet = CurMilli,
@@ -574,9 +575,9 @@ read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
      true -> {undefined,PCB0}
   end.
 
-connect(ConnIdRecv)->
+connect(Socket,ConnIdRecv)->
   ConnIdSend = aiutp_util:bit16(ConnIdRecv + 1),
-  PCB = new(ConnIdRecv,ConnIdSend),
+  PCB = new(ConnIdRecv,ConnIdSend,Socket),
   #aiutp_pcb{max_window = MaxWindow,inbuf = InBuf,
              conn_id_recv = ConnId,outbuf = OutBuf} = PCB,
   Now = aiutp_util:millisecond(),
@@ -597,9 +598,9 @@ connect(ConnIdRecv)->
                        seq_nr = SeqNR + 1},
   aiutp_net:send_packet(Iter, PCB0).
 
-accept({#aiutp_packet{conn_id = ConnIdSend},_} = Packet)->
+accept(Socket,{#aiutp_packet{conn_id = ConnIdSend},_} = Packet)->
   ConnIdRecv = aiutp_util:bit16(ConnIdSend + 1),
-  PCB = new(ConnIdRecv,ConnIdSend),
+  PCB = new(ConnIdRecv,ConnIdSend,Socket),
   PCB1 = process(Packet,PCB),
   {ConnIdRecv,PCB1}.
 
