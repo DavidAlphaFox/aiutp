@@ -95,8 +95,9 @@ send_ack(#aiutp_pcb{time = Now,
   WindowSize = window_size(MaxWindow,InBuf),
   Packet = aiutp_packet:ack(SeqNR, AckNR),
   Packet0 =
-    if (ReorderCount /= 0) and (not GotFinReached) ->
-       Sack = build_sack(PCB),
+    if (ReorderCount /= 0) and
+       (GotFinReached == false) ->
+        Sack = build_sack(PCB),
         Packet#aiutp_packet{conn_id = ConnIdSend, wnd = WindowSize,
                             tv_usec = MicroNow,reply_micro = ReplyMicro,
                             extension = [{sack,Sack}]};

@@ -190,8 +190,8 @@ accept_incoming({Caller,_} = Acceptor,
                        parent = Parent,socket = Socket} = State)->
   {ok,Worker} = aiutp_worker_sup:new(Parent,Socket),
   {{value,Req},Syns0} = queue:out(Syns),
-  {Remote,SYN} = Req,
-  case aiutp_worker:accept(Worker, Caller,Remote, SYN) of
+  {Remote,{SYN,_} = P} = Req,
+  case aiutp_worker:accept(Worker, Caller,Remote, P) of
     ok ->
       gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
       {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
