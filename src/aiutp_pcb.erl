@@ -206,7 +206,7 @@ cc_control(Now,AckedBytes,RTT,
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 1000) -> 0;
        true -> ScaledGain
     end,
-  LedbetCwnd = math:ceil(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = math:ceil(?MAX(?PACKET_SIZE,(MaxWindow + ScaledGain0))),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
         SSCwnd = math:ceil(MaxWindow + WindowFactor* ?PACKET_SIZE),
@@ -217,7 +217,7 @@ cc_control(Now,AckedBytes,RTT,
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
-                max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
+                max_window = aiutp_util:clamp(MaxWindow0,?PACKET_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
