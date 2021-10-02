@@ -14,7 +14,7 @@
 -define(REORDER_BUFFER_SIZE,32).
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE,1024).
--define(PACKET_SIZE,1435).
+-define(PACKET_SIZE,597).
 -define(MIN_WINDOW_SIZE,10).
 % this is the minimum max_window value. It can never drop below this
 -define(DUPLICATE_ACKS_BEFORE_RESEND,4).
@@ -35,8 +35,6 @@
 -define(TIMESTAMP_MASK, 16#FFFFFFFF).
 -define(RTT_MAX,16#FFFFFFFFFFFFFFFF).
 
--define(AIUTP_MTU_DEF, 1435).
--define(AIUTP_WND_DEF, 255 * ?PACKET_SIZE).
 
 
 -define(DIV_ROUND_UP(NUM,DENOM),((NUM + DENOM - 1) div DENOM)).
