@@ -499,17 +499,20 @@ check_timeouts_1(#aiutp_pcb{state = State,
   end;
 
 check_timeouts_1(#aiutp_pcb{time=Now,
+                            conn_id_recv= ConnId,
                             retransmit_timeout = RetransmitTimeout,
                             cur_window_packets = CurWindowPackets,
                             cur_window = CurWindow,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
+                            rto_timeout = RTOTimeout,
                             retransmit_count = RetransmitCount} = PCB) ->
 
   NewTimeout = RetransmitTimeout * 2,
   Now0 = aiutp_util:millisecond(),
-  io:format("Check Timeout Now:~p Now0:~p retransmit_timeout: ~p~n",[Now,Now0,RetransmitTimeout]),
+  io:format("Check Id: ~p Timeout Now:~p Now0:~p retransmit_timeout: ~p RTOTimeout: ~p ~n",
+            [ConnId,Now,Now0,RetransmitTimeout,RTOTimeout]),
   PCB0 =
     if (CurWindowPackets == 0) and
        (MaxWindow > ?PACKET_SIZE)->
