@@ -395,7 +395,7 @@ process_packet_3(#aiutp_packet{type = PktType} = Packet,
        (State == ?CS_CONNECTED_FULL) -> PCB0#aiutp_pcb{state = ?CS_CONNECTED};
        true -> PCB0
     end,
-  if PktType == ?ST_STATE-> PCB1;
+  if PktType == ?ST_STATE-> aiutp_net:flush_queue(PCB1);
      (State /= ?CS_CONNECTED)  and (State /= ?CS_CONNECTED_FULL)-> PCB1;
      true -> process_packet_4(Packet, PCB1)
 end.
