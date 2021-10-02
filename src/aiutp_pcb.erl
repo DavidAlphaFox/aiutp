@@ -134,7 +134,12 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
          PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
       end;
-     true -> process_packet_1(Packet,PCB0)
+     true ->
+      if PktType == ?ST_DATA ->
+          PCB1 = aiutp_net:send_ack(PCB0),
+          process_packet_1(Packet,PCB1);
+         true  -> process_packet_1(Packet,PCB0)
+      end
   end.
 
 %% 计算dulpicateAck
