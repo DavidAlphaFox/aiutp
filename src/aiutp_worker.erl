@@ -166,11 +166,12 @@ handle_call({controlling_process,OldControl,NewControl,Active},_From,
   {reply,ok,active_read(State#state{controller = NewControl,
                                     active = Active,
                                     controller_monitor = CMonitor0})};
-handle_call({send,Data},_From,#state{pcb = PCB} = State) ->
-  case aiutp_pcb:write(Data, PCB) of
-    {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
-    PCB1 -> {reply,ok,State#state{pcb = PCB1}}
-  end;
+handle_call({send,Data},From,#state{pcb = PCB} = State) ->
+  %case aiutp_pcb:write(Data,From, PCB) of
+  %   {Error,PCB1} -> {reply,Error,State#state{pcb = PCB1}};
+  %  PCB1 -> {reply,ok,State#state{pcb = PCB1}}
+  % end;
+  {noreply,State#state{pcb = aiutp_pcb:write(Data,From, PCB)}};
 
 handle_call({active,Active},_From,State) ->
   {reply,ok,active_read(State#state{active = Active})};

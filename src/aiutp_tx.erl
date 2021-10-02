@@ -60,7 +60,7 @@ pick_sacked_packet(SAcks,MaxSeq,Iter,Prev,Acc,OutBuf)->
   Next = aiutp_buffer:next(Iter, OutBuf),
   WrapPacket = aiutp_buffer:data(Iter, OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
-  if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MaxSeq) > 0 -> {Acc,OutBuf};
+  if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MaxSeq) >= 0 -> {Acc,OutBuf};
      true ->
       Member = lists:member(Packet#aiutp_packet.seq_nr, SAcks),
       if Member->
@@ -102,6 +102,6 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
 
 
 
-in(Data,#aiutp_pcb{outque = OutQue} = PCB) ->
-  OutQue0 = aiutp_queue:push_back({?ST_DATA,Data}, OutQue),
+in({Data,From},#aiutp_pcb{outque = OutQue} = PCB) ->
+  OutQue0 = aiutp_queue:push_back({?ST_DATA,Data,From}, OutQue),
   aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue0}).
