@@ -21,7 +21,7 @@ max_send(#aiutp_pcb{max_window = MaxWindow,
   MaxSend = ?MIN(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) -> 0;
      MaxSend > CurWindow ->
-      Remain = MaxSend - CurWindow,
+      Remain = math:ceil(MaxSend - CurWindow),
       if Remain < ?PACKET_SIZE -> ?PACKET_SIZE;
          true -> Remain
       end;

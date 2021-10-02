@@ -233,7 +233,7 @@ ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
        true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
-    if NeedResend == false -> CurWindow - Payload;
+    if NeedResend == false -> math:ceil(CurWindow - Payload);
        true -> CurWindow
     end,
   {Now,CurWindow0,RTT1,RTO0,RTTVar1,RTTHist1}.
