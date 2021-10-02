@@ -229,16 +229,18 @@ send_new_packet(Type,Data,Payload,
                 cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = SeqNR + 1,
                 last_rcv_win = LastRcvWin}.
 
+finish_write(undefined) -> ok;
+finish_write(From) -> gen_server:reply(From, ok).
 
 send_data_in_queue(_,<<>>,From,_,PCB) ->
-  gen_server:reply(From, ok),
+  finish_write(From),
   PCB;
 send_data_in_queue(Type,Bin,From,Size,#aiutp_pcb{outque = OutQue} = PCB)
   when Size =< 0 ->
   if erlang:byte_size(Bin) > 0 ->
       PCB#aiutp_pcb{outque = aiutp_queue:push_front({Type,Bin,From}, OutQue)};
      true ->
-      gen_server:reply(From, ok),
+      finish_write(From),
       PCB
   end;
 send_data_in_queue(Type,Bin,From,Size,PCB)->
@@ -249,7 +251,7 @@ send_data_in_queue(Type,Bin,From,Size,PCB)->
     end,
   if BinSize =< Size0 ->
       PCB0 = send_new_packet(Type, Bin, BinSize, PCB),
-      gen_server:reply(From, ok),
+      finish_write(From),
       send_data_in_queue(PCB0);
      true ->
       %io:format("send ~p bytes from queue~n",[Size0]),
