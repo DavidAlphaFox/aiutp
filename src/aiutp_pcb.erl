@@ -439,8 +439,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      PCB1_1 = aiutp_net:send_ack(PCB1),
-      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1_1),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
@@ -510,9 +509,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             retransmit_count = RetransmitCount} = PCB) ->
 
   NewTimeout = RetransmitTimeout * 2,
-  Now0 = aiutp_util:millisecond(),
-  io:format("Check Id: ~p Timeout Now:~p Now0:~p retransmit_timeout: ~p RTOTimeout: ~p ~n",
-            [ConnId,Now,Now0,RetransmitTimeout,RTOTimeout]),
+
   PCB0 =
     if (CurWindowPackets == 0) and
        (MaxWindow > ?PACKET_SIZE)->
