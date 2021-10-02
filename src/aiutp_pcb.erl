@@ -480,23 +480,20 @@ check_timeouts_1(#aiutp_pcb{time = Now,
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
+check_timeouts_1(#aiutp_pcb{rtt = RTT,close_requested = CloseRequested} = PCB)
+  when (RTT > 6000) ->
+  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
+  end;
+check_timeouts_1(#aiutp_pcb{state = State,
+                            close_requested = CloseRequested,
+                            retransmit_count = RetransmitCount} = PCB)
+  when (RetransmitCount >= 4);
+       ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
+  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
+  end;
 
-check_timeouts_1(#aiutp_pcb{state = State,
-                            close_requested = CloseRequested,
-                            retransmit_count = RetransmitCount} = PCB)
-  when (RetransmitCount >= 4);
-       ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
-  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
-     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
-  end;
-check_timeouts_1(#aiutp_pcb{state = State,
-                            close_requested = CloseRequested,
-                            retransmit_count = RetransmitCount} = PCB)
-  when (RetransmitCount >= 4);
-       ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
-  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
-     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
-  end;
 check_timeouts_1(#aiutp_pcb{time=Now,
                             retransmit_timeout = RetransmitTimeout,
                             cur_window_packets = CurWindowPackets,
