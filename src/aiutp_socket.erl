@@ -24,6 +24,7 @@
 -record(state, {socket,
                 conns,
                 monitors,
+                max_conns = 100, %% 可以增加接口后期修改
                 acceptor = closed,
                 options}).
 
@@ -260,13 +261,17 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
   end.
 
 dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
-         #state{socket = Socket,conns = Conns,acceptor = Acceptor})->
+         #state{socket = Socket,conns = Conns,acceptor = Acceptor,max_conns = MaxConns})->
   Key = {Remote,ConnId},
   RecvTime = aiutp_util:microsecond(),
   case maps:get(Key,Conns,undefined) of
     undefined ->
       if (PktType == ?ST_SYN) and
-         (Acceptor /= closed) -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}});
+         (Acceptor /= closed) ->
+          ConnsSize = maps:size(Conns),
+          if ConnsSize >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
+             true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}})
+          end;
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
     {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
