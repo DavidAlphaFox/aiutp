@@ -426,8 +426,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
                             zerowindow_time = ZeroWindowTime,
                             max_window_user = MaxWindowUser,
                             rto_timeout = RTOTimeout,
-                            fin_sent = FinSent
-                           } = PCB)->
+                            fin_sent = FinSent} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
        (Now - ZeroWindowTime >=0) -> PCB#aiutp_pcb{max_window_user = ?MIN_WINDOW_SIZE};
@@ -440,7 +439,8 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1),
+      PCB1_1 = aiutp_net:send_ack(PCB1),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1_1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
@@ -505,13 +505,14 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
-                            retransmit_count = RetransmitCount,
-                            reorder_count = ReorderCount} = PCB) ->
-  NewTimeout = RetransmitTimeout * 2,
+                            retransmit_count = RetransmitCount} = PCB) ->
 
+  NewTimeout = RetransmitTimeout * 2,
+  Now0 = aiutp_util:millisecond(),
+  io:format("Check Timeout Now:~p Now0:~p retransmit_timeout: ~p~n",[Now,Now0,RetransmitTimeout]),
   PCB0 =
     if (CurWindowPackets == 0) and
-       (MaxWindow > ?PACKET_SIZE) ->
+       (MaxWindow > ?PACKET_SIZE)->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
                       max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?PACKET_SIZE))};
@@ -519,22 +520,18 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                                 duplicate_ack = 0,
                                 max_window = erlang:trunc(?MAX((MaxWindow /2), ?PACKET_SIZE)),slow_start = true}
     end,
-  PCB1 =
-    if ReorderCount > 0 ->  aiutp_net:send_ack(PCB0);
-       true -> PCB0
-    end,
   if CurWindowPackets > 0 ->
       Iter = aiutp_buffer:head(OutBuf),
       {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
-      PCB2 = PCB1#aiutp_pcb{
+      PCB1 = PCB0#aiutp_pcb{
                cur_window = CurWindow0,
                outbuf = OutBuf0,
                retransmit_count = RetransmitCount + 1,
                fast_timeout = true,
                timeout_seq_nr = SeqNR
               },
-      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB2)};
-     true -> {true,aiutp_net:flush_queue(PCB1)}
+      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};
+     true -> {true,aiutp_net:flush_queue(PCB0)}
   end.
 write(_,#aiutp_pcb{state = State} = PCB)
   when (State /= ?CS_CONNECTED),
