@@ -29,7 +29,7 @@
 -define(KEEPALIVE_INTERVAL,29000). %ms
 % 29 seconds determined from measuring many home NAT devices
 -define(UTP_HEADER_SIZE,20).
--define(TIMEOUT_CHECK_INTERVAL,500).
+-define(TIMEOUT_CHECK_INTERVAL,1000).
 -define(SEQ_NR_MASK,16#FFFF).
 -define(ACK_NR_MASK,16#FFFF).
 -define(TIMESTAMP_MASK, 16#FFFFFFFF).
