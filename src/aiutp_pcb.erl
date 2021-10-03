@@ -497,9 +497,20 @@ check_timeouts_1(#aiutp_pcb{rtt = RTT,close_requested = CloseRequested} = PCB)
   end;
 check_timeouts_1(#aiutp_pcb{state = State,
                             close_requested = CloseRequested,
-                            retransmit_count = RetransmitCount} = PCB)
+                            retransmit_count = RetransmitCount,
+                            brust = false} = PCB)
   when (RetransmitCount >= 4);
        ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
+  io:format("CLOSED due to MAX retransmit: ~p~n",[RetransmitCount]),
+  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
+  end;
+check_timeouts_1(#aiutp_pcb{state = State,
+                            close_requested = CloseRequested,
+                            retransmit_count = RetransmitCount,
+                            brust = true} = PCB)
+  when (RetransmitCount >= 40);
+       ((State == ?CS_SYN_SENT) and RetransmitCount > 10) ->
   io:format("CLOSED due to MAX retransmit: ~p~n",[RetransmitCount]),
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
