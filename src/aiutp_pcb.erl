@@ -426,7 +426,8 @@ check_timeouts_0(#aiutp_pcb{time =Now,
                             zerowindow_time = ZeroWindowTime,
                             max_window_user = MaxWindowUser,
                             rto_timeout = RTOTimeout,
-                            fin_sent = FinSent} = PCB)->
+                            fin_sent = FinSent,
+                            brust = Brust} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
        (Now - ZeroWindowTime >=0) -> PCB#aiutp_pcb{max_window_user = ?MIN_WINDOW_SIZE};
@@ -439,10 +440,14 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
+      PCBBrust =
+        if Brust == true -> aiutp_net:send_ack(PCB1);
+           true -> PCB1
+        end,
       PCBFlush =
         if PCB1#aiutp_pcb.cur_window_packets == 0 ->
-            aiutp_net:flush_queue(PCB1);
-           true -> PCB1
+            aiutp_net:flush_queue(PCBBrust);
+           true -> PCBBrust
         end,
       {ISFull,PCB2} = aiutp_net:is_full(-1,PCBFlush),
       PCB3 =
