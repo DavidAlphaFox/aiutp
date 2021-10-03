@@ -422,14 +422,11 @@ check_timeouts_0(#aiutp_pcb{state = State} = PCB)
        State == ?CS_IDLE;
        State == ?CS_RESET-> PCB;
 check_timeouts_0(#aiutp_pcb{time =Now,
-                            cur_window = CurWindow,
-                            cur_window_packets = CurWindowPackets,
                             state = State,
                             zerowindow_time = ZeroWindowTime,
                             max_window_user = MaxWindowUser,
                             rto_timeout = RTOTimeout,
-                            outbuf = OutBuf,
-                            fin_sent = FinSent,brust = Brust} = PCB)->
+                            fin_sent = FinSent} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
        (Now - ZeroWindowTime >=0) -> PCB#aiutp_pcb{max_window_user = ?MIN_WINDOW_SIZE};
@@ -439,28 +436,15 @@ check_timeouts_0(#aiutp_pcb{time =Now,
     if (RTOTimeout >0) and
        (Now - RTOTimeout >= 0 ) ->
         check_timeouts_1(PCB0);
-       true ->
-        if (Brust == true) and
-           (CurWindowPackets > 0) ->
-            Iter = aiutp_buffer:head(OutBuf),
-            {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
-            {true,PCB0#aiutp_pcb{
-                    cur_window = CurWindow0,
-                    outbuf = OutBuf0}};
-           true -> {true,PCB0}
-        end
+       true -> {true,PCB0}
     end,
   if Continue == true ->
-      PCB1_1 =
+      PCBFlush =
         if PCB1#aiutp_pcb.cur_window_packets == 0 ->
             aiutp_net:flush_queue(PCB1);
            true -> PCB1
         end,
-      PCBBrust =
-        if Brust == true -> aiutp_net:send_ack(PCB1_1);
-           true -> PCB1_1
-        end,
-      {ISFull,PCB2} = aiutp_net:is_full(-1,PCBBrust),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCBFlush),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
