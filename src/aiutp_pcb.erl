@@ -291,7 +291,7 @@ selective_ack_packet(SAckedPackets,
                       rtt_hist = RTTHist0, rto = RTO0,retransmit_count = 0,
                       retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
-  [Packet|_] = SAckedPackets,
+  [El|_] = SAckedPackets,
   MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
   %% 计算出重发最大的序列号
   Packet = El#aiutp_packet_wrap.packet,
