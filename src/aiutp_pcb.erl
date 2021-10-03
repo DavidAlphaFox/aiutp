@@ -422,10 +422,13 @@ check_timeouts_0(#aiutp_pcb{state = State} = PCB)
        State == ?CS_IDLE;
        State == ?CS_RESET-> PCB;
 check_timeouts_0(#aiutp_pcb{time =Now,
+                            cur_window = CurWindow,
+                            cur_window_packets = CurWindowPackets,
                             state = State,
                             zerowindow_time = ZeroWindowTime,
                             max_window_user = MaxWindowUser,
                             rto_timeout = RTOTimeout,
+                            outbuf = OutBuf,
                             fin_sent = FinSent,brust = Brust} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
@@ -436,7 +439,16 @@ check_timeouts_0(#aiutp_pcb{time =Now,
     if (RTOTimeout >0) and
        (Now - RTOTimeout >= 0 ) ->
         check_timeouts_1(PCB0);
-       true -> {true,PCB0}
+       true ->
+        if (Brust == true) and
+           (CurWindowPackets > 0) ->
+            Iter = aiutp_buffer:head(OutBuf),
+            {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
+            {true,PCB0#aiutp_pcb{
+                    cur_window = CurWindow0,
+                    outbuf = OutBuf0}};
+           true -> {true,PCB0}
+        end
     end,
   if Continue == true ->
       PCB1_1 =
