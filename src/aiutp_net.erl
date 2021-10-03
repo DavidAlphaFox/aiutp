@@ -17,7 +17,7 @@ max_send(#aiutp_pcb{max_window = MaxWindow,
                     max_window_user = MaxWindowUser,
                     cur_window = CurWindow,
                     cur_window_packets = CurWindowPackets})->
-  MaxSend = ?MIN(MaxWindow, MaxWindowUser),
+  MaxSend = erlang:min(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?REORDER_BUFFER_MAX_SIZE - 1) -> 0;
      MaxSend > CurWindow ->
       Remain = MaxSend - CurWindow,
@@ -37,7 +37,7 @@ is_full(Bytes,#aiutp_pcb{time= Now,
               true -> Bytes
            end,
 
-  MaxSend = ?MIN(MaxWindow, MaxWindowUser),
+  MaxSend = erlang:min(MaxWindow, MaxWindowUser),
   if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
       {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
      (CurWindow + Bytes0) > MaxSend ->
@@ -71,7 +71,7 @@ build_sack(Size,Acc,Base,Iter,InBuf) ->
 
 build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
   Size = aiutp_buffer:size(InBuf),
-  Size0 = ?MIN(30,Size),
+  Size0 = erlang:min(30,Size),
   if Size0 == 0 -> undefined;
      true ->
       Acc = lists:foldl(fun(Idx,Map)-> maps:put(Idx,0,Map) end,#{},lists:seq(0,3)),

@@ -101,7 +101,7 @@ process(_,
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
-  CurrWindow = ?MAX(CurWindowPackets + ?ACK_NR_ALLOWED_WINDOW,?ACK_NR_ALLOWED_WINDOW),
+  CurrWindow = erlang:max(CurWindowPackets + ?ACK_NR_ALLOWED_WINDOW,?ACK_NR_ALLOWED_WINDOW),
   if (?WRAPPING_DIFF_16((SeqNR - 1), PktAckNR) < 0) or
      (?WRAPPING_DIFF_16(PktAckNR, (SeqNR -1 -CurrWindow)) < 0) -> PCB;
       % ignore packets whose ack_nr is invalid. This would imply a spoofed address
@@ -169,8 +169,8 @@ caculate_acked_bytes(Acc,Now,AckedPackets,SAckedPackets)->
   Fun = fun(WrapPacket,{Bytes,RTT})->
             TimeSent = WrapPacket#aiutp_packet_wrap.time_sent,
             RTT0 =
-              if TimeSent < Now -> ?MIN(RTT,(Now - TimeSent));
-                 true -> ?MIN(RTT,50000)
+              if TimeSent < Now -> erlang:min(RTT,(Now - TimeSent));
+                 true -> erlang:min(RTT,50000)
               end,
             {Bytes + WrapPacket#aiutp_packet_wrap.payload,RTT0}
         end,
@@ -184,7 +184,7 @@ cc_control(Now,AckedBytes,RTT,
                       last_maxed_out_window = LastMaxedOutWindow,
                       slow_start = SlowStart,ssthresh = SSThresh} = PCB)->
   OurHistValue = aiutp_delay:value(OurHist),
-  OurDelay = ?MIN(aiutp_util:bit32(RTT),OurHistValue),
+  OurDelay = erlang:min(aiutp_util:bit32(RTT),OurHistValue),
   Target =
     if TargetDelay =< 0 -> 100000;
        true -> TargetDelay
@@ -195,27 +195,27 @@ cc_control(Now,AckedBytes,RTT,
     end,
   OurDelay0 = OurDelay + Penalty,
   OffTarget = Target - OurDelay0,
-  Win0 = ?MIN(AckedBytes,MaxWindow),
-  Win1 = ?MAX(AckedBytes,MaxWindow),
+  Win0 = erlang:min(AckedBytes,MaxWindow),
+  Win1 = erlang:max(AckedBytes,MaxWindow),
   WindowFactor = Win0 / Win1,
   DelayFactor = OffTarget / Target,
   ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
   ScaledGain0 =
     if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
-       true -> ScaledGain
+       true -> erlang:trunc(ScaledGain)
     end,
-  LedbetCwnd = erlang:trunc(?MAX(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0))),
+  LedbetCwnd = erlang:max(?MIN_WINDOW_SIZE,(MaxWindow + ScaledGain0)),
   {SlowStart0,SSThresh0,MaxWindow0} =
     if SlowStart ->
-        SSCwnd = erlang:trunc(MaxWindow + WindowFactor* ?MIN_WINDOW_SIZE),
+        SSCwnd = MaxWindow + erlang:trunc(WindowFactor* ?MIN_WINDOW_SIZE),
         if SSCwnd > SSThresh-> {false,SSThresh,MaxWindow};
            OurDelay0  > Target * 0.9 -> {false,MaxWindow,MaxWindow};
-           true -> {SlowStart,SSThresh,?MAX(SSCwnd,LedbetCwnd)}
+           true -> {SlowStart,SSThresh,erlang:max(SSCwnd,LedbetCwnd)}
         end;
        true -> {SlowStart,SSThresh,LedbetCwnd}
     end,
   PCB#aiutp_pcb{slow_start = SlowStart0,ssthresh = SSThresh0,
-                target_delay = erlang:trunc(Target * 0.8 + 0.2 * OurDelay0),
+                target_delay = (Target * 3 + OurDelay0) div 4,
                 max_window = aiutp_util:clamp(MaxWindow0,?MIN_WINDOW_SIZE,?OUTGOING_BUFFER_MAX_SIZE*?PACKET_SIZE)}.
 
 ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
@@ -229,7 +229,7 @@ ack_packet(MicroNow,#aiutp_packet_wrap{transmissions = Transmissions,
           if RTT /= 0 -> aiutp_delay:add_sample(ERTT,Now,RTTHist);
              true -> RTTHist
           end,
-        {RTT0,RTTVar0,?MAX((RTT0 + RTTVar0 * 4),1000),RTTHist0};
+        {RTT0,RTTVar0,aiutp_util:clamp((RTT0 + RTTVar0 * 4),600,6000),RTTHist0};
        true -> {RTT,RTTVar,RTO,RTTHist}
   end,
   CurWindow0 =
@@ -439,8 +439,8 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      PCB1_1 = aiutp_net:send_ack(PCB1),
-      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1_1),
+      %PCB1_1 = aiutp_net:send_ack(PCB1),
+      {ISFull,PCB2} = aiutp_net:is_full(-1,PCB1),
       PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
@@ -514,10 +514,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
        (MaxWindow > ?PACKET_SIZE)->
         PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                       duplicate_ack = 0,
-                      max_window = erlang:trunc(?MAX((MaxWindow * 2 / 3), ?MIN_WINDOW_SIZE))};
+                      max_window = erlang:max((MaxWindow * 2 div 3), ?MIN_WINDOW_SIZE)};
        true -> PCB#aiutp_pcb{retransmit_timeout = NewTimeout,rto_timeout = Now + NewTimeout,
                              duplicate_ack = 0,
-                             max_window = erlang:trunc(?MAX((MaxWindow /2), ?MIN_WINDOW_SIZE)),
+                             max_window = erlang:max((MaxWindow div 2), ?MIN_WINDOW_SIZE),
                              slow_start = true}
     end,
   if CurWindowPackets > 0 ->
@@ -551,7 +551,7 @@ close(#aiutp_pcb{state = State } = PCB)
 close(#aiutp_pcb{state = State,rto = RTO} = PCB)
   when State == ?CS_SYN_SENT ->
   PCB#aiutp_pcb{
-    rto_timeout = ?MIN(RTO * 2, 60) + aiutp_util:millisecond(),
+    rto_timeout = erlang:min(RTO * 2, 60) + aiutp_util:millisecond(),
     state = ?CS_DESTROY};
 close(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->

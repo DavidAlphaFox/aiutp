@@ -38,9 +38,6 @@
 
 
 
--define(DIV_ROUND_UP(NUM,DENOM),((NUM + DENOM - 1) div DENOM)).
--define(MIN(F, S), case F < S of true -> F; false -> S end).
--define(MAX(F, S), case F < S of true -> S; false -> F end).
 %% WRAPPING_DIFF_16(1,65535) = 65532.
 %% 循环比较
 %% 如果L比R小，结果为负数

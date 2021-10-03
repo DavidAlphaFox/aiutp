@@ -25,7 +25,7 @@ recv(Packet,#aiutp_pcb{time=Now,inque = InQ,
        (EOFPkt == AckNR) ->
         PCB0 = PCB#aiutp_pcb {inque = InQ0,
                               got_fin_reached = true,
-                              rto_timeout = Now + ?MIN((RTO * 3),60),
+                              rto_timeout = Now + erlang:min((RTO * 3),60),
                               reorder_count = 0,
                               inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)},
         aiutp_net:send_ack(PCB0);

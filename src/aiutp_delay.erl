@@ -79,7 +79,7 @@ add_sample(Sample,CurMilli,
       DelayBaseIdx0 = (DelayBaseIdx + 1 ) rem ?DELAY_BASE_HISTORY,
       DelayBaseHist1 = array:set(DelayBaseIdx0,Sample,DelayBaseHist0),
       DelayBase1 =
-        array:foldl(fun(_,El,Acc) -> ?MIN(El,Acc) end,16#FFFFFFFF,DelayBaseHist1),
+        array:foldl(fun(_,El,Acc) -> erlang:min(El,Acc) end,16#FFFFFFFF,DelayBaseHist1),
       Delay#aiutp_delay{
         delay_base_time = CurMilli,
         delay_base_hist = DelayBaseHist1,
@@ -132,4 +132,4 @@ add_sample(Sample,CurMilli,
 
 delay_base(#aiutp_delay{delay_base = DelayBase}) -> DelayBase.
 value(#aiutp_delay{cur_delay_hist = Hist})->
-  array:foldl(fun(_,El,Acc) -> ?MIN(El,Acc) end, 16#FFFFFFFF, Hist).
+  array:foldl(fun(_,El,Acc) -> erlang:min(El,Acc) end, 16#FFFFFFFF, Hist).
