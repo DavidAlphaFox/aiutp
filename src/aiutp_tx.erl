@@ -102,6 +102,6 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
 
 
 
-in({Data,From},#aiutp_pcb{outque = OutQue} = PCB) ->
-  OutQue0 = aiutp_queue:push_back({?ST_DATA,Data,From}, OutQue),
+in(Data,#aiutp_pcb{outque = OutQue} = PCB) ->
+  OutQue0 = aiutp_queue:push_back({?ST_DATA,Data}, OutQue),
   aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue0}).
