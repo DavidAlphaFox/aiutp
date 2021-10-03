@@ -83,7 +83,8 @@ init([Port,Options]) ->
       true -> UDPOptions
     end,
   UTPOptions = proplists:get_value(utp, Options,[]),
-  case gen_udp:open(Port,UDPOptions0) of
+  case gen_udp:open(Port,[{sndbuf,6553600},
+                          {recbuf,6553500} | UDPOptions0]) of
     {ok,Socket} ->
       ok = inet:setopts(Socket, [{active,once},
                                  {high_msgq_watermark,6553500}]),

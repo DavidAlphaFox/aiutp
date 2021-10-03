@@ -328,5 +328,15 @@ flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
 schedule_ack(#aiutp_pcb{ida = false} = PCB) -> PCB;
 schedule_ack(PCB) -> send_ack(PCB#aiutp_pcb{ida = false}).
 
+do_send(Socket,Remote,Count,Content)->
+  case gen_udp:send(Socket,Remote,Content) of
+    ok -> ok ;
+    Error ->
+      if Count == 0 -> error(Error);
+         true ->
+          timer:sleep(150),
+          do_send(Socket,Remote,Count -1,Content)
+      end
+  end.
 do_send({Socket,Remote},Content) ->
-  ok = gen_udp:send(Socket,Remote, Content).
+  do_send(Socket,Remote,3,Content).
