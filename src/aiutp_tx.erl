@@ -1,7 +1,8 @@
 -module(aiutp_tx).
 -include("aiutp.hrl").
 -export([pick_acked/2,
-         in/2]).
+         in/2,
+         map_sack_to_seq/2]).
 
 
 %% 迎来计算我们需要从outbuf中移除多少数据包

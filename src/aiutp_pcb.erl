@@ -110,7 +110,9 @@ process(_,
   MaxSeqNR = aiutp_util:bit16(SeqNR - 1),
   MinSeqNR = aiutp_util:bit16(SeqNR -1 -CurrWindow),
   if (?WRAPPING_DIFF_16(MaxSeqNR,PktAckNR) < 0) or
-     (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) -> PCB;
+     (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) ->
+      io:format("ConnId: ~p drop packet in process PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
+      PCB;
       % ignore packets whose ack_nr is invalid. This would imply a spoofed address
       % or a malicious attempt to attach the uTP implementation.
       % acking a packet that hasn't been sent yet!
@@ -119,8 +121,8 @@ process(_,
      true -> process_packet(Packet,PCB)
   end.
 
-process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
-               #aiutp_pcb{state = State} = PCB)->
+process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR,ack_nr = PktAckNR} = Packet,
+               #aiutp_pcb{state = State,conn_id_recv = ConnId} = PCB)->
   Now = aiutp_util:millisecond(),
   PCB0 =
     if State == ?CS_SYN_SENT ->
@@ -138,6 +140,7 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
 % current. Subtracring 1 makes 0 mean "this is the next
 % expected packet".
   if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
+      io:format("ConnId: ~p drop packet in process_packet PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
       if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
          PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
