@@ -72,7 +72,7 @@ build_sack(Size,Acc,_,Iter,_)
 
 build_sack(Size,Acc,Base,Iter,InBuf) ->
   Packet = aiutp_buffer:data(Iter,InBuf),
-  Index = Packet#aiutp_packet.seq_nr - Base,
+  Index = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - Base),
   Pos = Index bsr 3,
   if Pos > 3 -> build_sack(0,Acc,Base,Iter,InBuf);
      true ->
