@@ -278,6 +278,7 @@ dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= P
           if ConnsSize >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
              true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}})
           end;
+         (PktType == ?ST_RESET) -> ok;
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
     {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
