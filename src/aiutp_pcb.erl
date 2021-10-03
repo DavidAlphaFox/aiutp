@@ -414,7 +414,8 @@ process_packet_4(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
   aiutp_rx:in(Packet, PCB0).
 
 check_timeouts(#aiutp_pcb{state = State} = PCB)
-  when State /= ?CS_DESTROY ->
+  when State /= ?CS_DESTROY;
+       State /= ?CS_RESET->
   Now = aiutp_util:millisecond(),
   PCB0 = aiutp_net:flush_packets(PCB),
   check_timeouts_0(PCB0#aiutp_pcb{time = Now});
