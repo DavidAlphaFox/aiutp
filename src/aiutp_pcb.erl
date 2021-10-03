@@ -62,9 +62,11 @@ process({Packet,TS},PCB)->
   aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,
                                  PCB#aiutp_pcb{recv_time = TS})).
 
-process(_,_,#aiutp_pcb{state = State} = PCB)
+process(_,Packet,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
-       (State == ?CS_RESET) -> PCB;
+       (State == ?CS_RESET) ->
+  io:format("REST and we hat packet:seq_nr:~p ack_nr: ~p ~n",[Packet#aiutp_packet.seq_nr,Packet#aiutp_packet.ack_nr]),
+  PCB;
 process(?ST_RESET,
         #aiutp_packet{conn_id = ConnId},
         #aiutp_pcb{conn_id_send = ConnIdSend,
@@ -95,15 +97,17 @@ process(?ST_SYN,
 
 %% 处理所有非RESET和非SYN
 process(_,
-        #aiutp_packet{ack_nr = PktAckNR}=Packet,
-        #aiutp_pcb{seq_nr = SeqNR,cur_window_packets = CurWindowPackets} = PCB)->
-
+        #aiutp_packet{seq_nr = PktSeqNR,ack_nr = PktAckNR}=Packet,
+        #aiutp_pcb{seq_nr = SeqNR,ack_nr = AckNR,cur_window_packets = CurWindowPackets} = PCB)->
+  io:format("PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[PktSeqNR,PktAckNR,SeqNR,AckNR]),
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
   CurrWindow = erlang:max(CurWindowPackets + ?ACK_NR_ALLOWED_WINDOW,?ACK_NR_ALLOWED_WINDOW),
-  if (?WRAPPING_DIFF_16((SeqNR - 1), PktAckNR) < 0) or
-     (?WRAPPING_DIFF_16(PktAckNR, (SeqNR -1 -CurrWindow)) < 0) -> PCB;
+  MaxSeqNR = aiutp_util:bit16(SeqNR - 1),
+  MinSeqNR = aiutp_util:bit16(SeqNR -1 -CurrWindow),
+  if (?WRAPPING_DIFF_16(MaxSeqNR,PktAckNR) < 0) or
+     (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) -> PCB;
       % ignore packets whose ack_nr is invalid. This would imply a spoofed address
       % or a malicious attempt to attach the uTP implementation.
       % acking a packet that hasn't been sent yet!
@@ -124,13 +128,14 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
        true -> PCB#aiutp_pcb{last_got_packet = Now,time = Now}
     end,
   %% 处理超出reorder范围的Packet
-  DiffSeqNR =  aiutp_util:bit16(PktSeqNR - PCB0#aiutp_pcb.ack_nr -1),
+  NextPktAckNR = aiutp_util:bit16(PCB0#aiutp_pcb.ack_nr + 1),
+  SeqDistance =  aiutp_util:bit16(PktSeqNR - NextPktAckNR),
 % seqnr is the number of packets past the expected
 % packet this is. ack_nr is the last acked, seq_nr is the
 % current. Subtracring 1 makes 0 mean "this is the next
 % expected packet".
-  if DiffSeqNR >= ?REORDER_BUFFER_MAX_SIZE ->
-      if (DiffSeqNR >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
+  if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
+      if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
          PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
       end;
