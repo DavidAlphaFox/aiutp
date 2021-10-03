@@ -16,33 +16,47 @@ window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 max_send(#aiutp_pcb{max_window = MaxWindow,
                     max_window_user = MaxWindowUser,
                     cur_window = CurWindow,
-                    cur_window_packets = CurWindowPackets})->
-  MaxSend = erlang:min(MaxWindow, MaxWindowUser),
-  if CurWindowPackets >= (?REORDER_BUFFER_MAX_SIZE - 1) -> 0;
-     MaxSend > CurWindow ->
-      Remain = MaxSend - CurWindow,
-      if Remain < ?PACKET_SIZE -> ?PACKET_SIZE;
-         true -> Remain
+                    cur_window_packets = CurWindowPackets,
+                    brust = Brust})->
+  if Brust == true ->
+      if CurWindowPackets >= (?REORDER_BUFFER_MAX_SIZE - 1) -> 0;
+         true -> ?PACKET_SIZE * (?REORDER_BUFFER_MAX_SIZE - CurWindowPackets)
       end;
-     true -> 0
+     true ->
+      MaxSend = erlang:min(MaxWindow, MaxWindowUser),
+      if CurWindowPackets >= (?REORDER_BUFFER_MAX_SIZE - 1) -> 0;
+         MaxSend > CurWindow ->
+          Remain = MaxSend - CurWindow,
+          if Remain < ?PACKET_SIZE -> ?PACKET_SIZE;
+             true -> Remain
+          end;
+         true -> 0
+      end
   end.
 
 is_full(Bytes,#aiutp_pcb{time= Now,
                          max_window = MaxWindow,
                          max_window_user = MaxWindowUser,
                          cur_window = CurWindow,
-                         cur_window_packets = CurWindowPackets } = PCB)->
+                         cur_window_packets = CurWindowPackets,
+                         brust = Brust} = PCB)->
   Bytes0 = if Bytes > ?PACKET_SIZE -> ?PACKET_SIZE;
               Bytes < 0 -> ?PACKET_SIZE;
               true -> Bytes
            end,
-
-  MaxSend = erlang:min(MaxWindow, MaxWindowUser),
-  if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
-      {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
-     (CurWindow + Bytes0) > MaxSend ->
-      {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
-     true -> {false,PCB}
+  if Brust == true ->
+      if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
+          {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
+         true -> {false,PCB}
+      end;
+     true ->
+      MaxSend = erlang:min(MaxWindow, MaxWindowUser),
+      if CurWindowPackets >= (?OUTGOING_BUFFER_MAX_SIZE - 1) ->
+          {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
+         (CurWindow + Bytes0) > MaxSend ->
+          {true,PCB#aiutp_pcb{last_maxed_out_window = Now}};
+         true -> {false,PCB}
+      end
   end.
 
 

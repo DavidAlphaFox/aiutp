@@ -166,6 +166,7 @@
                    % per 5 seconds
                    ssthresh = ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE,
                    slow_start = true,
+                   brust = true,
                    inbuf,
                    outbuf,
                    inque,
