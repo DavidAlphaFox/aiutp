@@ -73,6 +73,7 @@ process(?ST_RESET,
                    conn_id_recv = ConnIdRecv,
                    close_requested = CloseRequested} = PCB)->
   if (ConnIdSend == ConnId) or (ConnIdRecv == ConnId) ->
+      io:format("recv reset ConnId:~p  ConnIdSend:~p ConnIdRecv:~p ~n ",[ConnId,ConnIdSend,ConnIdRecv]),
       if CloseRequested == true -> PCB#aiutp_pcb{state = ?CS_DESTROY};
          true -> PCB#aiutp_pcb{state = ?CS_RESET}
       end;
@@ -98,8 +99,10 @@ process(?ST_SYN,
 %% 处理所有非RESET和非SYN
 process(_,
         #aiutp_packet{seq_nr = PktSeqNR,ack_nr = PktAckNR}=Packet,
-        #aiutp_pcb{seq_nr = SeqNR,ack_nr = AckNR,cur_window_packets = CurWindowPackets} = PCB)->
-  io:format("PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[PktSeqNR,PktAckNR,SeqNR,AckNR]),
+        #aiutp_pcb{seq_nr = SeqNR,ack_nr = AckNR,
+                   conn_id_recv = ConnId,
+                   cur_window_packets = CurWindowPackets} = PCB)->
+  io:format("ConnID: ~p PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[ConnId,PktSeqNR,PktAckNR,SeqNR,AckNR]),
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
