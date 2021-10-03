@@ -65,7 +65,7 @@ process({Packet,TS},PCB)->
 process(_,Packet,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
        (State == ?CS_RESET) ->
-  io:format("REST and we hat packet:seq_nr:~p ack_nr: ~p ~n",[Packet#aiutp_packet.seq_nr,Packet#aiutp_packet.ack_nr]),
+  %io:format("REST and we hat packet:seq_nr:~p ack_nr: ~p ~n",[Packet#aiutp_packet.seq_nr,Packet#aiutp_packet.ack_nr]),
   PCB;
 process(?ST_RESET,
         #aiutp_packet{conn_id = ConnId},
@@ -73,7 +73,7 @@ process(?ST_RESET,
                    conn_id_recv = ConnIdRecv,
                    close_requested = CloseRequested} = PCB)->
   if (ConnIdSend == ConnId) or (ConnIdRecv == ConnId) ->
-      io:format("recv reset ConnId:~p  ConnIdSend:~p ConnIdRecv:~p ~n ",[ConnId,ConnIdSend,ConnIdRecv]),
+   %   io:format("recv reset ConnId:~p  ConnIdSend:~p ConnIdRecv:~p ~n ",[ConnId,ConnIdSend,ConnIdRecv]),
       if CloseRequested == true -> PCB#aiutp_pcb{state = ?CS_DESTROY};
          true -> PCB#aiutp_pcb{state = ?CS_RESET}
       end;
@@ -102,7 +102,7 @@ process(_,
         #aiutp_pcb{seq_nr = SeqNR,ack_nr = AckNR,
                    conn_id_recv = ConnId,
                    cur_window_packets = CurWindowPackets} = PCB)->
-  io:format("ConnID: ~p PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[ConnId,PktSeqNR,PktAckNR,SeqNR,AckNR]),
+  %io:format("ConnID: ~p PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[ConnId,PktSeqNR,PktAckNR,SeqNR,AckNR]),
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
@@ -111,7 +111,7 @@ process(_,
   MinSeqNR = aiutp_util:bit16(SeqNR -1 -CurrWindow),
   if (?WRAPPING_DIFF_16(MaxSeqNR,PktAckNR) < 0) or
      (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) ->
-      io:format("ConnId: ~p drop packet in process PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
+   %   io:format("ConnId: ~p drop packet in process PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
       PCB;
       % ignore packets whose ack_nr is invalid. This would imply a spoofed address
       % or a malicious attempt to attach the uTP implementation.
@@ -140,7 +140,7 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR,ack_nr = PktAckNR}
 % current. Subtracring 1 makes 0 mean "this is the next
 % expected packet".
   if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
-      io:format("ConnId: ~p drop packet in process_packet PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
+      %io:format("ConnId: ~p drop packet in process_packet PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
       if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
          PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
@@ -291,21 +291,16 @@ selective_ack_packet(SAckedPackets,
                       rtt_hist = RTTHist0, rto = RTO0,retransmit_count = 0,
                       retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
-  SSAckeds = erlang:length(SAckedPackets),
+  [Packet|_] = SAckedPackets,
   MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
   %% 计算出重发最大的序列号
-  MaxSeq =
-    if SSAckeds > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-        El = lists:nth(?DUPLICATE_ACKS_BEFORE_RESEND, SAckedPackets),
-        Packet = El#aiutp_packet_wrap.packet,
-        aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1);
-       true -> MinSeq
-    end,
-  if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > 0 ->
+  Packet = El#aiutp_packet_wrap.packet,
+  MaxSeq = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1),
+  if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > ?DUPLICATE_ACKS_BEFORE_RESEND ->
       io:format("selective ack packet: ~p ~p fast: ~p~n",[MinSeq,MaxSeq,Fast]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
-                            duplicate_ack = SSAckeds},
+                            duplicate_ack = erlang:length(SAckedPackets)},
       if Sent > 0 ->
           io:format("should od decay~n"),
           PCB2;
@@ -409,7 +404,7 @@ process_packet_3(#aiutp_packet{type = PktType} = Packet,
        (State == ?CS_CONNECTED_FULL) -> PCB0#aiutp_pcb{state = ?CS_CONNECTED};
        true -> PCB0
     end,
-  if PktType == ?ST_STATE-> aiutp_net:flush_queue(PCB1);
+  if PktType == ?ST_STATE-> PCB1;
      (State /= ?CS_CONNECTED)  and (State /= ?CS_CONNECTED_FULL)-> PCB1;
      true -> process_packet_4(Packet, PCB1)
 end.
@@ -500,11 +495,13 @@ check_timeouts_1(#aiutp_pcb{time = Now,
                             last_got_packet = LastGotPacket,
                             close_requested = CloseRequested} = PCB)
   when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 1.5) ->
+  io:format("CLOSED due to MAX Keepalive: ~p~n",[LastGotPacket]),
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
 check_timeouts_1(#aiutp_pcb{rtt = RTT,close_requested = CloseRequested} = PCB)
   when (RTT > 6000) ->
+  io:format("CLOSED due to MAX RTT: ~p~n",[RTT]),
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
@@ -513,6 +510,7 @@ check_timeouts_1(#aiutp_pcb{state = State,
                             retransmit_count = RetransmitCount} = PCB)
   when (RetransmitCount >= 4);
        ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
+  io:format("CLOSED due to MAX retransmit: ~p~n",[RetransmitCount]),
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
