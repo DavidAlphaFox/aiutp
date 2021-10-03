@@ -49,10 +49,11 @@ pick_acked_packet(MaxSeq,Iter,Prev,Acc,OutBuf)->
   WrapPacket = aiutp_buffer:data(Iter,OutBuf),
   Next = aiutp_buffer:next(Iter,OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
-  if ?WRAPPING_DIFF_16(MaxSeq,Packet#aiutp_packet.seq_nr) >= 0  ->
+  if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr,MaxSeq) > 0  ->
+      {Acc,OutBuf};
+     true ->
       OutBuf0 = aiutp_buffer:delete(Iter,Prev,OutBuf),
-      pick_acked_packet(MaxSeq,Next,Prev,[WrapPacket|Acc],OutBuf0);
-     true -> {Acc,OutBuf}
+      pick_acked_packet(MaxSeq,Next,Prev,[WrapPacket|Acc],OutBuf0)
   end.
 
 pick_sacked_packet(_,_,-1,_,Acc,OutBuf)-> {Acc,OutBuf};
@@ -60,7 +61,7 @@ pick_sacked_packet(SAcks,MaxSeq,Iter,Prev,Acc,OutBuf)->
   Next = aiutp_buffer:next(Iter, OutBuf),
   WrapPacket = aiutp_buffer:data(Iter, OutBuf),
   Packet = WrapPacket#aiutp_packet_wrap.packet,
-  if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MaxSeq) >= 0 -> {Acc,OutBuf};
+  if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MaxSeq) > 0 -> {Acc,OutBuf};
      true ->
       Member = lists:member(Packet#aiutp_packet.seq_nr, SAcks),
       if Member->
