@@ -5,7 +5,7 @@
          state/1,
          process/2,
          check_timeouts/1,
-         write/3,
+         write/2,
          close/1,
          read/1,
          connect/2,
@@ -537,16 +537,15 @@ check_timeouts_1(#aiutp_pcb{time=Now,
       {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};
      true -> {true,PCB0}
   end.
-write(_,From,#aiutp_pcb{state = State} = PCB)
+write(_,#aiutp_pcb{state = State} = PCB)
   when (State /= ?CS_CONNECTED),
        (State /= ?CS_CONNECTED_FULL) ->
-  gen_server:reply(From, {error,not_connected}),
-  PCB;
-write(_,From,#aiutp_pcb{fin_sent = FinSent} = PCB)
+  {{error,not_connected},PCB};
+
+write(_,#aiutp_pcb{fin_sent = FinSent} = PCB)
   when FinSent == true ->
-  gen_server:reply(From, {error,closed}),
-  PCB;
-write(Data,From,PCB) -> aiutp_tx:in({Data,From},PCB#aiutp_pcb{time = aiutp_util:millisecond()}).
+  {{error,closed},PCB};
+write(Data,PCB) -> aiutp_tx:in(Data,PCB#aiutp_pcb{time = aiutp_util:millisecond()}).
 
 close(#aiutp_pcb{state = State } = PCB)
   when State == ?CS_UNINITIALIZED;

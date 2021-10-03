@@ -93,7 +93,7 @@ build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
       build_sack(Size0,Acc,AckNR + 2,Head,InBuf)
   end.
 send_fin(#aiutp_pcb{outque = OutQue} = PCB)->
-  OutQue0 = aiutp_queue:push_back({?ST_FIN,<<>>,undefined}, OutQue),
+  OutQue0 = aiutp_queue:push_back({?ST_FIN,<<>>}, OutQue),
   flush_queue(PCB#aiutp_pcb{outque = OutQue0}).
 send_ack(#aiutp_pcb{time = Now,
                     socket = Socket,
@@ -243,21 +243,16 @@ send_new_packet(Type,Data,Payload,
                 cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = SeqNR + 1,
                 last_rcv_win = LastRcvWin}.
 
-finish_write(undefined) -> ok;
-finish_write(From) -> gen_server:reply(From, ok).
-
-send_data_in_queue(_,<<>>,From,_,PCB) ->
-  finish_write(From),
+send_data_in_queue(_,<<>>,_,PCB) ->
   PCB;
-send_data_in_queue(Type,Bin,From,Size,#aiutp_pcb{outque = OutQue} = PCB)
+send_data_in_queue(Type,Bin,Size,#aiutp_pcb{outque = OutQue} = PCB)
   when Size =< 0 ->
   if erlang:byte_size(Bin) > 0 ->
-      PCB#aiutp_pcb{outque = aiutp_queue:push_front({Type,Bin,From}, OutQue)};
+      PCB#aiutp_pcb{outque = aiutp_queue:push_front({Type,Bin}, OutQue)};
      true ->
-      finish_write(From),
       PCB
   end;
-send_data_in_queue(Type,Bin,From,Size,PCB)->
+send_data_in_queue(Type,Bin,Size,PCB)->
   BinSize = erlang:size(Bin),
   Size0 =
     if Size > ?PACKET_SIZE -> ?PACKET_SIZE;
@@ -265,22 +260,21 @@ send_data_in_queue(Type,Bin,From,Size,PCB)->
     end,
   if BinSize =< Size0 ->
       PCB0 = send_new_packet(Type, Bin, BinSize, PCB),
-      finish_write(From),
       send_data_in_queue(PCB0);
      true ->
       %io:format("send ~p bytes from queue~n",[Size0]),
       <<Data:Size0/binary,Rest/binary>> = Bin,
       PCB0 = send_new_packet(Type, Data, Size0, PCB),
-      send_data_in_queue(Type,Rest,From,Size - Size0, PCB0)
+      send_data_in_queue(Type,Rest,Size - Size0, PCB0)
   end.
 send_data_in_queue(#aiutp_pcb{outque = OutQue} = PCB)->
   case aiutp_queue:empty(OutQue) of
     true -> PCB;
     _->
-      {Type,Bin,From}  = aiutp_queue:front(OutQue),
+      {Type,Bin}  = aiutp_queue:front(OutQue),
       OutQue0 = aiutp_queue:pop_front(OutQue),
       MaxSend = max_send(PCB),
-      send_data_in_queue(Type,Bin,From,MaxSend,PCB#aiutp_pcb{outque = OutQue0})
+      send_data_in_queue(Type,Bin,MaxSend,PCB#aiutp_pcb{outque = OutQue0})
   end.
 flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
                        cur_window_packets = CurWindowPackets,
