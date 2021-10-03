@@ -23,11 +23,11 @@ recv(Packet,#aiutp_pcb{time=Now,inque = InQ,
     if (GotFinReached == false) and
        (GotFin == true) and
        (EOFPkt == AckNR) ->
-        PCB0 = PCB#aiutp_pcb {inque = InQ0,
-                              got_fin_reached = true,
-                              rto_timeout = Now + erlang:min((RTO * 3),60),
-                              reorder_count = 0,
-                              inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)},
+        PCB0 = PCB#aiutp_pcb{inque = InQ0,
+                             got_fin_reached = true,
+                             rto_timeout = Now + erlang:min((RTO * 3),60),
+                             reorder_count = 0,
+                             inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)},
         aiutp_net:send_ack(PCB0);
        true -> PCB#aiutp_pcb{inque = InQ0}
     end,

@@ -32,7 +32,7 @@ map_sack_to_seq(<<Bits/big-unsigned-integer,Rest/bits>>,Index,Base,Acc) ->
       Acc1 = lists:foldl(
                fun(I,Acc0) ->
                    Hint = Bits band (1 bsl I),
-                   if Hint > 0 -> [(Base + Offset + I)|Acc0];
+                   if Hint > 0 -> [aiutp_util:bit16(Base + Offset + I)|Acc0];
                       true -> Acc0
                    end
                end,Acc,lists:seq(0, 7)),
@@ -90,7 +90,8 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
         Iter = aiutp_buffer:head(OutBuf),
         pick_acked_packet(PktAckNR,Iter,-1,[],OutBuf)
     end,
-  SAcks = map_sack_to_seq(Exts,PktAckNR + 2),
+  SAcks = map_sack_to_seq(Exts,aiutp_util:bit16(PktAckNR + 2)),
+  io:format("Selective ACKS ~p~n",[SAcks]),
   {SAckedPacket,OutBuf1} =
     if Acks == CurWindowPackets -> {[],OutBuf0};
        true -> pick_sacked_packet(SAcks,OutBuf0)
