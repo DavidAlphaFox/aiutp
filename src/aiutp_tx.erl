@@ -64,10 +64,10 @@ pick_sacked_packet(SAcks,MaxSeq,Iter,Prev,Acc,OutBuf)->
   if ?WRAPPING_DIFF_16(Packet#aiutp_packet.seq_nr, MaxSeq) > 0 -> {Acc,OutBuf};
      true ->
       Member = lists:member(Packet#aiutp_packet.seq_nr, SAcks),
-      if Member->
+      if Member ->
           OutBuf0 = aiutp_buffer:delete(Iter,Prev,OutBuf),
           pick_sacked_packet(SAcks,MaxSeq,Next,Prev,[WrapPacket|Acc],OutBuf0);
-         true -> {Acc,OutBuf}
+         true -> pick_sacked_packet(SAcks,MaxSeq,Next,Iter,Acc,OutBuf)
       end
   end.
 
@@ -90,11 +90,11 @@ pick_acked(#aiutp_packet{ack_nr = PktAckNR,extension = Exts },
         Iter = aiutp_buffer:head(OutBuf),
         pick_acked_packet(PktAckNR,Iter,-1,[],OutBuf)
     end,
-  SAcks = map_sack_to_seq(Exts,aiutp_util:bit16(PktAckNR + 2)),
-  io:format("Selective ACKS ~p~n",[SAcks]),
   {SAckedPacket,OutBuf1} =
     if Acks == CurWindowPackets -> {[],OutBuf0};
-       true -> pick_sacked_packet(SAcks,OutBuf0)
+       true ->
+        SAcks = map_sack_to_seq(Exts,aiutp_util:bit16(PktAckNR + 2)),
+        pick_sacked_packet(SAcks,OutBuf0)
     end,
   {AckedPacket,SAckedPacket,
    PCB#aiutp_pcb{
