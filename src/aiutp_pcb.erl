@@ -62,10 +62,9 @@ process({Packet,TS},PCB)->
   aiutp_net:schedule_ack(process(Packet#aiutp_packet.type,Packet,
                                  PCB#aiutp_pcb{recv_time = TS})).
 
-process(_,Packet,#aiutp_pcb{state = State} = PCB)
+process(_,_,#aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
        (State == ?CS_RESET) ->
-  %io:format("REST and we hat packet:seq_nr:~p ack_nr: ~p ~n",[Packet#aiutp_packet.seq_nr,Packet#aiutp_packet.ack_nr]),
   PCB;
 process(?ST_RESET,
         #aiutp_packet{conn_id = ConnId},
@@ -73,7 +72,7 @@ process(?ST_RESET,
                    conn_id_recv = ConnIdRecv,
                    close_requested = CloseRequested} = PCB)->
   if (ConnIdSend == ConnId) or (ConnIdRecv == ConnId) ->
-   %   io:format("recv reset ConnId:~p  ConnIdSend:~p ConnIdRecv:~p ~n ",[ConnId,ConnIdSend,ConnIdRecv]),
+
       if CloseRequested == true -> PCB#aiutp_pcb{state = ?CS_DESTROY};
          true -> PCB#aiutp_pcb{state = ?CS_RESET}
       end;
@@ -98,11 +97,8 @@ process(?ST_SYN,
 
 %% 处理所有非RESET和非SYN
 process(_,
-        #aiutp_packet{seq_nr = PktSeqNR,ack_nr = PktAckNR}=Packet,
-        #aiutp_pcb{seq_nr = SeqNR,ack_nr = AckNR,
-                   conn_id_recv = ConnId,
-                   cur_window_packets = CurWindowPackets} = PCB)->
-  %io:format("ConnID: ~p PktSeqNR: ~p PktAckNR:~p SeqNR:~p AckNR:~p~n",[ConnId,PktSeqNR,PktAckNR,SeqNR,AckNR]),
+        #aiutp_packet{ack_nr = PktAckNR}=Packet,
+        #aiutp_pcb{seq_nr = SeqNR,cur_window_packets = CurWindowPackets} = PCB)->
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
@@ -121,8 +117,8 @@ process(_,
      true -> process_packet(Packet,PCB)
   end.
 
-process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR,ack_nr = PktAckNR} = Packet,
-               #aiutp_pcb{state = State,conn_id_recv = ConnId} = PCB)->
+process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
+               #aiutp_pcb{state = State} = PCB)->
   Now = aiutp_util:millisecond(),
   PCB0 =
     if State == ?CS_SYN_SENT ->
@@ -278,9 +274,7 @@ selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB
 selective_ack_packet([],_,PCB)-> PCB;
 selective_ack_packet(SAckedPackets,
                      MicroNow,
-                     #aiutp_pcb{seq_nr = SeqNR,
-                                cur_window_packets = CurWindowPackets,
-                                fast_resend_seq_nr = Fast} =  PCB)->
+                     #aiutp_pcb{fast_resend_seq_nr = MinSeq} =  PCB)->
   Now0 = aiutp_util:millisecond(),
   {_,CurWindow0,RTT0,RTO0,RTTVar0,RTTHist0} =
     lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
@@ -292,19 +286,15 @@ selective_ack_packet(SAckedPackets,
                       retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
   [El|_] = SAckedPackets,
-  MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
+  %MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
   %% 计算出重发最大的序列号
   Packet = El#aiutp_packet_wrap.packet,
   MaxSeq = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1),
   if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-      io:format("selective ack packet: ~p ~p fast: ~p~n",[MinSeq,MaxSeq,Fast]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
                             duplicate_ack = erlang:length(SAckedPackets)},
-      if Sent > 0 ->
-          io:format("should od decay~n"),
-          PCB2;
-          %maybe_decay_win(PCB2);
+      if Sent > 0 -> maybe_decay_win(PCB2);
          true ->  PCB2
       end;
      true -> PCB0
