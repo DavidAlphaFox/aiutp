@@ -267,7 +267,9 @@ selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB
 selective_ack_packet([],_,PCB)-> PCB;
 selective_ack_packet(SAckedPackets,
                      MicroNow,
-                     #aiutp_pcb{fast_resend_seq_nr = MinSeq} = PCB)->
+                     #aiutp_pcb{seq_nr = SeqNR,
+                                cur_window_packets = CurWindowPackets,
+                                fast_resend_seq_nr = Fast} =  PCB)->
   Now0 = aiutp_util:millisecond(),
   {_,CurWindow0,RTT0,RTO0,RTTVar0,RTTHist0} =
     lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
@@ -279,6 +281,7 @@ selective_ack_packet(SAckedPackets,
                       retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
   SSAckeds = erlang:length(SAckedPackets),
+  MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
   %% 计算出重发最大的序列号
   MaxSeq =
     if SSAckeds > ?DUPLICATE_ACKS_BEFORE_RESEND ->
@@ -288,7 +291,7 @@ selective_ack_packet(SAckedPackets,
        true -> MinSeq
     end,
   if ?WRAPPING_DIFF_16(MaxSeq,MinSeq) > 0 ->
-      %io:format("selective ack packet: ~p ~p~n",[MinSeq,MaxSeq]),
+      io:format("selective ack packet: ~p ~p fast: ~p~n",[MinSeq,MaxSeq,Fast]),
       {Sent,LastSeq,PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
       PCB2 = PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
                             duplicate_ack = SSAckeds},
