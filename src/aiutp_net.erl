@@ -243,6 +243,27 @@ send_new_packet(Type,Data,Payload,
                 cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = SeqNR + 1,
                 last_rcv_win = LastRcvWin}.
 
+
+fill_with_next(RequiredSize,Type,#aiutp_pcb{outque = OutQue} = PCB)->
+  case aiutp_queue:empty(OutQue) of
+    true -> undefined;
+    false ->
+      fill_with_next(RequiredSize,Type,<<>>, PCB)
+  end.
+fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
+  case aiutp_queue:front(OutQue) of
+    {Type,Bin} ->
+      BinSize = erlang:byte_size(Bin),
+      if BinSize > RequiredSize ->
+          <<More:RequiredSize/binary,Rest/binary>> = Bin,
+          {<<Acc/binary,More/binary>>,Rest,PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)}};
+         true ->
+          fill_with_next(RequiredSize - BinSize, Type,<<Acc/binary,Bin/binary>>,
+                         PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)})
+      end;
+    _ -> {Acc,<<>>,PCB}
+  end.
+
 send_data_in_queue(_,<<>>,_,PCB) ->
   PCB;
 send_data_in_queue(Type,Bin,Size,#aiutp_pcb{outque = OutQue} = PCB)
@@ -258,9 +279,15 @@ send_data_in_queue(Type,Bin,Size,PCB)->
     if Size > ?PACKET_SIZE -> ?PACKET_SIZE;
        true -> Size
     end,
-  if BinSize =< Size0 ->
-      PCB0 = send_new_packet(Type, Bin, BinSize, PCB),
-      send_data_in_queue(PCB0);
+  if BinSize < Size0 ->
+      case fill_with_next(Size0 - BinSize, Type,PCB) of
+        undefined -> send_new_packet(Type, Bin, BinSize, PCB);
+
+        {MoreData,NewBin,PCB1} ->
+          Data = <<Bin/binary,MoreData/binary>>,
+          PCB2 = send_new_packet(Type, Data, Size0, PCB1),
+          send_data_in_queue(Type,NewBin,Size - Size0, PCB2)
+        end;
      true ->
       %io:format("send ~p bytes from queue~n",[Size0]),
       <<Data:Size0/binary,Rest/binary>> = Bin,
