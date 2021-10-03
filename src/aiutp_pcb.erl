@@ -440,27 +440,26 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> {true,PCB0}
     end,
   if Continue == true ->
-      PCBBrust =
-        if Brust == true -> aiutp_net:send_ack(PCB1);
+      PCBKeepAlive =
+        if (FinSent == false) and
+           ((State == ?CS_CONNECTED) or (State == ?CS_CONNECTED_FULL)) and
+           (Now - PCB1#aiutp_pcb.last_sent_packet >= ?KEEPALIVE_INTERVAL) ->
+            aiutp_net:send_keep_alive(PCB1);
+           (FinSent == false) and
+           (Brust == true) and  (Now - PCB1#aiutp_pcb.last_sent_packet >= 5000)->
+            aiutp_net:send_keep_alive(PCB1);
            true -> PCB1
-        end,
+      end,
       PCBFlush =
         if PCB1#aiutp_pcb.cur_window_packets == 0 ->
-            aiutp_net:flush_queue(PCBBrust);
-           true -> PCBBrust
+            aiutp_net:flush_queue(PCBKeepAlive);
+           true -> PCBKeepAlive
         end,
       {ISFull,PCB2} = aiutp_net:is_full(-1,PCBFlush),
-      PCB3 =
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
            true -> PCB2
-        end,
-      if (FinSent == false) and
-         ((State == ?CS_CONNECTED) or (State == ?CS_CONNECTED_FULL)) and
-         (Now - PCB3#aiutp_pcb.last_sent_packet >= ?KEEPALIVE_INTERVAL) ->
-          aiutp_net:send_keep_alive(PCB3);
-         true -> PCB3
-      end;
+        end;
      true -> PCB1
   end.
 
@@ -489,7 +488,7 @@ check_timeouts_1(#aiutp_pcb{state = State} = PCB)
 check_timeouts_1(#aiutp_pcb{time = Now,
                             last_got_packet = LastGotPacket,
                             close_requested = CloseRequested} = PCB)
-  when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 1.5) ->
+  when (LastGotPacket > 0),(Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 2) ->
   io:format("CLOSED due to MAX Keepalive: ~p~n",[LastGotPacket]),
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}

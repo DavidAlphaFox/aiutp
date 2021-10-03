@@ -226,7 +226,7 @@ send_new_packet(Type,Data,Payload,
                            conn_id_send = ConnId,ack_nr = AckNR,seq_nr = SeqNR,
                            cur_window_packets = CurWindowPackets,
                            max_window = MaxWindow,inbuf = InBuf,
-                           reply_micro = ReplyMicro} = PCB)->
+                           reply_micro = ReplyMicro, time = Now} = PCB)->
   MicroNow = aiutp_util:microsecond(),
   Packet =  aiutp_packet:data(SeqNR, AckNR),
   LastRcvWin = window_size(MaxWindow,InBuf),
@@ -241,7 +241,7 @@ send_new_packet(Type,Data,Payload,
   do_send(Socket,Content1),
   PCB#aiutp_pcb{cur_window_packets = CurWindowPackets + 1,
                 cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = aiutp_util:bit16(SeqNR + 1),
-                last_rcv_win = LastRcvWin}.
+                last_rcv_win = LastRcvWin,last_sent_packet = Now}.
 
 
 fill_with_next(RequiredSize,Type,#aiutp_pcb{outque = OutQue} = PCB)->
