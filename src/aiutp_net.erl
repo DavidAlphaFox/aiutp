@@ -247,21 +247,25 @@ send_new_packet(Type,Data,Payload,
 fill_with_next(RequiredSize,Type,#aiutp_pcb{outque = OutQue} = PCB)->
   case aiutp_queue:empty(OutQue) of
     true -> undefined;
-    false ->
-      fill_with_next(RequiredSize,Type,<<>>, PCB)
+    false -> fill_with_next(RequiredSize,Type,<<>>, PCB)
   end.
 fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
-  case aiutp_queue:front(OutQue) of
-    {Type,Bin} ->
-      BinSize = erlang:byte_size(Bin),
-      if BinSize > RequiredSize ->
-          <<More:RequiredSize/binary,Rest/binary>> = Bin,
-          {<<Acc/binary,More/binary>>,Rest,PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)}};
-         true ->
-          fill_with_next(RequiredSize - BinSize, Type,<<Acc/binary,Bin/binary>>,
-                         PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)})
-      end;
-    _ -> {Acc,<<>>,PCB}
+  case {aiutp_queue:empty(OutQue),erlang:byte_size(Acc)} of
+    {true,0} -> undefined;
+    {true,_} -> {Acc,<<>>,PCB};
+    _ ->
+      case aiutp_queue:front(OutQue) of
+        {Type,Bin} ->
+          BinSize = erlang:byte_size(Bin),
+          if BinSize > RequiredSize ->
+              <<More:RequiredSize/binary,Rest/binary>> = Bin,
+              {<<Acc/binary,More/binary>>,Rest,PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)}};
+             true ->
+              fill_with_next(RequiredSize - BinSize, Type,<<Acc/binary,Bin/binary>>,
+                             PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)})
+          end;
+        _ -> {Acc,<<>>,PCB}
+      end
   end.
 
 send_data_in_queue(_,<<>>,_,PCB) ->
