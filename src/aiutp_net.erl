@@ -240,7 +240,7 @@ send_new_packet(Type,Data,Payload,
   OutBuf0 = aiutp_buffer:append(WrapPacket0,OutBuf),
   do_send(Socket,Content1),
   PCB#aiutp_pcb{cur_window_packets = CurWindowPackets + 1,
-                cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = SeqNR + 1,
+                cur_window = CurWindow + SendBytes,outbuf = OutBuf0,seq_nr = aiutp_util:bit16(SeqNR + 1),
                 last_rcv_win = LastRcvWin}.
 
 
