@@ -457,7 +457,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
            true -> PCB1
       end,
       PCBFlush =
-        if PCB1#aiutp_pcb.cur_window_packets == 0 ->
+        if PCBKeepAlive#aiutp_pcb.cur_window_packets == 0 ->
             aiutp_net:flush_queue(PCBKeepAlive);
            true -> PCBKeepAlive
         end,

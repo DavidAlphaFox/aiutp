@@ -123,7 +123,8 @@ send_ack(#aiutp_pcb{time = Now,
 
 
 send_keep_alive(#aiutp_pcb{ack_nr = AckNR} = PCB)->
-  PCB0 = send_ack(PCB#aiutp_pcb{ack_nr = AckNR -1}),
+  PCB0 = send_ack(PCB#aiutp_pcb{ack_nr = aiutp_util:bit16(AckNR -1)}),
+  io:format("send keep alive: ~p~n",[AckNR]),
   PCB0#aiutp_pcb{ack_nr = AckNR}.
 
 update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
