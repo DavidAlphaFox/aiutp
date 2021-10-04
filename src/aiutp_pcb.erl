@@ -431,6 +431,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
                             max_window_user = MaxWindowUser,
                             rto_timeout = RTOTimeout,
                             fin_sent = FinSent,
+                            cur_window_packets = CurWindowPackets,
                             brust = Brust} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
