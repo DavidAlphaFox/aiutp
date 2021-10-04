@@ -534,7 +534,10 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             brust = Brust,
                             retransmit_count = RetransmitCount} = PCB) ->
 
-  NewTimeout = RetransmitTimeout * 2,
+  NewTimeout =
+    if Brust == true -> RetransmitTimeout * 1.5;
+       true -> RetransmitTimeout * 2
+    end,
 
   PCB0 =
     if (CurWindowPackets == 0) and
