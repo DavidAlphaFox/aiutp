@@ -121,6 +121,10 @@ process(_,
 process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR,conn_id = ConnId,ack_nr = PktAckNR} = Packet,
                #aiutp_pcb{state = State} = PCB)->
   Now = aiutp_util:millisecond(),
+  if PktType == ?ST_DATA ->
+      io:fomart("ConnId: ~p recv packet PktSeqNR: ~p PktAckNR: ~p~n",[ConnId,PktSeqNR,PktAckNR]);
+     true -> ok
+  end,
   PCB0 =
     if State == ?CS_SYN_SENT ->
         % if this is a syn-ack, initialize our ack_nr
