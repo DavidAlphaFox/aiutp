@@ -444,12 +444,16 @@ check_timeouts_0(#aiutp_pcb{time =Now,
     if (Brust == false) and
        (RTOTimeout >0) and
        (Now - RTOTimeout >= 0) ->
-        check_timeouts_1(PCB0);
+        check_timeouts_2(check_timeouts_1(PCB0));
        (Brust == true) and
        (CurWindowPackets > 0) ->
-        Iter = aiutp_buffer:head(OutBuf),
-        {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
-        {true,aiutp_net:flush_packets(PCB#aiutp_pcb{cur_window = CurWindow0,outbuf = OutBuf0})};
+        case check_timeouts_1(PCB0) of
+          {true,_} ->
+            Iter = aiutp_buffer:head(OutBuf),
+            {CurWindow0,OutBuf0} = mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf),
+            {true,aiutp_net:flush_packets(PCB#aiutp_pcb{cur_window = CurWindow0,outbuf = OutBuf0})};
+          {false,_} = W-> W
+        end;
        true -> {true,PCB0}
     end,
   if Continue == true ->
@@ -522,26 +526,17 @@ check_timeouts_1(#aiutp_pcb{state = State,
   if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
      true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
   end;
-check_timeouts_1(#aiutp_pcb{state = State,
-                            close_requested = CloseRequested,
-                            retransmit_count = RetransmitCount,
-                            brust = true} = PCB)
-  when (RetransmitCount >= 40);
-       ((State == ?CS_SYN_SENT) and RetransmitCount > 10) ->
-  io:format("CLOSED due to MAX retransmit: ~p~n",[RetransmitCount]),
-  if CloseRequested == true -> {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
-     true ->  {false,PCB#aiutp_pcb{state = ?CS_RESET}}
-  end;
+check_timeouts_1(PCB)->{true,PCB}.
 
-check_timeouts_1(#aiutp_pcb{time=Now,
+check_timeouts_2({false,_} = W) -> W;
+check_timeouts_2({true,#aiutp_pcb{time=Now,
                             retransmit_timeout = RetransmitTimeout,
                             cur_window_packets = CurWindowPackets,
                             cur_window = CurWindow,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
-                            retransmit_count = RetransmitCount} = PCB) ->
-
+                            retransmit_count = RetransmitCount} = PCB}) ->
   NewTimeout = RetransmitTimeout * 1.5,
   PCB0 =
     if (CurWindowPackets == 0) and
