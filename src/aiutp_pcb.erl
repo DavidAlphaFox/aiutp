@@ -531,6 +531,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
+                            brust = Brust,
                             retransmit_count = RetransmitCount} = PCB) ->
 
   NewTimeout = RetransmitTimeout * 2,
@@ -556,7 +557,11 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                fast_timeout = true,
                timeout_seq_nr = SeqNR
               },
-      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};
+      PCB2 =
+        if Brust == true -> aiutp_net:flush_packets(PCB);
+           true -> aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)
+        end,
+      {true,PCB2};
      true -> {true,PCB0}
   end.
 write(_,#aiutp_pcb{state = State} = PCB)
