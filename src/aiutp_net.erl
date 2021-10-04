@@ -246,13 +246,13 @@ send_new_packet(Type,Data,Payload,
 
 fill_with_next(RequiredSize,Type,#aiutp_pcb{outque = OutQue} = PCB)->
   case aiutp_queue:empty(OutQue) of
-    true -> undefined;
-    false -> fill_with_next(RequiredSize,Type,<<>>, PCB)
+    true -> done;
+    false ->  fill_with_next(RequiredSize,Type,<<>>, PCB)
   end.
 fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
   case {aiutp_queue:empty(OutQue),erlang:byte_size(Acc)} of
-    {true,0} -> undefined;
-    {true,_} -> {Acc,<<>>,PCB};
+    {true,0} -> done;
+    {true,_} -> {done,Acc,PCB};
     _ ->
       case aiutp_queue:front(OutQue) of
         {Type,Bin} ->
@@ -264,18 +264,19 @@ fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
               fill_with_next(RequiredSize - BinSize, Type,<<Acc/binary,Bin/binary>>,
                              PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)})
           end;
-        _ -> {Acc,<<>>,PCB}
+        _ ->
+          if erlang:byte_size(Acc) > 0 -> {next,Acc,PCB};
+             true -> {next,PCB}
+          end
       end
   end.
 
-send_data_in_queue(_,<<>>,_,PCB) ->
-  PCB;
+send_data_in_queue(_,<<>>,_,PCB) -> send_data_in_queue(PCB);
 send_data_in_queue(Type,Bin,Size,#aiutp_pcb{outque = OutQue} = PCB)
   when Size =< 0 ->
   if erlang:byte_size(Bin) > 0 ->
       PCB#aiutp_pcb{outque = aiutp_queue:push_front({Type,Bin}, OutQue)};
-     true ->
-      PCB
+     true ->PCB
   end;
 send_data_in_queue(Type,Bin,Size,PCB)->
   BinSize = erlang:size(Bin),
@@ -283,10 +284,19 @@ send_data_in_queue(Type,Bin,Size,PCB)->
     if Size > ?PACKET_SIZE -> ?PACKET_SIZE;
        true -> Size
     end,
-  if BinSize < Size0 ->
+  if BinSize =< Size0 ->
       case fill_with_next(Size0 - BinSize, Type,PCB) of
-        undefined -> send_new_packet(Type, Bin, BinSize, PCB);
-
+        done -> send_new_packet(Type, Bin, BinSize, PCB);
+        {done,MoreData,PCB1} ->
+          Data = <<Bin/binary,MoreData/binary>>,
+          send_new_packet(Type, Data, erlang:byte_size(Data), PCB1);
+        {next,PCB1}->
+          PCB2 = send_new_packet(Type, Bin, BinSize, PCB1),
+          send_data_in_queue(PCB2);
+        {next,MoreData,PCB1} ->
+          Data = <<Bin/binary,MoreData/binary>>,
+          PCB2 = send_new_packet(Type, Data, erlang:byte_size(Data), PCB1),
+          send_data_in_queue(PCB2);
         {MoreData,NewBin,PCB1} ->
           Data = <<Bin/binary,MoreData/binary>>,
           PCB2 = send_new_packet(Type, Data, Size0, PCB1),
@@ -305,6 +315,7 @@ send_data_in_queue(#aiutp_pcb{outque = OutQue} = PCB)->
       {Type,Bin}  = aiutp_queue:front(OutQue),
       OutQue0 = aiutp_queue:pop_front(OutQue),
       MaxSend = max_send(PCB),
+      io:format("max can send ~p~n",[MaxSend]),
       send_data_in_queue(Type,Bin,MaxSend,PCB#aiutp_pcb{outque = OutQue0})
   end.
 flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
@@ -321,7 +332,7 @@ flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
         end,
       {ISFull,PCB1} = is_full(-1,PCB0),
       if ISFull == true -> PCB1;
-         true -> send_data_in_queue(PCB0)
+         true -> send_data_in_queue(PCB1)
       end
   end.
 
