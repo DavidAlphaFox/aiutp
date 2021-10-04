@@ -5,6 +5,7 @@
 in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
    #aiutp_pcb{ack_nr = AckNR} = PCB)->
   NextAckNR  = aiutp_util:bit16(AckNR + 1),
+  io:format("recv: ~p expect: ~p~n",[PktSeqNR,NextAckNR]),
   PCB1 =
     if PktSeqNR == NextAckNR  -> recv(Packet,PCB#aiutp_pcb{ack_nr = PktSeqNR});
        true->  recv_reorder(aiutp_util:bit16(PktSeqNR - NextAckNR),Packet,PCB)
