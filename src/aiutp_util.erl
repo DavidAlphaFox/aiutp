@@ -1,10 +1,10 @@
--module(ai_utp_util).
+-module(aiutp_util).
 
 -export([bit16/1,bit32/1,getaddr/1]).
 -export([bit16_random/0,bit32_random/0]).
 -export([microsecond/0,millisecond/0]).
 -export([clamp/3,wrapping_compare_less/3]).
--export([send/4,send/5]).
+
 
 -spec bit16(integer()) -> integer().
 bit16(N) when is_integer(N) ->
@@ -19,8 +19,8 @@ getaddr(S) when is_list(S) ->
     CAddr;
 getaddr({_, _, _, _} = Addr) ->
     Addr.
-microsecond()-> os:system_time(microsecond).
-millisecond()-> os:system_time(millisecond).
+microsecond()-> erlang:system_time(microsecond).
+millisecond()-> erlang:system_time(millisecond).
 
 
 bit16_random() ->
@@ -37,17 +37,3 @@ wrapping_compare_less(L,R,Mask)->
   Down = (L - R) band Mask,
   Up = (R - L) band Mask,
   Up < Down.
-
-send(Socket,Remote,Packet,TS,TSDiff)->
-  Payload =  ai_utp_protocol:encode(Packet,TS,TSDiff),
-  case gen_udp:send(Socket,Remote,Payload) of
-    ok -> {ok,TS};
-    Error -> Error
-  end.
-send(Socket,Remote,Packet,TSDiff)->
-  TS = microsecond(),
-  Payload =  ai_utp_protocol:encode(Packet,TS,TSDiff),
-  case gen_udp:send(Socket,Remote,Payload) of
-    ok -> {ok,TS};
-    Error -> Error
-  end.

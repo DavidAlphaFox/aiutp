@@ -6,23 +6,25 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_socket).
+-module(aiutp_socket).
 
 -behaviour(gen_server).
--include("ai_utp.hrl").
+-include("aiutp.hrl").
 %% API
 -export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/2]).
--export([incoming/4,connect/3,listen/2,accept/1]).
+-export([connect/3,listen/2,accept/1,
+         add_conn/3,free_conn/3]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {
-                socket,
-                dispatch,
+-record(state, {socket,
+                conns,
+                monitors,
+                max_conns = 100, %% 可以增加接口后期修改
                 acceptor = closed,
                 options}).
 
@@ -30,25 +32,21 @@
 %%% API
 %%%===================================================================
 connect(UTPSocket,Address,Port)->
-  {ok,{Socket,UTPOptions}} = gen_server:call(UTPSocket,socket),
-  {ok,Worker} = ai_utp_worker_sup:new(UTPSocket, Socket,UTPOptions),
-  Address0 = ai_utp_util:getaddr(Address),
+  {ok,{Socket,_}} = gen_server:call(UTPSocket,socket),
+  {ok,Worker} = aiutp_worker_sup:new(UTPSocket, Socket),
+  Address0 = aiutp_util:getaddr(Address),
   Caller = self(),
-  case ai_utp_worker:connect(Worker,Caller,Address0, Port) of
+  case aiutp_worker:connect(Worker,Caller,Address0, Port) of
     ok -> {ok,{utp,UTPSocket,Worker}};
     Error -> Error
   end.
 
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
-incoming(Socket,Remote,#utp_packet{type = Type} = Packet,Timing)->
-  case Type of
-    st_reset -> ok;
-    st_syn ->
-      gen_server:cast(Socket,{syn,Remote,Packet,Timing});
-    _ ->
-      gen_server:cast(Socket,{reset,Remote,Packet})
-  end.
+add_conn(UTPSocket,Remote,ConnId) ->
+  Worker = self(),
+  gen_server:call(UTPSocket,{add_conn,Remote,ConnId,Worker},infinity).
+free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnId},infinity).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -78,13 +76,22 @@ start_link(Port,Options) ->
         ignore.
 init([Port,Options]) ->
   process_flag(trap_exit, true),
-  Parent = self(),
-  {UDPOptions,UTPOptions} = split_options(Options),
-  case gen_udp:open(Port,UDPOptions) of
+  UDPOptions = proplists:get_value(udp, Options,[]),
+  UDPOptions0 =
+    case proplists:is_defined(binary,UDPOptions) of
+      false -> [binary|UDPOptions];
+      true -> UDPOptions
+    end,
+  UTPOptions = proplists:get_value(utp, Options,[]),
+  case gen_udp:open(Port,[{sndbuf,6553600},
+                          {recbuf,6553500} | UDPOptions0]) of
     {ok,Socket} ->
-      {ok,Dispatch} = ai_utp_dispatch:start_link(Parent),
-      ok = inet:setopts(Socket, [{active,once}]),
-      {ok, #state{socket = Socket,dispatch = Dispatch,options = UTPOptions}};
+      ok = inet:setopts(Socket, [{active,once},
+                                 {high_msgq_watermark,6553500}]),
+      {ok, #state{socket = Socket,
+                  conns = maps:new(),
+                  monitors = maps:new(),
+                  options = UTPOptions}};
     {error,Reason} -> {stop,Reason}
   end.
 
@@ -103,20 +110,26 @@ init([Port,Options]) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
         {stop, Reason :: term(), NewState :: term()}.
+handle_call({add_conn,Remote,ConnId,Worker},_From,State)->
+  {Result,State0} = add_conn_inner(Remote,ConnId,Worker,State),
+  {reply,Result,State0};
+handle_call({free_conn,Remote,ConnId},_From,State) ->
+  {reply,ok,free_conn_inner(Remote,ConnId,State)};
+
 handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
   {reply,{ok,{Socket,Options}},State};
 handle_call({listen,Options},_From,
             #state{socket = Socket,acceptor = closed,
                    options = UTPOptions} = State)->
   Parent = self(),
-  {ok,Acceptor} = ai_utp_acceptor:start_link(Parent,Socket,Options,UTPOptions),
+  {ok,Acceptor} = aiutp_acceptor:start_link(Parent,Socket,Options,UTPOptions),
   {reply,ok,State#state{acceptor = Acceptor}};
 handle_call({listen,_},_From,State) ->
-  {reply,{error,is_listen_socket},State};
+  {reply,{error,listening},State};
 handle_call(accept,_From,#state{acceptor = closed} = State)->
-  {reply,{error,not_listen_socket},State};
+  {reply,{error,not_listening},State};
 handle_call(accept,From,#state{acceptor = Acceptor} = State)->
-  ai_utp_acceptor:accept(Acceptor,From),
+  aiutp_acceptor:accept(Acceptor,From),
   {noreply,State};
 handle_call(_Request, _From, State) ->
   Reply = ok,
@@ -133,22 +146,6 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
-handle_cast({reset,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo,
-                                      extension = Ext}},
-             #state{socket = Socket} = State)->
-  reset(Socket, Remote, ConnID, SeqNo,
-        proplists:get_value(ext_bits,Ext)),
-  {noreply,State};
-
-handle_cast({syn,Remote,#utp_packet{conn_id = ConnID,seq_no = SeqNo,
-                                    extension = Ext}},
-            #state{socket = Socket,acceptor = closed} = State)->
-  reset(Socket,Remote,ConnID,SeqNo,
-        proplists:get_value(ext_bits,Ext)),
-  {noreply,State};
-handle_cast({syn,_,_,_} = Req,#state{acceptor = Acceptor} = State)->
-  ai_utp_acceptor:incoming(Acceptor,Req),
-  {noreply,State};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -163,18 +160,32 @@ handle_cast(_Request, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
-handle_info({'EXIT',Dispatch,Reason},
-            #state{dispatch = Dispatch} = State)->
-  {stop,Reason,State};
-handle_info({'EXIT',Acceptor,Reason},
-            #state{acceptor = Acceptor} = State) ->
-  {stop,Reason,State};
-handle_info({udp, Socket, IP, InPortNo, Packet},
-            #state{socket = Socket,dispatch = Dispatch} = State)->
-  Now = ai_utp_util:microsecond(),
-  ai_utp_dispatch:dispatch(Dispatch,{IP,InPortNo}, Packet,Now),
+
+handle_info({udp, Socket, IP, Port, Payload},
+            #state{socket = Socket} = State)->
+  case aiutp_packet:decode(Payload) of
+    {ok,Packet} -> dispatch({IP,Port},Packet, State);
+    _ -> ok
+    %{error,_Reason}->
+      %error_logger:info_report([decode_error,Reason]),
+     % ok
+  end,
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
+handle_info({'DOWN',MRef,process,_Worker,_Reason},
+            #state{monitors = Monitors,conns = Conns} = State)->
+  case maps:get(MRef,Monitors,undefined) of
+    undefined -> {noreply,State};
+    Key -> {noreply,
+            State#state{monitors = maps:remove(MRef, Monitors),
+                        conns = maps:remove(Key,Conns)}}
+  end;
+handle_info({'EXIT',Acceptor,Reason},
+            #state{acceptor = Acceptor,socket = Socket} = State) ->
+  if Socket /= undefined -> gen_udp:close(Socket);
+     true -> ok
+  end,
+  {stop,Reason,State#state{socket = undefined}};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -223,46 +234,52 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-reset(Socket,Remote,ConnID,AckNo,Exts)->
-  Packet = ai_utp_protocol:make_reset_packet(ConnID, AckNo),
-  ai_utp_util:send(Socket, Remote,
-                   Packet#utp_packet{extension = [{ext_bits,Exts}]}, 0).
+reset_conn(Socket,Remote,ConnID,AckNR)->
+  Packet = aiutp_packet:reset(ConnID, AckNR),
+  Bin = aiutp_packet:encode(Packet),
+  gen_udp:send(Socket,Remote,Bin).
 
-split_options(Options)->
-  {UDPOptions,UTPOptions} =
-    split_options(Options,{[],[]}),
-  UDPOptions0 =
-    case proplists:is_defined(binary,UDPOptions) of
-      false -> [binary|UDPOptions];
-      true -> UDPOptions
-    end,
-  UTPSndBuf = proplists:get_value(utp_sndbuf,UTPOptions,?OPT_SEND_BUF) * 4,
-  UTPRecvBuf = proplists:get_value(utp_recvbuf,UTPOptions,?OPT_RECV_BUF) * 4,
-  UDPSndBuf = proplists:get_value(sndbuf,UDPOptions0,UTPSndBuf),
-  UDPRecBuf = proplists:get_value(recbuf,UDPOptions0,UTPRecvBuf),
-  UDPSndBuf0 =
-    if UDPSndBuf < UTPSndBuf -> UTPSndBuf;
-       true -> UDPSndBuf
-    end,
-  UDPRecBuf0 =
-    if UDPRecBuf < UTPRecvBuf -> UTPRecvBuf;
-       true -> UDPRecBuf
-    end,
-  UDPRecBuf = proplists:get_value(recbuf,UDPOptions0,UTPRecvBuf),
-  UDPOptions1 = [{sndbuf,UDPSndBuf0}| proplists:delete(sndbuf, UDPOptions0)],
-  UDPOptions2 = [{recbuf,UDPRecBuf0}| proplists:delete(recbuf, UDPOptions1)],
-  {UDPOptions2,UTPOptions}.
+add_conn_inner(Remote,ConnId,Worker,
+         #state{conns = Conns,monitors = Monitors,max_conns = MaxConns} = State)->
+  Key = {Remote,ConnId},
+  case maps:is_key(Key, Conns) of
+    true -> {exists,State};
+    false ->
+      ConnsSize = maps:size(Conns),
+      if ConnsSize > MaxConns -> {overflow,State};
+         true ->
+          Monitor = erlang:monitor(process, Worker),
+          Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
+          Monitors0 = maps:put(Monitor,Key,Monitors),
+          {ok,State#state{conns = Conns0,monitors = Monitors0}}
+      end
+  end.
+free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
+  Key = {Remote,ConnId},
+  case maps:is_key(Key,Conns) of
+    false -> State;
+    true ->
+      {_,Monitor} = maps:get(Key,Conns),
+      erlang:demonitor(Monitor,[flush]),
+      State#state{
+        monitors = maps:remove(Monitor, Monitors),
+        conns = maps:remove(Key,Conns)}
+  end.
 
-
-split_options([],Acc)-> Acc;
-split_options([{Key,_} = Opt|T],{UDPOptions,UTPOptions})->
-  Member = lists:member(Key, ?UTP_OPTIONS),
-  Acc =
-    if Member == true ->
-        {UDPOptions,[Opt|UTPOptions]};
-       true ->
-        {[Opt|UDPOptions],UTPOptions}
-    end,
-  split_options(T,Acc);
-split_options([Opt|T],{UDPOptions,UTPOptions})->
-  split_options(T,{[Opt|UDPOptions],UTPOptions}).
+dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
+         #state{socket = Socket,conns = Conns,acceptor = Acceptor,max_conns = MaxConns})->
+  Key = {Remote,ConnId},
+  RecvTime = aiutp_util:microsecond(),
+  case maps:get(Key,Conns,undefined) of
+    undefined ->
+      if (PktType == ?ST_SYN) and
+         (Acceptor /= closed) ->
+          ConnsSize = maps:size(Conns),
+          if ConnsSize >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
+             true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}})
+          end;
+         (PktType == ?ST_RESET) -> ok;
+         true -> reset_conn(Socket, Remote, ConnId, AckNR)
+      end;
+    {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
+  end.

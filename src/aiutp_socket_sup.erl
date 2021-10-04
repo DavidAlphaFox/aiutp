@@ -6,7 +6,7 @@
 %%% @end
 %%% Created :  6 May 2020 by David Gao <david.alpha.fox@gmail.com>
 %%%-------------------------------------------------------------------
--module(ai_utp_socket_sup).
+-module(aiutp_socket_sup).
 
 -behaviour(supervisor).
 
@@ -63,12 +63,12 @@ init([]) ->
   SupFlags = #{strategy => simple_one_for_one,
                intensity => 1,
                period => 5},
-  Socket = #{id => ai_utp_socket,
-             start => {ai_utp_socket,start_link,[]},
+  Socket = #{id => aiutp_socket,
+             start => {aiutp_socket,start_link,[]},
              restart => temporary,
              shutdown => 5000,
              type => worker,
-             modules => [ai_utp_socket]
+             modules => [aiutp_socket]
             },
   {ok, {SupFlags, [Socket]}}.
 
