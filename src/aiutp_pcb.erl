@@ -438,9 +438,13 @@ check_timeouts_0(#aiutp_pcb{time =Now,
        true -> PCB
     end,
   {Continue,PCB1} =
-    if (RTOTimeout >0) and
-       (Now - RTOTimeout >= 0 ) ->
+    if (Brust == false) and
+      (RTOTimeout >0) and
+       (Now - RTOTimeout >= 0) ->
         check_timeouts_1(PCB0);
+       (Brust == true) and
+       (CurWindowPackets > 0) ->
+        {true,aiutp_net:flush_packets(PCB)};
        true -> {true,PCB0}
     end,
   if Continue == true ->
@@ -460,10 +464,10 @@ check_timeouts_0(#aiutp_pcb{time =Now,
            true -> PCBKeepAlive
         end,
       {ISFull,PCB2} = aiutp_net:is_full(-1,PCBFlush),
-        if (State == ?CS_CONNECTED_FULL) and
-           (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
-           true -> PCB2
-        end;
+      if (State == ?CS_CONNECTED_FULL) and
+         (ISFull == false) ->PCB2#aiutp_pcb{state = ?CS_CONNECTED};
+         true -> PCB2
+      end;
      true -> PCB1
   end.
 
@@ -531,14 +535,9 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                             max_window = MaxWindow,
                             outbuf = OutBuf,
                             seq_nr = SeqNR,
-                            brust = Brust,
                             retransmit_count = RetransmitCount} = PCB) ->
 
-  NewTimeout =
-    if Brust == true -> RetransmitTimeout * 1.5;
-       true -> RetransmitTimeout * 2
-    end,
-
+  NewTimeout = RetransmitTimeout * 1.5,
   PCB0 =
     if (CurWindowPackets == 0) and
        (MaxWindow > ?PACKET_SIZE)->
@@ -560,11 +559,7 @@ check_timeouts_1(#aiutp_pcb{time=Now,
                fast_timeout = true,
                timeout_seq_nr = SeqNR
               },
-      PCB2 =
-        if Brust == true -> aiutp_net:flush_packets(PCB);
-           true -> aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)
-        end,
-      {true,PCB2};
+      {true,aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};
      true -> {true,PCB0}
   end.
 write(_,#aiutp_pcb{state = State} = PCB)
