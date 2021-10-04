@@ -15,7 +15,7 @@
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE,1024).
 -define(BRUST_OUTGOING_BUFFER_SIZE,1023).
--define(PACKET_SIZE,1453).
+-define(PACKET_SIZE,800).
 -define(MIN_WINDOW_SIZE,2906).
 %-define(MIN_WINDOW_SIZE,7265).
 % this is the minimum max_window value. It can never drop below this
