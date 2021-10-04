@@ -423,8 +423,7 @@ active_read(#state{parent = Parent,
         Control ! {utp_data,UTPSocket,Payload},
         {false,PCB1}
     end,
-  PCB3 = aiutp_pcb:flush(PCB2),
-  State#state{ active = Active,pcb = PCB3};
+  State#state{ active = Active,pcb = PCB2};
 active_read(#state{pcb = PCB} = State)->
   PCB1 = aiutp_pcb:flush(PCB),
   State#state{pcb = PCB1}.
