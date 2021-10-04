@@ -97,15 +97,16 @@ process(?ST_SYN,
 
 %% 处理所有非RESET和非SYN
 process(_,
-        #aiutp_packet{ack_nr = PktAckNR}=Packet,
-        #aiutp_pcb{seq_nr = SeqNR,cur_window_packets = CurWindowPackets} = PCB)->
+        #aiutp_packet{type = PktType,ack_nr = PktAckNR}=Packet,
+        #aiutp_pcb{state = State,seq_nr = SeqNR,cur_window_packets = CurWindowPackets} = PCB)->
       % window packets size is used to calculate a minimum
       % permissible range for received acks. connections with acks falling
       % out of this range are dropped
   CurrWindow = erlang:max(CurWindowPackets + ?ACK_NR_ALLOWED_WINDOW,?ACK_NR_ALLOWED_WINDOW),
   MaxSeqNR = aiutp_util:bit16(SeqNR - 1),
   MinSeqNR = aiutp_util:bit16(SeqNR -1 -CurrWindow),
-  if (?WRAPPING_DIFF_16(MaxSeqNR,PktAckNR) < 0) or
+  if ((PktType /= ?ST_SYN) or (State /= ?CS_SYN_RECV)) and
+     (?WRAPPING_DIFF_16(MaxSeqNR,PktAckNR) < 0) or
      (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) ->
    %   io:format("ConnId: ~p drop packet in process PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
       PCB;
@@ -138,7 +139,7 @@ process_packet(#aiutp_packet{type = PktType,seq_nr = PktSeqNR} = Packet,
   if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
       %io:format("ConnId: ~p drop packet in process_packet PktSeqNR: ~p PktAckNR: ~p ~n ",[ConnId,PktSeqNR,PktAckNR]),
       if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
-         PktType /= ?ST_STATE -> PCB0#aiutp_pcb{ida = true};
+         (PktType /= ?ST_STATE) -> PCB0#aiutp_pcb{ida = true};
          true -> PCB0
       end;
      true ->  process_packet_1(Packet,PCB0)
@@ -152,8 +153,13 @@ process_packet_1(#aiutp_packet{type = PktType,ack_nr = PktAckNR } = Packet,
   when CurWindowPackets > 0->
   Seq = aiutp_util:bit16(SeqNR -CurWindowPackets -1),
   if (PktAckNR == Seq) and
-     PktType == ?ST_STATE ->
-      process_packet_2(Packet,PCB#aiutp_pcb{duplicate_ack = DuplicateAck + 1});
+     (PktType == ?ST_STATE) ->
+      if DuplicateAck + 1 == ?DUPLICATE_ACKS_BEFORE_RESEND ->
+          PCB0 = aiutp_net:send_packet(aiutp_buffer:head(PCB#aiutp_pcb.outbuf),
+                                       PCB#aiutp_pcb{duplicate_ack = 0}),
+          process_packet_2(Packet,PCB0);
+         true -> process_packet_2(Packet,PCB#aiutp_pcb{duplicate_ack = DuplicateAck + 1})
+      end;
      true ->
       process_packet_2(Packet,PCB#aiutp_pcb{duplicate_ack = 0})
   end;
@@ -274,7 +280,7 @@ selective_ack_packet(_,_,#aiutp_pcb{cur_window_packets = CurWindowPackets} = PCB
 selective_ack_packet([],_,PCB)-> PCB;
 selective_ack_packet(SAckedPackets,
                      MicroNow,
-                     #aiutp_pcb{fast_resend_seq_nr = MinSeq} =  PCB)->
+                     #aiutp_pcb{seq_nr = SeqNR,cur_window_packets = CurWindowPackets} =  PCB)->
   Now0 = aiutp_util:millisecond(),
   {_,CurWindow0,RTT0,RTO0,RTTVar0,RTTHist0} =
     lists:foldr(fun(I,AccPCB) -> ack_packet(MicroNow,I,AccPCB) end,
@@ -286,7 +292,7 @@ selective_ack_packet(SAckedPackets,
                       retransmit_timeout = RTO0, rto_timeout = RTO0 + Now0},
 
   [El|_] = SAckedPackets,
-  %MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
+  MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
   %% 计算出重发最大的序列号
   Packet = El#aiutp_packet_wrap.packet,
   MaxSeq = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1),
