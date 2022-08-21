@@ -31,7 +31,7 @@
 -define(KEEPALIVE_INTERVAL,29000). %ms
 % 29 seconds determined from measuring many home NAT devices
 -define(UTP_HEADER_SIZE,20).
--define(TIMEOUT_CHECK_INTERVAL,150).
+-define(TIMEOUT_CHECK_INTERVAL,100).
 -define(SEQ_NR_MASK,16#FFFF).
 -define(ACK_NR_MASK,16#FFFF).
 -define(TIMESTAMP_MASK, 16#FFFFFFFF).
@@ -107,7 +107,7 @@
                    read_shutdown = false, %  Reading is disabled
                    close_requested = false, % User called utp_close()
                    fast_timeout = false, % Timeout procedure
-                   max_window_user = 255 * ?PACKET_SIZE, % max receive window for other end, in bytes
+                   max_window_user = ?REORDER_BUFFER_SIZE * ?PACKET_SIZE, % max receive window for other end, in bytes
                    last_rwin_decay = 0, % TickCount when we last decayed window (wraps)
                    eof_pkt = 0,
                    % the sequence number of the FIN packet. This field is only set

@@ -78,13 +78,19 @@ add_sample(Sample,CurMilli,
   if CurMilli - DelayBaseTime > 60000 ->
       DelayBaseIdx0 = (DelayBaseIdx + 1 ) rem ?DELAY_BASE_HISTORY,
       DelayBaseHist1 = array:set(DelayBaseIdx0,Sample,DelayBaseHist0),
-      DelayBase1 =
-        array:foldl(fun(_,El,Acc) -> erlang:min(El,Acc) end,16#FFFFFFFF,DelayBaseHist1),
+      DelayBase1 = array:get(0,DelayBaseHist1),
+      DelayBase2 = array:foldl(
+        fun(_,El,Acc) -> 
+          if ?WRAPPING_DIFF_32(El,Acc) < 0 -> El;
+              true -> Acc
+           end
+        end,
+        DelayBase1,DelayBaseHist1),
       Delay#aiutp_delay{
         delay_base_time = CurMilli,
         delay_base_hist = DelayBaseHist1,
         delay_base_idx = DelayBaseIdx0,
-        delay_base = DelayBase1,
+        delay_base = DelayBase2,
         cur_delay_hist = CurDelayHist0,
         cur_delay_idx = CurDelayIdx0
        };

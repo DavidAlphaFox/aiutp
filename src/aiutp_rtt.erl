@@ -58,13 +58,14 @@ caculate_delay(Now,MicroNow,
                  MaxSample < 0 -> 0 - MaxSample;
                  true -> 0
               end,
-            {AverageDelayBase1,AverageDelay0} =
-              if Adjust /= 0 -> {AverageDelayBase0 - Adjust,AverageDelay + Adjust};
-                 true -> {AverageDelayBase0,AverageDelay}
+            {AverageDelayBase1,AverageDelay0,PrevAverageDelay0} =
+              if Adjust /= 0 -> 
+                {AverageDelayBase0 - Adjust,AverageDelay + Adjust,PrevAverageDelay + Adjust};
+                 true -> {AverageDelayBase0,AverageDelay,PrevAverageDelay}
               end,
             PCB#aiutp_pcb{ reply_micro = TheirDelay,last_measured_delay = Now,
                            their_hist = TheirHist0,our_hist = OurHist1,
-                           clock_drift = erlang:trunc((ClockDrift * 7 +  AverageDelay - PrevAverageDelay) / 8),
+                           clock_drift = erlang:trunc((ClockDrift * 7 +  AverageDelay - PrevAverageDelay0) / 8),
                            average_delay_base = AverageDelayBase1,
                            average_delay = AverageDelay0,
                            average_sample_time = AverageSampleTime + 5000,
@@ -79,7 +80,7 @@ caculate_delay(Now,MicroNow,
         end;
        true ->
         PCB#aiutp_pcb{ reply_micro = TheirDelay,last_measured_delay = Now,
-                       their_hist = TheirHist0}
+                       their_hist = TheirHist0,our_hist = OurHist0}
     end,
   {ActualDelay,PCB0}.
 
