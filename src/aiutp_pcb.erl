@@ -256,7 +256,7 @@ maybe_decay_win(#aiutp_pcb {time = Now,
                            } = PCB)->
   if (Now - LastRWinDecay) < ?MAX_WINDOW_DECAY -> PCB;
      true ->
-      MaxWindow0 = erlang:trunc(MaxWindow * 0.5),
+      MaxWindow0 = erlang:trunc(MaxWindow * 0.8),
       MaxWindow1 =
         if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
            true -> MaxWindow0
