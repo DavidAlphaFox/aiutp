@@ -15,7 +15,7 @@
 -define(REORDER_BUFFER_MAX_SIZE,1024).
 -define(OUTGOING_BUFFER_MAX_SIZE,1024).
 -define(BRUST_OUTGOING_BUFFER_SIZE,255).
--define(PACKET_SIZE,1400).
+-define(PACKET_SIZE,548).
 -define(MIN_WINDOW_SIZE,2906).
 %-define(MIN_WINDOW_SIZE,7265).
 % this is the minimum max_window value. It can never drop below this
@@ -167,7 +167,7 @@
                    % per 5 seconds
                    ssthresh = ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE,
                    slow_start = true,
-                   brust = true,
+                   brust = false,
                    inbuf,
                    outbuf,
                    inque,
