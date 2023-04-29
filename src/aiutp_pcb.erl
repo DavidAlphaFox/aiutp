@@ -613,12 +613,14 @@ read(#aiutp_pcb{inque = InQue,max_window = MaxWindow,
   end.
 
 connect(Socket,ConnIdRecv)->
-  ConnIdSend = aiutp_util:bit16(ConnIdRecv + 1),
+  ConnIdSend = aiutp_util:bit16(ConnIdRecv + 1), 
+  %% 服务器端的接收ID = 客户端的接收ID + 1
+  %% 服务器端的发送ID = 客户端的接收ID(connection_id)               
   PCB = new(ConnIdRecv,ConnIdSend,Socket),
   #aiutp_pcb{max_window = MaxWindow,inbuf = InBuf,
              conn_id_recv = ConnId,outbuf = OutBuf} = PCB,
   Now = aiutp_util:millisecond(),
-  SeqNR = aiutp_util:bit16_random(),
+  SeqNR = aiutp_util:bit16_random(), %%初始化一个发送的seq
   WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
   Packet = aiutp_packet:syn(SeqNR),
   Packet0 = Packet#aiutp_packet{conn_id = ConnId,wnd = WindowSize,
@@ -632,7 +634,7 @@ connect(Socket,ConnIdRecv)->
                        rto_timeout = 3000 + Now,
                        last_rcv_win = WindowSize,
                        outbuf = OutBuf0, cur_window_packets = 1,
-                       seq_nr = SeqNR + 1},
+                       seq_nr = SeqNR + 1},%%下一个发送的ID
   aiutp_net:send_packet(Iter, PCB0).
 
 accept(Socket,{#aiutp_packet{conn_id = ConnIdSend},_} = Packet)->

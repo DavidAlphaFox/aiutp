@@ -283,3 +283,20 @@ dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= P
       end;
     {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
   end.
+
+%% {ip,port}
+%% #{
+%%   {ip,port} => handler_process
+%% }
+%%  socket                session                            handler               pcb      
+%%   |  ---查询session-->    |       
+%%   |  <---返回handler--    |
+%%   | -----------------------传递封包数据------------------->  |
+%%   |                      | <-----注册session，删除session----|
+%%                                                             | -----创建 --------> |
+%%                                                             | -----转发数据包---> |
+%%                                                             | <---- 入队数据包--- |
+%%   | <--------------------发送数据封包----------------------- | 
+%%
+%%  handler可以负责数据包的解析，acceptor和reset，同时可以将部分数据封包进行合并，从而提高udp利用效率
+%%  如果某个UDP的端口没有回应了可以将整个handler及子进程全部杀死，这样可以减少端口风暴防止被发现封禁                                                          
