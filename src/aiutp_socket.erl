@@ -299,4 +299,14 @@ dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= P
 %%   | <--------------------发送数据封包----------------------- | 
 %%
 %%  handler可以负责数据包的解析，acceptor和reset，同时可以将部分数据封包进行合并，从而提高udp利用效率
-%%  如果某个UDP的端口没有回应了可以将整个handler及子进程全部杀死，这样可以减少端口风暴防止被发现封禁                                                          
+%%  如果某个UDP的端口没有回应了可以将整个handler及子进程全部杀死，这样可以减少端口风暴防止被发现封禁   
+%% 进行connect的时候，需要先根据{ip,port}找出对应的handler，如果handler不存在，就新创建一个handler
+%% 收到数据包，根据{ip,port}找到对应的hanler，如果handler不存在，则立刻发送rest包    
+
+%% socket进程负责
+%% 1. udp数据的接收
+%% 2. {ip,port}级别的session管理
+%% handler进程负责
+%% 1. session id级别的管理
+%% 2. id对应的pcb管理
+%% 3. 对数据进行封包和解包

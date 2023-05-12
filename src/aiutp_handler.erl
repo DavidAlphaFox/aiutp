@@ -25,18 +25,29 @@
     code_change/3,
     format_status/2
 ]).
-
+-export([
+    accept/2
+]).
 -define(SERVER, ?MODULE).
 
 -record(state, {
     socket :: pid(),
-    session :: pid()
+    session :: pid(),
+    acceptors,
+    monitors,
+    syns,
+    syn_len,
+    max_syn_len,
+    options
 }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+-spec accept(pid(),Acceptor :: {pid(), term()}) -> ignore.
+%% acceptor是一个gen_server:call的FROM
+accept(Pid,Acceptor)->
+  gen_server:cast(Pid,{accept,Acceptor}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -98,6 +109,15 @@ handle_call(_Request, _From, State) ->
     | {noreply, NewState :: term(), Timeout :: timeout()}
     | {noreply, NewState :: term(), hibernate}
     | {stop, Reason :: term(), NewState :: term()}.
+
+handle_cast({accept,Acceptor},
+            #state{acceptors = Acceptors, syn_len = SynLen} = State)->
+  if
+    SynLen > 0 -> accept_incoming(Acceptor,State);
+    true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
+  end;
+handle_cast({?ST_SYN,Remote,Packet},State)->
+  pair_incoming(Remote,Packet,State);
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -163,3 +183,51 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+%%% worker只要知道handler就可以了
+accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
+  {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
+accept_incoming({Caller,_} = Acceptor,
+                #state{ syns = Syns,syn_len = SynLen,socket = Socket} = State)->
+  Parent = self(),
+  {ok,Worker} = aiutp_worker_sup:new(Parent,Socket),
+  {{value,Req},Syns0} = queue:out(Syns),
+  {Remote,{SYN,_} = P} = Req,
+  case aiutp_worker:accept(Worker, Caller,Remote, P) of
+    ok ->
+      gen_server:reply(Acceptor, {ok,{utp,Parent,Worker}}),
+      {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
+    _ ->
+      Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+      Bin = aiutp_packet:encode(Packet),
+      gen_udp:send(Socket,Remote,Bin),
+      accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
+  end.
+pair_incoming(Remote,{SYN,_},
+              #state{socket = Socket,
+                     syn_len = SynLen,
+                     max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
+  Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+  Bin = aiutp_packet:encode(Packet),
+  gen_udp:send(Socket,Remote,Bin),
+  {noreply,State};
+
+pair_incoming(Remote,{Packet,_} = P,
+              #state{acceptors = Acceptors,syns = Syns} = State) ->
+  Syns0 =
+    queue:filter(
+      fun({Remote0,{SYN,_}})->
+          if (Remote ==  Remote0) andalso
+             (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
+            true -> true
+          end
+      end, Syns),
+  Syns1 = queue:in({Remote,P},Syns0),
+  Empty = queue:is_empty(Acceptors),
+  if
+    Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
+    true ->
+      {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
+      accept_incoming(Acceptor,State#state{syns = Syns1,
+                                           syn_len = queue:len(Syns1),
+                                           acceptors = Acceptors0})
+  end.
