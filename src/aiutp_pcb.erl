@@ -434,18 +434,18 @@ check_timeouts_0(#aiutp_pcb{time =Now,
                             cur_window_packets = CurWindowPackets,
                             cur_window = CurWindow,
                             outbuf = OutBuf,
-                            brust = Brust} = PCB)->
+                            burst = Burst} = PCB)->
   PCB0 =
     if (MaxWindowUser == 0 ) and
        (Now - ZeroWindowTime >=0) -> PCB#aiutp_pcb{max_window_user = ?MIN_WINDOW_SIZE};
        true -> PCB
     end,
   {Continue,PCB1} =
-    if (Brust == false) and
+    if (Burst == false) and
        (RTOTimeout >0) and
        (Now - RTOTimeout >= 0) ->
         check_timeouts_2(check_timeouts_1(PCB0));
-       (Brust == true) and
+       (Burst == true) and
        (CurWindowPackets > 0) and
        (State == ?CS_CONNECTED) ->
         case check_timeouts_1(PCB0) of
@@ -464,7 +464,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
            (Now - PCB1#aiutp_pcb.last_sent_packet >= ?KEEPALIVE_INTERVAL) ->
             aiutp_net:send_keep_alive(PCB1);
            (FinSent == false) and
-           (Brust == true) and  (Now - PCB1#aiutp_pcb.last_sent_packet >= 5000)->
+           (Burst == true) and  (Now - PCB1#aiutp_pcb.last_sent_packet >= 5000)->
             aiutp_net:send_keep_alive(PCB1);
            true -> PCB1
       end,
@@ -502,7 +502,7 @@ mark_need_resend(CurWindowPackets,CurWindow,Iter,OutBuf) ->
 
 check_timeouts_1(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
-  {fasle,PCB#aiutp_pcb{state = ?CS_DESTROY}};
+  {false,PCB#aiutp_pcb{state = ?CS_DESTROY}};
 check_timeouts_1(#aiutp_pcb{time = Now,
                             last_got_packet = LastGotPacket,
                             close_requested = CloseRequested} = PCB)
@@ -520,7 +520,7 @@ check_timeouts_1(#aiutp_pcb{rtt = RTT,close_requested = CloseRequested} = PCB)
 check_timeouts_1(#aiutp_pcb{state = State,
                             close_requested = CloseRequested,
                             retransmit_count = RetransmitCount,
-                            brust = false} = PCB)
+                            burst = false} = PCB)
   when (RetransmitCount >= 4);
        ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
   io:format("CLOSED due to MAX retransmit: ~p~n",[RetransmitCount]),

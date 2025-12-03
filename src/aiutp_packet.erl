@@ -4,8 +4,8 @@
 -export([decode/1,encode/1]).
 -export([reset/2,syn/1,fin/2,ack/3,ack/2,data/2]).
 
--define(EXT_SACK, 1).
--define(EXT_BITS, 2).
+%% Extension types are now defined in aiutp.hrl
+%% EXT_SACK = 1, EXT_EXT_BITS = 2
 
 reset(ConnId,AckNR)->
   #aiutp_packet{type = ?ST_RESET,
@@ -71,12 +71,12 @@ decode_packet(Packet) ->
                            payload = Payload}
   end.
 
-decode_extensions(0, Payload, Exts) -> {lists:reverse(Exts), Payload};
+decode_extensions(?EXT_NONE, Payload, Exts) -> {lists:reverse(Exts), Payload};
 decode_extensions(?EXT_SACK, <<Next:8/big-integer,Len:8/big-integer, R/binary>>, Acc) ->
   <<Bits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{sack, Bits} | Acc]);
-decode_extensions(?EXT_BITS, <<Next:8/big-integer,
-                               Len:8/big-integer, R/binary>>, Acc) ->
+decode_extensions(?EXT_EXT_BITS, <<Next:8/big-integer,
+                                   Len:8/big-integer, R/binary>>, Acc) ->
   <<ExtBits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{ext_bits, ExtBits} | Acc]).
 
@@ -110,7 +110,7 @@ encode(#aiutp_packet{type = Type,
     ExtBin/binary,Payload/binary>>.
 
 
-encode_extensions([]) -> {0, <<>>};
+encode_extensions([]) -> {?EXT_NONE, <<>>};
 encode_extensions([{sack, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),
@@ -119,5 +119,5 @@ encode_extensions([{ext_bits,undefined}| R])-> encode_extensions(R);
 encode_extensions([{ext_bits, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),
   Sz = byte_size(Bits),
-  {?EXT_BITS, <<Next:8/big-integer, Sz:8/big-integer, Bits/binary, Bin/binary>>}.
+  {?EXT_EXT_BITS, <<Next:8/big-integer, Sz:8/big-integer, Bits/binary, Bin/binary>>}.
 
