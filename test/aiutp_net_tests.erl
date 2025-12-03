@@ -46,8 +46,7 @@ is_full_respects_max_window_test() ->
     PCB1 = PCB#aiutp_pcb{
         max_window = 1000,
         max_window_user = 2000,
-        cur_window = 1500,
-        burst = false
+        cur_window = 1500
     },
     {IsFull, _PCB2} = aiutp_net:is_full(500, PCB1),
     ?assertEqual(true, IsFull).
@@ -104,6 +103,5 @@ create_test_pcb() ->
         our_hist = aiutp_delay:new(Now),
         their_hist = aiutp_delay:new(Now),
         rtt_hist = aiutp_delay:new(Now),
-        burst = true,
         ida = false
     }.

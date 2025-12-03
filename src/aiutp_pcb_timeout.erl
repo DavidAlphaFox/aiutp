@@ -143,10 +143,7 @@ do_check_timeouts(PCB) ->
 %%------------------------------------------------------------------------------
 check_active_connection_timeouts(#aiutp_pcb{
         time = Now,
-        state = State,
-        rto_timeout = RTOTimeout,
-        burst = Burst,
-        cur_window_packets = CurWindowPackets
+        rto_timeout = RTOTimeout
     } = PCB) ->
 
     %% 步骤 1: 处理零窗口探测
@@ -154,18 +151,8 @@ check_active_connection_timeouts(#aiutp_pcb{
 
     %% 步骤 2: 检查 RTO 超时
     {Continue, PCB1} =
-        if (Burst == false) andalso
-           (RTOTimeout > 0) andalso
-           (Now >= RTOTimeout) ->
-            %% 标准模式 RTO 超时
+        if (RTOTimeout > 0) andalso (Now >= RTOTimeout) ->
             handle_rto_timeout(PCB0);
-
-           (Burst == true) andalso
-           (CurWindowPackets > 0) andalso
-           (State == ?CS_CONNECTED) ->
-            %% 突发模式下检查是否需要重发
-            handle_burst_mode_check(PCB0);
-
            true ->
             {true, PCB0}
         end,
@@ -259,8 +246,7 @@ check_fatal_timeout(#aiutp_pcb{
 
 check_fatal_timeout(#aiutp_pcb{
         retransmit_count = RetransmitCount,
-        close_requested = CloseRequested,
-        burst = false
+        close_requested = CloseRequested
     } = PCB)
   when RetransmitCount >= ?MAX_RETRANSMIT_COUNT ->
     %% libutp: 一般状态超过最大重试次数
@@ -335,29 +321,6 @@ do_retransmit_timeout(#aiutp_pcb{
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 突发模式下的超时检查
-%%------------------------------------------------------------------------------
-handle_burst_mode_check(#aiutp_pcb{
-        cur_window_packets = CurWindowPackets,
-        cur_window = CurWindow,
-        outbuf = OutBuf
-    } = PCB) ->
-    case check_fatal_timeout(PCB) of
-        {true, _} ->
-            %% 连接有效，标记包为需要重发
-            Iter = aiutp_buffer:head(OutBuf),
-            {CurWindow0, OutBuf0} = mark_need_resend(CurWindowPackets, CurWindow, Iter, OutBuf),
-            PCB0 = aiutp_net:flush_packets(PCB#aiutp_pcb{
-                cur_window = CurWindow0,
-                outbuf = OutBuf0
-            }),
-            {true, PCB0};
-        {false, PCB0} ->
-            {false, PCB0}
-    end.
-
-%%------------------------------------------------------------------------------
-%% @private
 %% @doc 处理 keepalive
 %%
 %% libutp: 每 KEEPALIVE_INTERVAL 发送一次心跳
@@ -366,20 +329,13 @@ handle_keepalive(#aiutp_pcb{
         time = Now,
         state = State,
         fin_sent = FinSent,
-        burst = Burst,
         last_sent_packet = LastSentPacket
     } = PCB) ->
 
     ShouldSendKeepalive =
         (FinSent == false) andalso
-        (
-            %% 标准模式：CONNECTED 状态且超过 KEEPALIVE_INTERVAL
-            (((State == ?CS_CONNECTED) orelse (State == ?CS_CONNECTED_FULL)) andalso
-             (Now - LastSentPacket >= ?KEEPALIVE_INTERVAL))
-            orelse
-            %% 突发模式：超过 5 秒
-            ((Burst == true) andalso (Now - LastSentPacket >= 5000))
-        ),
+        ((State == ?CS_CONNECTED) orelse (State == ?CS_CONNECTED_FULL)) andalso
+        (Now - LastSentPacket >= ?KEEPALIVE_INTERVAL),
 
     if ShouldSendKeepalive ->
         aiutp_net:send_keep_alive(PCB);

@@ -15,8 +15,7 @@
 %% - max_send/1: 计算可发送的最大字节数
 %%
 %% == 发送模式 ==
-%% 1. 正常模式：受拥塞窗口 (max_window) 和对端窗口 (max_window_user) 限制
-%% 2. 突发模式 (burst=true)：受 BURST_SEND_COUNT 限制，用于连接建立阶段
+%% 发送受拥塞窗口 (max_window) 和对端窗口 (max_window_user) 限制
 %%
 %% == ACK 调度 ==
 %% - schedule_ack/1: 检查 ida 标志，如需要则发送 ACK
@@ -81,9 +80,7 @@ window_size(_MaxWindow, InBuf) ->
 %%------------------------------------------------------------------------------
 %% @doc 检查发送窗口是否已满
 %%
-%% 检查条件：
-%% - 突发模式：检查 outbuf 大小
-%% - 正常模式：检查 cur_window + Bytes 是否超过窗口限制
+%% 检查 cur_window + Bytes 是否超过窗口限制
 %%
 %% @param Bytes 要发送的字节数（-1 表示使用 PACKET_SIZE）
 %% @param PCB 协议控制块
@@ -91,19 +88,11 @@ window_size(_MaxWindow, InBuf) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec is_full(integer(), #aiutp_pcb{}) -> {boolean(), #aiutp_pcb{}}.
-is_full(_Bytes, #aiutp_pcb{time = Now, burst = true, outbuf = OutBuf} = PCB) ->
-    %% 突发模式
-    OSize = aiutp_buffer:used(OutBuf),
-    case OSize > ?BURST_SEND_COUNT of
-        true -> {true, PCB#aiutp_pcb{last_maxed_out_window = Now}};
-        false -> {false, PCB}
-    end;
 is_full(Bytes, #aiutp_pcb{time = Now,
                           max_window = MaxWindow,
                           max_window_user = MaxWindowUser,
                           cur_window = CurWindow,
                           cur_window_packets = CurWindowPackets} = PCB) ->
-    %% 正常模式
     Bytes1 = normalize_bytes(Bytes),
     MaxSend = erlang:min(MaxWindow, MaxWindowUser),
 
@@ -335,12 +324,6 @@ normalize_bytes(Bytes) -> Bytes.
 %% @doc 计算可发送的最大字节数
 %%------------------------------------------------------------------------------
 -spec max_send(#aiutp_pcb{}) -> non_neg_integer().
-max_send(#aiutp_pcb{burst = true, outbuf = OutBuf}) ->
-    OSize = aiutp_buffer:used(OutBuf),
-    case OSize > ?BURST_SEND_COUNT of
-        true -> 0;
-        false -> ?PACKET_SIZE * (?BURST_SEND_COUNT - OSize)
-    end;
 max_send(#aiutp_pcb{max_window = MaxWindow,
                     max_window_user = MaxWindowUser,
                     cur_window = CurWindow,
