@@ -23,357 +23,38 @@
 
 ## 已完成任务
 
-### 2025-12-03
-- [x] aiutp_buffer/aiutp_queue 模块重构
-  - **aiutp_buffer.erl**: 固定大小环形缓冲区重构
-    - 添加详细模块文档（数据结构图、设计原理、主要用途）
-    - 常量重命名：`LAST_INDEX` → `END_INDEX`
-    - 函数重命名：`init_index` → `init_free_list`
-    - 提取辅助函数：
-      - `do_insert/4`: 执行插入操作分发
-      - `insert_at_head/3`: 插入到链表头部
-      - `insert_after/4`: 在指定位置后插入
-      - `delete_head/2`: 删除头部元素
-      - `delete_after/3`: 删除中间或尾部元素
-    - 代码按功能区域组织：创建、查询、修改、内部函数
-    - 所有函数添加 edoc 文档
-  - **aiutp_queue.erl**: 双端队列重构
-    - 添加详细模块文档（主要用途、队列操作图、性能特性）
-    - 代码按功能区域组织：创建、查询、插入、删除
-    - 所有函数添加 edoc 文档和注释
-  - 158 个测试全部通过
-- [x] aiutp_channel closing 状态修复
-  - 修复: closing 状态现在正确等待 FIN 确认
-  - 添加 closing 状态的 packet/timeout 处理
-  - 添加 `handle_packet_closing/2`: 处理 closing 状态数据包
-  - 添加 `handle_timeout_closing/1`: 处理 closing 状态超时
-  - 添加 `do_closing_cleanup/2`: 统一清理逻辑
-  - 修复: blocker 赋值使用 `:=` 而非 `=>`
-  - 添加 closing 状态下的 parent DOWN 处理
-  - 158 个测试全部通过
-- [x] aiutp_rx/aiutp_tx/aiutp_net 模块重构
-  - **aiutp_rx.erl**: 接收处理模块重构
-    - 添加详细模块文档（接收流程、重排序机制、FIN 处理）
-    - 函数重命名：`recv` → `deliver_in_order`, `recv_reorder` → `buffer_out_of_order`
-    - 提取辅助函数：
-      - `maybe_handle_fin_reached/1`: FIN 状态检查
-      - `maybe_deliver_buffered/1`: 缓冲区后续包交付
-      - `insert_into_reorder_buffer/4`: 有序插入缓冲区
-    - 添加常量：`MAX_REORDER_DISTANCE` (0x3FFF)
-  - **aiutp_tx.erl**: 发送处理模块重构
-    - 添加详细模块文档（ACK 处理、SACK 解析、快速重传）
-    - 函数重命名：
-      - `pick_acked` → `extract_acked`（保留兼容别名）
-      - `map_sack_to_seq` → `parse_sack_extension`（保留兼容别名）
-    - 提取辅助函数：
-      - `count_acked_packets/2`: 统计 ACK 包数量
-      - `calculate_cur_window_packets/1`: 计算当前窗口包数
-      - `extract_acked_packets/4`: 提取已确认包
-      - `parse_sack_bitmap/3`: 解析 SACK 位图
-      - `parse_sack_byte/3`: 解析单字节 SACK
-      - `extract_sacked_packets/3`: 提取 SACK 确认的包
-      - `update_skip_counts_loop/3`: 循环更新跳过计数
-  - **aiutp_net.erl**: 网络 I/O 模块重构
-    - 添加详细模块文档（发送流程、窗口管理、SACK 构建）
-    - 代码按功能区域组织：ACK 发送、数据发送、窗口管理、队列刷新、UDP 发送
-    - 添加常量：`UDP_SEND_RETRIES` (3), `UDP_SEND_RETRY_DELAY` (150ms)
-    - 提取辅助函数：
-      - `flush_packets_loop/1`: 刷新包循环
-      - `do_flush_queue/1`: 实际刷新队列
-      - `send_queued_data/1`: 发送队列数据
-      - `send_data_chunk/3`, `send_data_chunk_small/3`: 发送数据块
-      - `fill_from_queue/3`, `fill_from_queue_loop/5`: 填充发送数据
-      - `send_new_packet/2`, `send_n_packets_loop/5`: 发送新包
-      - `prepare_packet_for_send/5`: 准备发送包
-      - `build_sack/1`, `build_sack_bitmap/5`, `finalize_sack_bitmap/1`: SACK 构建
-      - `do_send_with_retry/4`: 带重试的 UDP 发送
-  - **aiutp_pcb.erl**: 更新函数调用
-    - `aiutp_tx:pick_acked` → `aiutp_tx:extract_acked`
-    - `aiutp_tx:map_sack_to_seq` → `aiutp_tx:parse_sack_extension`
-  - 158 个测试全部通过
-- [x] aiutp_rtt 模块重构
-  - 添加详细的模块文档（RTT 估计、延迟估计、时钟漂移检测）
-  - 修正函数命名：`caculate_delay` → `calculate_delay`, `caculate_rtt` → `calculate_rtt`
-  - 保留旧名称作为向后兼容别名
-  - 拆分 `calculate_delay/4` 为多个小函数：
-    - `compute_their_delay/2`: 计算对端延迟
-    - `extract_our_delay/1`: 提取我方延迟
-    - `update_delay_histories/4`: 更新延迟历史
-    - `maybe_sync_our_hist/3`: 同步 our_hist
-    - `update_delay_statistics/6`: 更新延迟统计
-    - `update_average_delay_stats/6`: 更新 average_delay
-    - `compute_delay_sample/2`: 计算延迟样本偏差
-    - `compute_average_delay/5`: 计算 average_delay 和 clock_drift
-    - `compute_base_adjust/2`: 计算基准调整值
-  - 添加常量定义：`AVERAGE_DELAY_SAMPLE_INTERVAL`, `DELAY_BASE_SHIFT_THRESHOLD`
-  - 所有函数添加 edoc 文档和类型规范
-  - 158 个测试全部通过
-- [x] 删除 aiutp_socket 向后兼容别名
-  - 移除 `add_conn/3` 和 `free_conn/3` 导出
-  - 移除 `handle_call` 中对 `{add_conn, ...}` 和 `{free_conn, ...}` 的处理
-  - 更新 `aiutp_channel.erl` 调用：
-    - `aiutp_socket:add_conn/3` → `aiutp_socket:register_channel/3`
-    - `aiutp_socket:free_conn/3` → `aiutp_socket:unregister_channel/3`
-  - 158 个测试全部通过
-- [x] 缓冲区常量对齐 libutp
-  - 分析 libutp 源码中的缓冲区大小配置
-  - `OUTGOING_BUFFER_MAX_SIZE = 1024` 保持不变（与 libutp 一致）
-  - `max_window_user`: 256 → 255 个包（对齐 libutp）
-  - libutp 使用 255 为 FIN 包预留空间
-  - 158 个测试全部通过
-- [x] aiutp_channel 模块重构
-  - 完整重写模块，删除向后兼容代码
-  - 添加详细的模块文档和架构图（ASCII 状态机图）
-  - 代码按功能区域组织：API、回调、状态函数、内部函数
-  - 重命名函数以提高清晰度：
-    - `add_conn` → `allocate_conn_id`
-    - `cleanup_monitors` → `cleanup_resources`
-    - `active_read` → `maybe_deliver_data`
-    - `sync_input` → `forward_pending_messages`
-  - 提取状态处理为独立函数：
-    - `handle_connect`, `handle_accept`
-    - `handle_packet_connecting`, `handle_packet_accepting`, `handle_packet_connected`
-    - `handle_timeout_connecting`, `handle_timeout_accepting`, `handle_timeout_connected`
-    - `handle_parent_down`, `handle_controller_down`
-    - `handle_close`, `handle_closing_enter`
-  - 添加工具函数：`safe_demonitor`, `release_conn_id`, `notify_controller_if_active`
-  - 修复类型契约：`accept/4` 参数类型修正为 `{#aiutp_packet{}, non_neg_integer()}`
-  - 所有函数添加中文注释
-  - 158 个测试全部通过，Dialyzer 警告减少到 12 个
-- [x] clock_drift 惩罚机制（libutp 对齐）
-  - 在 `aiutp_pcb_cc.erl` 添加 `apply_clock_drift_penalty/2` 函数
-  - 当 `clock_drift < -200000` 时应用惩罚延迟
-  - 惩罚公式: `penalty = (-clock_drift - 200000) / 7`
-  - 防止对端通过减慢时钟来"作弊"获取更多带宽
-  - 添加 5 个测试用例验证惩罚机制
-  - 158 个测试全部通过
-- [x] 清理未使用的 PCB 字段
-  - 移除 `read_shutdown` 字段（设置但从不读取）
-  - 移除 `timeout_seq_nr` 字段（设置但从不读取）
-  - 保留 `average_delay` 相关字段（用于 `clock_drift` 计算）
-  - 158 个测试全部通过
-- [x] aiutp_pcb_timeout 超时处理模块重构（对齐 libutp）
-  - RTO 退避因子: 1.5x → 2x（对齐 libutp/RFC 6298）
-  - SYN_SENT 重试阈值: > 2 → >= 2（对齐 libutp MAX_SYN_RETRIES）
-  - 零窗口探测窗口: MIN_WINDOW_SIZE → PACKET_SIZE（对齐 libutp）
-  - 更新常量 RTO_MIN: 500ms → 1000ms（对齐 libutp）
-  - 更新常量 TIMEOUT_CHECK_INTERVAL: 150ms → 500ms（减少检查频率）
-  - 添加 MAX_SYN_RETRIES (2) 和 MAX_RETRANSMIT_COUNT (4) 常量
-  - 重构为更小的聚焦函数: handle_zero_window_probe, handle_rto_timeout, check_fatal_timeout 等
-  - 添加详细的中文模块文档
-  - 153 个测试全部通过
-- [x] aiutp_delay 延迟估计模块重构
-  - 重写模块文档，详细说明 LEDBAT 延迟估计算法
-  - 说明核心概念：Base Delay、Current Delay、Queuing Delay
-  - 说明时钟漂移处理机制
-  - 说明 32 位环绕处理
-  - 改进 record 字段注释
-  - 重写所有函数的 edoc 文档
-  - 新增 6 个测试用例（共 17 个）
-  - 153 个测试全部通过
-- [x] LEDBAT 拥塞控制重构（对齐 RFC 6817 和 libutp）
-  - 重构 `aiutp_pcb_cc.erl`:
-    - 移除动态 target_delay 更新，使用固定 100ms（RFC 6817）
-    - 移除 clock_drift 惩罚（延迟补偿通过 delay_base 处理）
-    - 窗口饱和检测阈值: 3000ms → 1000ms（对齐 libutp）
-    - 窗口衰减率: 20% → 50%（对齐 libutp）
-    - 慢启动增长: MIN_WINDOW_SIZE → PACKET_SIZE（对齐 libutp）
-    - 添加 off_target 值范围限制，防止异常值
-  - 重构 `aiutp_pcb_timeout.erl`:
-    - 超时有包在途: max_window/2 → PACKET_SIZE, slow_start=true（对齐 RFC 6817 CTO）
-    - 超时无包在途: 保持 max_window * 2/3（与 libutp 一致）
-    - 设置 ssthresh = max(max_window/2, PACKET_SIZE)
-  - 更新 `aiutp.hrl`:
-    - 添加 WINDOW_SATURATION_TIMEOUT 常量（1000ms）
-    - 改进 LEDBAT 参数文档，引用 RFC 6817
-  - 更新测试用例:
-    - `maybe_decay_win_after_interval_test`: 期望 50% 衰减
-  - 147 个测试全部通过
-- [x] 常量优化（BEP-29 合规性）
-  - `MIN_WINDOW_SIZE`: 2906 → 3*PACKET_SIZE (3888)，计算更直观
-  - `RTT_VAR_INITIAL`: 800 → 250ms，符合 RFC 6298
-  - `DUPLICATE_ACKS_BEFORE_RESEND`: 4 → 3，符合 BEP-29 和 TCP 标准
-  - `BURST_OUTGOING_BUFFER_SIZE` → `BURST_SEND_COUNT`: 255 → 256（2的幂次）
-  - `UDP_BUFFER_SIZE`: 6.25MB → 324KB，避免 bufferbloat
-  - 移除冗余常量：`REORDER_BUFFER_MAX_SIZE`、`DUPLICATE_ACKS_BEFORE_RESEND_BEP29`
-  - 147 个测试全部通过
-- [x] 监督树重构（故障隔离）
-  - 新结构：aiutp_sup (simple_one_for_one) → aiutp_socket_sup (one_for_all) → {socket, channel_sup}
-  - 每个 socket 拥有独立的 channel_sup 实例
-  - socket 崩溃时自动终止所有相关 channel
-  - 修改 aiutp_sup.erl: rest_for_one → simple_one_for_one
-  - 修改 aiutp_socket_sup.erl: simple_one_for_one → one_for_all，管理 socket + channel_sup
-  - 修改 aiutp_channel_sup.erl: 移除全局注册，new/2 → new/3
-  - 修改 aiutp_socket.erl: 从父监督者获取 channel_sup pid
-  - 修改 aiutp_acceptor.erl: start_link/4 → start_link/5，添加 channel_sup 参数
-  - 修改 aiutp.erl: open 调用 aiutp_sup:new/2
-  - 更新测试用例适配新结构
-  - 147 个测试全部通过
-- [x] aiutp_socket 代码重构和注释
-  - 添加完整模块文档和架构图
-  - 函数重命名: `add_conn_inner` → `do_register_channel`, `free_conn_inner` → `do_unregister_channel`
-  - 函数重命名: `reset_conn` → `send_reset`, `dispatch` → `dispatch_packet`
-  - 新增 API: `register_channel/3`, `unregister_channel/3` (保留向后兼容别名)
-  - 拆分复杂函数: `handle_udp_packet/4`, `dispatch_packet/3`, `handle_unknown_connection/10`
-  - 新增辅助函数: `open_udp_socket/2`, `ensure_binary_mode/1`, `close_socket_if_open/1`
-  - 添加 UDP 缓冲区大小宏定义
-  - 代码按功能分组: API、gen_server 回调、内部函数
-  - 全部使用中文注释
-  - 146 个测试全部通过
-- [x] aiutp_socket 代码优化
-  - 改进 `connect` 函数错误处理，使用嵌套 case 替代模式匹配崩溃
-  - 添加 `conn_count` 字段缓存连接数，避免 `dispatch` 中重复调用 `maps:size`
-  - 更新 `add_conn_inner`、`free_conn_inner`、`handle_info DOWN` 同步维护计数
-  - 146 个测试全部通过
-- [x] aiutp_pcb 与 aiutp_channel 配合修复
-  - 修复 `aiutp_pcb:write/2` 返回值统一为 `{ok, PCB} | {{error, atom()}, PCB}`
-  - 修复 `aiutp_channel` 中 `connected` 状态对 write 返回值的处理
-  - 修复 `connecting` 状态控制器崩溃时调用 `aiutp_pcb:close()` 通知对端
-  - 修复 `accepting` 状态控制器崩溃时调用 `aiutp_pcb:close()` 通知对端
-  - 146 个测试全部通过
-- [x] 项目初始化
-- [x] 创建 PLANNING.md 规划文档
-- [x] 创建 TASK.md 任务追踪
-- [x] 创建文档目录结构
-- [x] 完成全面代码分析报告
-- [x] 为核心纯函数模块添加 EUnit 测试 (100 个测试用例)
-  - aiutp_util: 100% 覆盖率
-  - aiutp_queue: 100% 覆盖率
-  - aiutp_delay: 100% 覆盖率
-  - aiutp_packet: 97% 覆盖率
-  - aiutp_buffer: 96% 覆盖率
-- [x] BEP-29 协议分析报告 (docs/report/bep29-analysis-2025-12-03.md)
-  - 丢包重传机制分析
-  - 对端崩溃处理分析
-  - 断开连接处理分析
-  - 项目实现与标准差异对比
-- [x] PCB 和常量重构 (include/aiutp.hrl)
-  - 常量按 BEP-29 标准分组（13 个 Section）
-  - 添加协议版本、扩展类型、超时参数等新常量
-  - PCB 记录按功能分组（连接标识、状态、序列号、FIN处理、窗口、RTT/RTO、拥塞控制、延迟统计、重传、时间戳、缓冲区、特殊模式）
-  - 修复拼写错误：`brust` -> `burst`, `fasle` -> `false`
-  - 添加详细的字段注释和类型规范
-- [x] 高优先级技术债务修复
-  - 修复 aiutp_sup.erl supervisor 子进程 ID 拼写错误
-  - 修复 aiutp_worker.erl 不存在的函数调用 (remove_conn -> free_conn)
-  - 修复 aiutp_worker.erl 拼写错误 (undefiend -> undefined)
-  - 改进 aiutp_socket.erl 数据包解码错误日志 (使用 logger:debug)
-  - 改进 aiutp_net.erl UDP 发送错误处理 (不再崩溃进程)
-  - 添加 aiutp_sup_tests 和 aiutp_net_tests 单元测试 (109 个测试用例)
-- [x] 文档完善 (v0.1.0 里程碑完成)
-  - 增强 README.md：添加徽章、详细 API 文档
-  - 添加服务端/客户端/Active 模式使用示例
-  - 添加安装和快速开始指南
-  - 添加协议参数说明表格
-  - 添加架构概览和模块职责说明
-  - 添加开发指南（构建、测试、类型检查）
-- [x] Worker 重构为 Channel (gen_statem)
-  - 创建 aiutp_channel.erl 使用 gen_statem 行为
-  - 实现 5 个状态：idle, connecting, accepting, connected, closing
-  - 创建 aiutp_channel_sup.erl 监督器
-  - 集成到 aiutp_sup 监督树
-  - 更新 aiutp_socket.erl 使用 channel
-  - 更新 aiutp_acceptor.erl 使用 channel
-  - 更新 aiutp.erl API 使用 channel
-  - 添加 aiutp_channel_tests.erl 单元测试 (6 个测试用例)
-  - 删除旧模块：aiutp_worker.erl, aiutp_worker_sup.erl
-  - 总计 115 个测试用例通过
-- [x] 代码质量修复
-  - 替换 aiutp_pcb.erl 中的 io:format 为 logger:warning (3 处)
-  - 改进 aiutp_sup.erl 监督策略 (one_for_all → rest_for_one)
-  - 为 aiutp_util.erl 中的 wrapping_compare_less 添加文档和类型规范
-  - 更新相关测试用例
-  - 总计 115 个测试用例通过
-- [x] aiutp_pcb.erl 模块拆分重构
-  - 创建 aiutp_pcb_cc.erl 拥塞控制模块 (LEDBAT 算法)
-    - cc_control/4: 主拥塞控制逻辑
-    - maybe_decay_win/1: 窗口衰减
-    - ack_packet/3: ACK 包 RTT 处理
-    - caculate_acked_bytes/4: 计算已确认字节数
-    - selective_ack_packet/3: SACK 处理
-  - 创建 aiutp_pcb_timeout.erl 超时处理模块
-    - check_timeouts/1: 超时检查入口
-    - mark_need_resend/4: 标记重传包
-  - 重构 aiutp_pcb.erl (669行 → 585行)
-    - 添加详细的 edoc 文档
-    - 改进函数命名 (process → process_by_type)
-    - 清理注释和格式
-  - 添加新模块测试 (20 个测试用例)
-    - aiutp_pcb_cc_tests.erl (11 个测试)
-    - aiutp_pcb_timeout_tests.erl (9 个测试)
-  - 总计 135 个测试用例通过
-- [x] PCB Packet Processing 重构 (BEP-29 合规性改进)
-  - 阶段 1: 函数重命名
-    - process/2 → process_incoming/2 (保留兼容别名)
-    - process_by_type/3 → dispatch_by_type/3
-    - process_packet/2 → validate_and_init/2
-    - process_packet_1/2 → handle_duplicate_acks/2
-    - process_packet_2/2 → process_ack_and_sack/2
-    - process_packet_3/2 → update_connection_state/2
-    - process_packet_4/2 → handle_data_and_fin/2
-  - 阶段 2: 连接断开处理改进
-    - 添加 aiutp_net:send_reset/1 函数
-    - 超时时发送 RESET 包通知对端 (BEP-29)
-  - 阶段 3: SACK 处理改进
-    - 添加 skip_count 字段跟踪包被 SACK 跳过次数
-    - 实现 aiutp_tx:update_skip_counts/2 检测 SACK 缺口
-    - 被跳过 3+ 次的包标记为快速重传 (BEP-29)
-  - 阶段 4: 测试验证
-    - 添加 aiutp_tx_tests.erl (9 个测试)
-    - 添加 aiutp_net 额外测试 (2 个测试)
-  - 总计 146 个测试用例通过
-- [x] Dialyzer 类型规范支持
-  - 配置 rebar.config 添加 dialyzer 设置
-  - 为数据结构添加 opaque 类型 (aiutp_queue, aiutp_buffer, aiutp_delay)
-  - 为 API 添加导出类型 (utp_socket, utp_connection, socket_ref)
-  - 为所有模块添加 -spec 类型规范
-  - 修复类型不一致 (PCB socket 字段、packet conn_id 字段、整数运算)
-  - Dialyzer 警告: 62 → 19 (剩余为风格警告)
-  - 146 个测试全部通过
-- [x] OTP 模块状态 record 转换为 maps
-  - aiutp_socket.erl: #state{} → maps (6 个字段)
-  - aiutp_acceptor.erl: #state{} → maps (7 个字段)
-  - aiutp_channel.erl: #data{} → maps (11 个字段)
-  - 添加详细类型规范 (-type state(), -type data())
-  - 保留性能关键 records: #aiutp_pcb{}, #aiutp_packet{}, #aiutp_buffer{}
-  - 146 个测试全部通过
-- [x] CS_DESTROY 状态转换修复 (对齐 libutp 实现)
-  - 分析报告: docs/report/cs-destroy-analysis-2025-12-03.md
-  - 修复 SYN_RECV 超时: 添加 send_reset 调用
-  - 修复 closed/1: 移除非 CS_DESTROY 状态下对 got_fin_reached 的处理
-  - 修复 close() 在 SYN_SENT/SYN_RECV: 发送 RESET 后进入 CS_DESTROY
-  - 优化 closed/1 函数: 简化逻辑，移除 crash 返回值
-  - 修复 format_status 废弃警告 (format_status/2 → format_status/1)
-  - 146 个测试全部通过
+> 详细的已完成任务记录请参见 [TASK_DONE.md](./TASK_DONE.md)
 
-### 历史任务
-- [x] 实现 uTP 协议核心逻辑 (aiutp_pcb)
-- [x] 实现数据包编解码 (aiutp_packet)
-- [x] 实现 OTP supervisor 树结构
-- [x] 实现基本的连接管理 (aiutp_socket, aiutp_channel)
-- [x] 实现 LEDBAT 拥塞控制
-- [x] 实现选择性确认 (SACK)
-- [x] 添加 Micro Transport Protocol 注释
+### 最近完成 (2025-12-03)
+
+- [x] aiutp_buffer/aiutp_queue 模块重构
+- [x] aiutp_channel closing 状态修复
+- [x] aiutp_rx/aiutp_tx/aiutp_net 模块重构
+- [x] aiutp_rtt 模块重构
+- [x] 删除 aiutp_socket 向后兼容别名
+- [x] 缓冲区常量对齐 libutp
+- [x] aiutp_channel 模块重构
+- [x] clock_drift 惩罚机制
+- [x] 清理未使用的 PCB 字段
+- [x] aiutp_pcb_timeout 超时处理模块重构
+- [x] aiutp_delay 延迟估计模块重构
+- [x] LEDBAT 拥塞控制重构
+- [x] 常量优化（BEP-29 合规性）
+- [x] 监督树重构（故障隔离）
+- [x] aiutp_socket 代码重构和优化
+- [x] aiutp_pcb 与 aiutp_channel 配合修复
+- [x] 项目初始化和文档完善
+- [x] EUnit 测试套件 (158 个测试用例)
+- [x] PCB 模块拆分重构
+- [x] Dialyzer 类型规范支持
+- [x] OTP 模块状态 record 转换为 maps
+- [x] CS_DESTROY 状态转换修复
 
 ## 发现的工作
 
 > 在开发过程中发现的新任务或需要注意的事项
 
-### 技术债务（高优先级 - 立即修复）
-- [x] ~~**aiutp_pcb.erl:493** - 🔴 `write/2` 类型签名与实现不一致~~ (已修复: 统一返回 `{ok, PCB}` 格式)
-- [x] ~~**aiutp_channel.erl:292-297** - ⚠️ connecting 状态控制器崩溃未调用 `aiutp_pcb:close()` 通知对端~~ (已修复)
-- [x] ~~**aiutp_channel.erl:346-349** - ⚠️ accepting 状态控制器崩溃未调用 `aiutp_pcb:close()` 通知对端~~ (已修复)
-- [x] ~~**aiutp_worker.erl:329** - 🔴 严重：调用不存在的函数 `aiutp_socket:remove_conn/2`，应改为 `free_conn/3`~~ (已修复)
-- [x] ~~**aiutp.hrl:89** - 🔴 拼写错误: `ida = fasle` 应为 `ida = false`~~ (已在 PCB 重构中修复)
-- [x] ~~**aiutp_pcb.erl:505** - 🔴 拼写错误: `{fasle,PCB#...` 应为 `{false,PCB#...`~~ (已修复)
-- [x] ~~**aiutp_worker.erl:193** - 🔴 拼写错误: `undefiend` 应为 `undefined`~~ (已修复)
-- [x] ~~**aiutp_worker.erl:314** - 🔴 拼写错误: `undefiend` 应为 `undefined`~~ (已修复)
-- [x] ~~**aiutp_sup.erl:22** - 🔴 拼写错误: `aiutp_woker_sup` 应为 `aiutp_worker_sup`~~ (已修复)
-- [x] ~~**aiutp_socket.erl:168-169** - ⚠️ 数据包解码失败时静默丢弃，需添加日志~~ (已添加 logger:debug)
-- [x] ~~**aiutp_net.erl:349** - ⚠️ UDP 发送失败时直接崩溃进程，应优雅处理~~ (已改为返回错误并记录日志)
-
 ### 测试相关
-- [x] 添加 EUnit 单元测试套件 (115 个测试用例)
 - [ ] 添加 Common Test 集成测试
 - [ ] 添加 PropEr 属性测试
 - [ ] 为 gen_server/gen_statem 模块添加测试 (aiutp_socket, aiutp_channel)
@@ -381,40 +62,13 @@
 - [ ] 测试覆盖率达到核心功能 100%
 
 ### 架构改进
-- [x] `aiutp_pcb.erl` - 模块拆分完成 (669行 → 585行 + 2个子模块)
-  - aiutp_pcb_cc.erl: 拥塞控制 (~200行)
-  - aiutp_pcb_timeout.erl: 超时处理 (~180行)
-- [x] `aiutp_channel.erl` - gen_statem 状态机实现完成
-- [x] 使用 logger 模块替代 io:format (aiutp_pcb.erl, aiutp_socket.erl)
-- [x] 改进监督策略 (one_for_all → rest_for_one)
 - [ ] 添加结构化日志和监控指标
 - [ ] 配置管理改用应用环境变量
 
 ### 改进建议
-- [x] 添加 dialyzer 类型规范检查 (已完成 2025-12-03)
-- [x] 使用 maps 替代部分 record，提高可读性 (已完成 2025-12-03)
 - [ ] 考虑支持 IPv6
 
-### 代码清理（2025-12-03 扫描发现）
-
-#### 🔴 高优先级 - libutp 功能缺失
-- [x] **clock_drift 惩罚机制** - ~~`aiutp_rtt.erl` 计算了 clock_drift 但从未使用~~
-  - 已实现: 在 `aiutp_pcb_cc.erl` 添加 `apply_clock_drift_penalty/2`
-  - libutp: 当 `clock_drift < -200000` 时应用惩罚延迟
-  - 目的: 防止对端通过减慢时钟来"作弊"
-
-#### ⚠️ 中优先级 - 死代码清理
-
-**未使用的 PCB 字段（设置但从不读取）:**
-- [x] ~~`read_shutdown`~~ - 已移除
-- [x] ~~`timeout_seq_nr`~~ - 已移除
-
-**延迟统计字段（用于 clock_drift 计算，保留）:**
-- [x] `clock_drift` - 现已用于拥塞控制惩罚机制
-- [x] `average_delay` - 用于计算 clock_drift
-- [x] `average_delay_base` - 用于计算 average_delay
-- [x] `current_delay_sum` - 用于计算 average_delay
-- [x] `current_delay_samples` - 用于计算 average_delay
+### 代码清理
 
 **无效导出（仅内部使用，不应导出）:**
 - [ ] `aiutp_pcb:new/3` - 仅 connect/accept 内部调用
@@ -430,7 +84,7 @@
 - [ ] `aiutp_util:bit32_random/0`
 - [ ] `aiutp_util:wrapping_compare_less/3`
 
-#### 📝 低优先级 - 可选清理
+**低优先级:**
 - [ ] 删除 `src/aiutp_test.erl` - 手动测试文件，非必需
 
 ## 里程碑
@@ -444,7 +98,7 @@
 ### v0.2.0 (进行中)
 - [x] gen_statem 重构 (aiutp_channel)
 - [x] PCB Packet Processing 重构 (BEP-29 合规性)
-- [ ] 完整测试覆盖 (当前 146 个测试)
+- [ ] 完整测试覆盖 (当前 158 个测试)
 - [ ] 性能优化
 - [ ] API 稳定化
 
@@ -458,5 +112,4 @@
 
 ## 任务归档说明
 
-完成的任务将定期归档到 `docs/tasks/` 目录，按日期命名。例如:
-- `docs/tasks/2025-12-03.md`
+完成的任务定期归档到 `docs/tasks/` 目录，按日期命名。索引请参见 [TASK_DONE.md](./TASK_DONE.md)。
