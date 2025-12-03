@@ -32,28 +32,28 @@
 
 | 任务 ID | 任务 | 描述 | 状态 |
 |---------|------|------|------|
-| MTU-1.1 | 常量定义 | 在 aiutp.hrl 添加 MTU 相关常量 | [ ] |
-| MTU-1.2 | PCB 记录扩展 | 添加 mtu_floor, mtu_ceiling 等字段 | [ ] |
-| MTU-1.3 | packet_wrap 扩展 | 添加 is_mtu_probe 标记 | [ ] |
-| MTU-1.4 | 配置接口 | 添加 MTU 配置读取/设置函数 | [ ] |
+| MTU-1.1 | 常量定义 | 在 aiutp.hrl 添加 MTU 相关常量 | [x] |
+| MTU-1.2 | PCB 记录扩展 | 添加 mtu_floor, mtu_ceiling 等字段 | [x] |
+| MTU-1.3 | packet_wrap 扩展 | 添加 is_mtu_probe 标记 | [x] |
+| MTU-1.4 | 配置接口 | 添加 MTU 配置读取/设置函数 | [-] 暂不需要 |
 
 ### 阶段 2: 核心逻辑实现
 
 | 任务 ID | 任务 | 描述 | 状态 |
 |---------|------|------|------|
-| MTU-2.1 | aiutp_mtu 模块 | 创建新模块实现核心 MTU 逻辑 | [ ] |
-| MTU-2.2 | 探测包发送集成 | 修改 aiutp_net.erl 支持探测包 | [ ] |
-| MTU-2.3 | ACK 处理集成 | 修改 aiutp_pcb_cc.erl 处理探测 ACK | [ ] |
+| MTU-2.1 | aiutp_mtu 模块 | 创建新模块实现核心 MTU 逻辑 | [x] |
+| MTU-2.2 | 探测包发送集成 | 修改 aiutp_net.erl 支持探测包 | [x] |
+| MTU-2.3 | ACK 处理集成 | 修改 aiutp_pcb.erl 处理探测 ACK | [x] |
 | MTU-2.4 | 超时处理集成 | 修改 aiutp_pcb_timeout.erl 处理探测超时 | [ ] |
 | MTU-2.5 | 丢包检测集成 | 修改 aiutp_tx.erl 检测探测包丢失 | [ ] |
 | MTU-2.6 | 周期性重新探测 | 实现 30 分钟周期重新探测 | [ ] |
-| MTU-2.7 | PCB 初始化集成 | 修改 aiutp_pcb.erl 初始化 MTU 状态 | [ ] |
+| MTU-2.7 | PCB 初始化集成 | 修改 aiutp_pcb.erl 初始化 MTU 状态 | [x] |
 
 ### 阶段 3: 测试和文档
 
 | 任务 ID | 任务 | 描述 | 状态 |
 |---------|------|------|------|
-| MTU-3.1 | 单元测试 | 创建 aiutp_mtu_tests.erl | [ ] |
+| MTU-3.1 | 单元测试 | 创建 aiutp_mtu_tests.erl (29 个测试) | [x] |
 | MTU-3.2 | 集成测试 | 创建 MTU 集成测试场景 | [ ] |
 | MTU-3.3 | 性能验证 | 验证探测开销和收敛时间 | [ ] |
 | MTU-3.4 | 文档更新 | 更新 README 和 API 文档 | [ ] |
@@ -64,6 +64,10 @@
 
 ### 最近完成 (2025-12-03)
 
+- [x] MTU 发现模块实现 (aiutp_mtu.erl，29 个测试用例)
+- [x] MTU 探测包发送集成 (aiutp_net.erl)
+- [x] MTU ACK 处理集成 (aiutp_pcb.erl)
+- [x] MTU PCB 初始化集成 (aiutp_pcb.erl)
 - [x] 快速重传对齐 libutp (fast_resend_seq_nr 检查、send_skipped_packets)
 - [x] process_ack_and_sack 重构为子函数
 - [x] need_resend 和 skip_count 字段文档
@@ -140,7 +144,7 @@
 ### v0.2.0 (进行中)
 - [x] gen_statem 重构 (aiutp_channel)
 - [x] PCB Packet Processing 重构 (BEP-29 合规性)
-- [ ] 完整测试覆盖 (当前 158 个测试)
+- [ ] 完整测试覆盖 (当前 187 个测试)
 - [ ] 性能优化
 - [ ] API 稳定化
 

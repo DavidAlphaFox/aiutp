@@ -593,8 +593,13 @@ send_new_packet(Type, Data, Payload,
         wnd = LastRcvWin
     },
 
+    %% 检查是否应该作为 MTU 探测包
+    %% 条件: 包大小在 (floor, ceiling] 范围内且无在途探测
+    IsMtuProbe = aiutp_mtu:should_probe(Payload, PCB),
+
     %% 包装并发送
-    WrapPacket = #aiutp_packet_wrap{payload = Payload, packet = Packet1},
+    WrapPacket = #aiutp_packet_wrap{payload = Payload, packet = Packet1,
+                                    is_mtu_probe = IsMtuProbe},
     WindowSize = window_size(MaxWindow, InBuf),
     {SendBytes, WrapPacket1, Content} =
         prepare_packet_for_send(MicroNow, ReplyMicro, WindowSize, AckNR, WrapPacket),
@@ -602,7 +607,18 @@ send_new_packet(Type, Data, Payload,
     OutBuf1 = aiutp_buffer:append(WrapPacket1, OutBuf),
     do_send(Socket, Content),
 
-    PCB#aiutp_pcb{
+    %% 如果是 MTU 探测包，更新探测状态
+    PCB1 = case IsMtuProbe of
+        true ->
+            PCB#aiutp_pcb{
+                mtu_probe_seq = SeqNR,
+                mtu_probe_size = Payload
+            };
+        false ->
+            PCB
+    end,
+
+    PCB1#aiutp_pcb{
         cur_window_packets = CurWindowPackets + 1,
         cur_window = CurWindow + SendBytes,
         outbuf = OutBuf1,

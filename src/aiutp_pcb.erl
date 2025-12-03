@@ -50,7 +50,7 @@
 -spec new(integer(), integer(), socket_ref()) -> #aiutp_pcb{}.
 new(ConnIdRecv, ConnIdSend, Socket) ->
     CurMilli = aiutp_util:millisecond(),
-    #aiutp_pcb{
+    PCB = #aiutp_pcb{
         time = CurMilli,
         state = ?CS_IDLE,
         socket = Socket,
@@ -69,7 +69,9 @@ new(ConnIdRecv, ConnIdSend, Socket) ->
         outbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
         inque = aiutp_queue:new(),
         outque = aiutp_queue:new()
-    }.
+    },
+    %% 初始化 MTU 发现状态
+    aiutp_mtu:reset(PCB).
 
 %%------------------------------------------------------------------------------
 %% @doc 获取当前连接状态
@@ -356,7 +358,11 @@ extract_and_process_acks(#aiutp_packet{ack_nr = PktAckNR, extension = Exts} = Pa
     %% 这可能导致某些包被标记为 need_resend=true
     {_SkippedCount, PCB1} = aiutp_tx:update_skip_counts(SAckedSeqs, PCB0),
 
-    {AckedPackets, SAckedPackets, SAckedSeqs, PCB1}.
+    %% 处理 MTU 探测包确认
+    %% 如果探测包被确认，更新 MTU 发现状态
+    PCB2 = handle_mtu_probe_acks(AckedPackets ++ SAckedPackets, PCB1),
+
+    {AckedPackets, SAckedPackets, SAckedSeqs, PCB2}.
 
 %% @private 步骤 2: 应用 LEDBAT 拥塞控制
 %%
@@ -593,6 +599,22 @@ handle_data_and_fin(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
         end,
     %% 处理数据（或 FIN 的空载荷）
     aiutp_rx:in(Packet, PCB0).
+
+%%------------------------------------------------------------------------------
+%% @private MTU 探测包 ACK 处理
+%%
+%% 遍历已确认的包列表，检查是否有 MTU 探测包被确认。
+%% 如果探测包被确认，调用 aiutp_mtu:on_probe_acked/2 更新 MTU 发现状态。
+%%------------------------------------------------------------------------------
+-spec handle_mtu_probe_acks([#aiutp_packet_wrap{}], #aiutp_pcb{}) -> #aiutp_pcb{}.
+handle_mtu_probe_acks([], PCB) ->
+    PCB;
+handle_mtu_probe_acks([#aiutp_packet_wrap{is_mtu_probe = true, packet = Packet} | Rest], PCB) ->
+    SeqNR = Packet#aiutp_packet.seq_nr,
+    PCB1 = aiutp_mtu:on_probe_acked(SeqNR, PCB),
+    handle_mtu_probe_acks(Rest, PCB1);
+handle_mtu_probe_acks([_ | Rest], PCB) ->
+    handle_mtu_probe_acks(Rest, PCB).
 
 %%------------------------------------------------------------------------------
 %% @doc 检查和处理超时

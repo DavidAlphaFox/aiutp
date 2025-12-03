@@ -122,6 +122,35 @@
 %% 用于接收乱序包的临时存储
 -define(REORDER_BUFFER_SIZE, 32).
 
+%%==============================================================================
+%% 第 6.1 节: MTU 发现参数
+%%
+%% 路径 MTU 发现 (PMTUD) 使用二分查找探测网络路径支持的最大包大小。
+%% 参考: RFC 4821 (PLPMTUD), libutp
+%%==============================================================================
+
+%% MTU 下限（载荷大小，字节）
+%% TCP 最小 MTU 576 - IP(20) - UDP(8) - uTP(20) = 528
+-define(MTU_FLOOR_DEFAULT, 528).
+
+%% MTU 上限（载荷大小，字节）
+%% 以太网 MTU 1500 - IP(20) - UDP(8) - uTP(20) = 1452
+-define(MTU_CEILING_DEFAULT, 1452).
+
+%% 二分查找终止阈值（字节）
+%% 当 ceiling - floor <= 此值时，搜索完成
+-define(MTU_SEARCH_THRESHOLD, 16).
+
+%% 重新探测间隔（微秒）
+%% libutp: 30 分钟 = 30 * 60 * 1000000
+-define(MTU_PROBE_INTERVAL, 1800000000).
+
+%% 探测失败回退阈值
+%% 连续失败此次数后，回退到 floor 值
+-define(MTU_PROBE_FAILURE_THRESHOLD, 3).
+
+%% 探测失败后延长间隔倍数
+-define(MTU_PROBE_BACKOFF_MULTIPLIER, 2).
 
 %%==============================================================================
 %% 第 7 节: 拥塞控制参数 (LEDBAT)
@@ -263,7 +292,11 @@
 
     %% BEP-29: 本包被 SACK 跳过的次数
     %% 当 skip_count >= 3 时，包应标记为快速重传
-    skip_count = 0 :: non_neg_integer()
+    skip_count = 0 :: non_neg_integer(),
+
+    %% MTU 探测标记
+    %% 当为 true 时，此包用于 MTU 发现探测
+    is_mtu_probe = false :: boolean()
 }).
 
 %%==============================================================================
@@ -487,7 +520,32 @@
     %%--------------------------------------------------------------------------
 
     %% 立即数据确认模式
-    ida = false :: boolean()
+    ida = false :: boolean(),
+
+    %%--------------------------------------------------------------------------
+    %% MTU 发现
+    %%--------------------------------------------------------------------------
+
+    %% MTU 二分查找下限（字节）
+    mtu_floor = ?MTU_FLOOR_DEFAULT :: non_neg_integer(),
+
+    %% MTU 二分查找上限（字节）
+    mtu_ceiling = ?MTU_CEILING_DEFAULT :: non_neg_integer(),
+
+    %% 当前使用的 MTU（载荷大小，字节）
+    mtu_last = ?PACKET_SIZE :: non_neg_integer(),
+
+    %% 在途探测包的序列号（0 表示无在途探测）
+    mtu_probe_seq = 0 :: non_neg_integer(),
+
+    %% 在途探测包的大小（字节）
+    mtu_probe_size = 0 :: non_neg_integer(),
+
+    %% 下次重新探测时间（微秒，绝对时间）
+    mtu_discover_time = 0 :: non_neg_integer(),
+
+    %% 连续探测失败次数
+    mtu_probe_failures = 0 :: non_neg_integer()
 }).
 
 -endif. %% AIUTP_HRL
