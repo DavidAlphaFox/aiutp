@@ -39,9 +39,6 @@
 -export([connect/3, listen/2, accept/1]).
 -export([register_channel/3, unregister_channel/3]).
 
-%% 向后兼容别名
--export([add_conn/3, free_conn/3]).
-
 %%==============================================================================
 %% gen_server 回调导出
 %%==============================================================================
@@ -207,20 +204,6 @@ register_channel(Socket, Remote, ConnId) ->
 unregister_channel(Socket, Remote, ConnId) ->
     gen_server:call(Socket, {unregister_channel, Remote, ConnId}, infinity).
 
-%% @doc register_channel/3 的向后兼容别名
-%% @deprecated 请使用 register_channel/3
--spec add_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) ->
-    ok | exists | overflow.
-add_conn(Socket, Remote, ConnId) ->
-    register_channel(Socket, Remote, ConnId).
-
-%% @doc unregister_channel/3 的向后兼容别名
-%% @deprecated 请使用 unregister_channel/3
--spec free_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) ->
-    ok.
-free_conn(Socket, Remote, ConnId) ->
-    unregister_channel(Socket, Remote, ConnId).
-
 %%==============================================================================
 %% gen_server 回调实现
 %%==============================================================================
@@ -291,18 +274,8 @@ handle_call({register_channel, Remote, ConnId, Channel}, _From, State) ->
     {Result, NewState} = do_register_channel(Remote, ConnId, Channel, State),
     {reply, Result, NewState};
 
-%% 向后兼容：旧的 add_conn 调用
-handle_call({add_conn, Remote, ConnId, Channel}, _From, State) ->
-    {Result, NewState} = do_register_channel(Remote, ConnId, Channel, State),
-    {reply, Result, NewState};
-
 %% 注销 Channel
 handle_call({unregister_channel, Remote, ConnId}, _From, State) ->
-    NewState = do_unregister_channel(Remote, ConnId, State),
-    {reply, ok, NewState};
-
-%% 向后兼容：旧的 free_conn 调用
-handle_call({free_conn, Remote, ConnId}, _From, State) ->
     NewState = do_unregister_channel(Remote, ConnId, State),
     {reply, ok, NewState};
 

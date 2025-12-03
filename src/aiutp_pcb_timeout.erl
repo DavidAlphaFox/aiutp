@@ -289,7 +289,6 @@ do_retransmit_timeout(#aiutp_pcb{
         cur_window = CurWindow,
         max_window = MaxWindow,
         outbuf = OutBuf,
-        seq_nr = SeqNR,
         retransmit_count = RetransmitCount
     } = PCB) ->
 
@@ -326,8 +325,7 @@ do_retransmit_timeout(#aiutp_pcb{
             cur_window = CurWindow0,
             outbuf = OutBuf0,
             retransmit_count = RetransmitCount + 1,
-            fast_timeout = true,
-            timeout_seq_nr = SeqNR
+            fast_timeout = true
         },
         %% 立即发送第一个需要重发的包
         {true, aiutp_net:send_packet(aiutp_buffer:head(OutBuf0), PCB1)};

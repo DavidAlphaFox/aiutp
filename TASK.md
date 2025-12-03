@@ -14,8 +14,6 @@
 
 | 任务 | 描述 | 优先级 |
 |------|------|--------|
-| clock_drift 惩罚机制 | 实现 libutp 的时钟漂移惩罚，防止作弊 | 高 |
-| 清理死代码 | 删除未使用的 PCB 字段和无效导出 | 中 |
 | 清理无效导出 | 移除仅内部使用的函数导出 | 中 |
 | 属性测试 | 使用 PropEr 添加属性测试 | 中 |
 | API 文档 | 添加 edoc 格式的 API 文档 | 中 |
@@ -26,6 +24,50 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] 删除 aiutp_socket 向后兼容别名
+  - 移除 `add_conn/3` 和 `free_conn/3` 导出
+  - 移除 `handle_call` 中对 `{add_conn, ...}` 和 `{free_conn, ...}` 的处理
+  - 更新 `aiutp_channel.erl` 调用：
+    - `aiutp_socket:add_conn/3` → `aiutp_socket:register_channel/3`
+    - `aiutp_socket:free_conn/3` → `aiutp_socket:unregister_channel/3`
+  - 158 个测试全部通过
+- [x] 缓冲区常量对齐 libutp
+  - 分析 libutp 源码中的缓冲区大小配置
+  - `OUTGOING_BUFFER_MAX_SIZE = 1024` 保持不变（与 libutp 一致）
+  - `max_window_user`: 256 → 255 个包（对齐 libutp）
+  - libutp 使用 255 为 FIN 包预留空间
+  - 158 个测试全部通过
+- [x] aiutp_channel 模块重构
+  - 完整重写模块，删除向后兼容代码
+  - 添加详细的模块文档和架构图（ASCII 状态机图）
+  - 代码按功能区域组织：API、回调、状态函数、内部函数
+  - 重命名函数以提高清晰度：
+    - `add_conn` → `allocate_conn_id`
+    - `cleanup_monitors` → `cleanup_resources`
+    - `active_read` → `maybe_deliver_data`
+    - `sync_input` → `forward_pending_messages`
+  - 提取状态处理为独立函数：
+    - `handle_connect`, `handle_accept`
+    - `handle_packet_connecting`, `handle_packet_accepting`, `handle_packet_connected`
+    - `handle_timeout_connecting`, `handle_timeout_accepting`, `handle_timeout_connected`
+    - `handle_parent_down`, `handle_controller_down`
+    - `handle_close`, `handle_closing_enter`
+  - 添加工具函数：`safe_demonitor`, `release_conn_id`, `notify_controller_if_active`
+  - 修复类型契约：`accept/4` 参数类型修正为 `{#aiutp_packet{}, non_neg_integer()}`
+  - 所有函数添加中文注释
+  - 158 个测试全部通过，Dialyzer 警告减少到 12 个
+- [x] clock_drift 惩罚机制（libutp 对齐）
+  - 在 `aiutp_pcb_cc.erl` 添加 `apply_clock_drift_penalty/2` 函数
+  - 当 `clock_drift < -200000` 时应用惩罚延迟
+  - 惩罚公式: `penalty = (-clock_drift - 200000) / 7`
+  - 防止对端通过减慢时钟来"作弊"获取更多带宽
+  - 添加 5 个测试用例验证惩罚机制
+  - 158 个测试全部通过
+- [x] 清理未使用的 PCB 字段
+  - 移除 `read_shutdown` 字段（设置但从不读取）
+  - 移除 `timeout_seq_nr` 字段（设置但从不读取）
+  - 保留 `average_delay` 相关字段（用于 `clock_drift` 计算）
+  - 158 个测试全部通过
 - [x] aiutp_pcb_timeout 超时处理模块重构（对齐 libutp）
   - RTO 退避因子: 1.5x → 2x（对齐 libutp/RFC 6298）
   - SYN_SENT 重试阈值: > 2 → >= 2（对齐 libutp MAX_SYN_RETRIES）
@@ -68,7 +110,6 @@
   - `RTT_VAR_INITIAL`: 800 → 250ms，符合 RFC 6298
   - `DUPLICATE_ACKS_BEFORE_RESEND`: 4 → 3，符合 BEP-29 和 TCP 标准
   - `BURST_OUTGOING_BUFFER_SIZE` → `BURST_SEND_COUNT`: 255 → 256（2的幂次）
-  - `max_window_user`: 255 → 256 个包（2的幂次）
   - `UDP_BUFFER_SIZE`: 6.25MB → 324KB，避免 bufferbloat
   - 移除冗余常量：`REORDER_BUFFER_MAX_SIZE`、`DUPLICATE_ACKS_BEFORE_RESEND_BEP29`
   - 147 个测试全部通过
@@ -273,23 +314,23 @@
 ### 代码清理（2025-12-03 扫描发现）
 
 #### 🔴 高优先级 - libutp 功能缺失
-- [ ] **clock_drift 惩罚机制** - `aiutp_rtt.erl` 计算了 clock_drift 但从未使用
+- [x] **clock_drift 惩罚机制** - ~~`aiutp_rtt.erl` 计算了 clock_drift 但从未使用~~
+  - 已实现: 在 `aiutp_pcb_cc.erl` 添加 `apply_clock_drift_penalty/2`
   - libutp: 当 `clock_drift < -200000` 时应用惩罚延迟
   - 目的: 防止对端通过减慢时钟来"作弊"
-  - 影响模块: `aiutp_pcb_cc.erl`, `aiutp_rtt.erl`
 
 #### ⚠️ 中优先级 - 死代码清理
 
 **未使用的 PCB 字段（设置但从不读取）:**
-- [ ] `read_shutdown` - `aiutp_pcb.erl:531` 设置，从不读取
-- [ ] `timeout_seq_nr` - `aiutp_pcb_timeout.erl:330` 设置，从不读取
+- [x] ~~`read_shutdown`~~ - 已移除
+- [x] ~~`timeout_seq_nr`~~ - 已移除
 
-**死计算（计算但结果从不使用）:**
-- [ ] `clock_drift` - 在 `aiutp_rtt.erl` 计算但从不用于拥塞控制
-- [ ] `average_delay` - 在 `aiutp_rtt.erl` 计算但从不使用
-- [ ] `average_delay_base` - 死计算的一部分
-- [ ] `current_delay_sum` - 死计算的一部分
-- [ ] `current_delay_samples` - 死计算的一部分
+**延迟统计字段（用于 clock_drift 计算，保留）:**
+- [x] `clock_drift` - 现已用于拥塞控制惩罚机制
+- [x] `average_delay` - 用于计算 clock_drift
+- [x] `average_delay_base` - 用于计算 average_delay
+- [x] `current_delay_sum` - 用于计算 average_delay
+- [x] `current_delay_samples` - 用于计算 average_delay
 
 **无效导出（仅内部使用，不应导出）:**
 - [ ] `aiutp_pcb:new/3` - 仅 connect/accept 内部调用

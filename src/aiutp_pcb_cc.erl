@@ -32,6 +32,12 @@
 %%   cwnd += GAIN * off_target * bytes_acked * MSS / cwnd
 %%   其中 off_target = (TARGET - queuing_delay) / TARGET
 %%
+%% 时钟漂移惩罚 (libutp):
+%%   当检测到对端时钟变慢超过 200ms/5s 时，应用惩罚延迟
+%%   penalty = (-clock_drift - 200000) / 7
+%%   our_delay += penalty
+%%   目的：防止对端通过减慢时钟来"作弊"获取更多带宽
+%%
 %% @param Now 当前时间戳（毫秒）
 %% @param AckedBytes 已确认字节数
 %% @param RTT 测量的往返时间（微秒）
@@ -44,10 +50,18 @@ cc_control(Now, AckedBytes, RTT,
            #aiutp_pcb{our_hist = OurHist,
                       max_window = MaxWindow,
                       last_maxed_out_window = LastMaxedOutWindow,
-                      slow_start = SlowStart, ssthresh = SSThresh} = PCB) ->
+                      slow_start = SlowStart, ssthresh = SSThresh,
+                      clock_drift = ClockDrift} = PCB) ->
     %% 获取当前延迟估计（取历史最小值和当前 RTT 的较小者）
     OurHistValue = aiutp_delay:value(OurHist),
-    OurDelay = erlang:min(aiutp_util:bit32(RTT), OurHistValue),
+    OurDelayRaw = erlang:min(aiutp_util:bit32(RTT), OurHistValue),
+
+    %% libutp 时钟漂移惩罚机制
+    %% 当 clock_drift < -200000（对端时钟变慢超过 200ms/5s）时应用惩罚
+    %% 这防止对端通过减慢时钟来"作弊"获取更多带宽
+    %% Reason: 如果对端减慢时钟，会使我们测量的延迟看起来更低，
+    %%         从而让我们的拥塞窗口增长过快，占用过多带宽
+    OurDelay = apply_clock_drift_penalty(ClockDrift, OurDelayRaw),
 
     %% 目标延迟固定为 100ms（RFC 6817 要求 <= 100ms）
     Target = ?TARGET_DELAY,
@@ -264,3 +278,34 @@ selective_ack_packet(SAckedPackets,
         end;
        true -> PCB0
     end.
+
+%%------------------------------------------------------------------------------
+%% 内部函数
+%%------------------------------------------------------------------------------
+
+%% libutp 时钟漂移惩罚阈值（微秒/5秒）
+%% 当 clock_drift < -200000 时应用惩罚
+-define(CLOCK_DRIFT_PENALTY_THRESHOLD, -200000).
+
+%%------------------------------------------------------------------------------
+%% @doc 应用时钟漂移惩罚
+%%
+%% libutp 实现：当检测到对端时钟变慢超过阈值时，增加感知延迟。
+%% 这防止对端通过减慢时钟来"作弊"获取更多带宽。
+%%
+%% 公式: penalty = (-clock_drift - 200000) / 7
+%%       our_delay = our_delay + penalty
+%%
+%% @param ClockDrift 估计的时钟漂移（微秒/5秒）
+%% @param OurDelay 原始延迟估计（微秒）
+%% @returns 应用惩罚后的延迟（微秒）
+%% @end
+%%------------------------------------------------------------------------------
+-spec apply_clock_drift_penalty(integer(), non_neg_integer()) -> non_neg_integer().
+apply_clock_drift_penalty(ClockDrift, OurDelay) when ClockDrift < ?CLOCK_DRIFT_PENALTY_THRESHOLD ->
+    %% 对端时钟变慢超过 200ms/5s，应用惩罚
+    Penalty = (-ClockDrift - 200000) div 7,
+    OurDelay + Penalty;
+apply_clock_drift_penalty(_ClockDrift, OurDelay) ->
+    %% 时钟漂移在正常范围内，不应用惩罚
+    OurDelay.

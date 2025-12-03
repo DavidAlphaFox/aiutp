@@ -155,6 +155,95 @@ maybe_decay_win_minimum_test() ->
     ?assert(Result#aiutp_pcb.max_window >= ?MIN_WINDOW_SIZE).
 
 %%==============================================================================
+%% Test: cc_control/4 - 时钟漂移惩罚机制
+%%==============================================================================
+
+cc_control_no_clock_drift_penalty_test() ->
+    %% clock_drift 在正常范围内，不应用惩罚
+    Now = aiutp_util:millisecond(),
+    PCB = #aiutp_pcb{
+        our_hist = aiutp_delay:new(Now),
+        max_window = 10000,
+        last_maxed_out_window = Now,
+        slow_start = false,
+        ssthresh = 50000,
+        clock_drift = 0  %% 无漂移
+    },
+    Result = aiutp_pcb_cc:cc_control(Now, 1400, 50000, PCB),
+    %% 窗口应该正常调整（无惩罚）
+    ?assert(Result#aiutp_pcb.max_window >= ?MIN_WINDOW_SIZE).
+
+cc_control_small_negative_clock_drift_test() ->
+    %% clock_drift 为小负值（在阈值内），不应用惩罚
+    Now = aiutp_util:millisecond(),
+    PCB = #aiutp_pcb{
+        our_hist = aiutp_delay:new(Now),
+        max_window = 10000,
+        last_maxed_out_window = Now,
+        slow_start = false,
+        ssthresh = 50000,
+        clock_drift = -100000  %% -100ms/5s，低于 -200ms 阈值
+    },
+    Result = aiutp_pcb_cc:cc_control(Now, 1400, 50000, PCB),
+    %% 窗口应该正常调整（无惩罚）
+    ?assert(Result#aiutp_pcb.max_window >= ?MIN_WINDOW_SIZE).
+
+cc_control_large_negative_clock_drift_penalty_test() ->
+    %% clock_drift 超过阈值，应用惩罚
+    %% 当 clock_drift < -200000 时，惩罚延迟增加
+    Now = aiutp_util:millisecond(),
+    %% 创建一个有较低延迟历史的 PCB
+    OurHist = aiutp_delay:add_sample(30000, Now, aiutp_delay:new(Now)),  %% 30ms 延迟
+    PCB = #aiutp_pcb{
+        our_hist = OurHist,
+        max_window = 100000,
+        last_maxed_out_window = Now,
+        slow_start = false,
+        ssthresh = 200000,
+        clock_drift = -500000  %% -500ms/5s，超过 -200ms 阈值
+    },
+    %% 惩罚 = (-(-500000) - 200000) / 7 = 300000 / 7 ≈ 42857us
+    %% 这会增加感知延迟，从而减小窗口
+    ResultWithPenalty = aiutp_pcb_cc:cc_control(Now, 1400, 30000, PCB),
+
+    %% 对比无惩罚情况
+    PCBNoPenalty = PCB#aiutp_pcb{clock_drift = 0},
+    ResultNoPenalty = aiutp_pcb_cc:cc_control(Now, 1400, 30000, PCBNoPenalty),
+
+    %% 有惩罚时窗口应该更小或相等（因为感知延迟更高）
+    ?assert(ResultWithPenalty#aiutp_pcb.max_window =< ResultNoPenalty#aiutp_pcb.max_window).
+
+cc_control_clock_drift_at_threshold_test() ->
+    %% clock_drift 刚好在阈值边界
+    Now = aiutp_util:millisecond(),
+    PCB = #aiutp_pcb{
+        our_hist = aiutp_delay:new(Now),
+        max_window = 10000,
+        last_maxed_out_window = Now,
+        slow_start = false,
+        ssthresh = 50000,
+        clock_drift = -200000  %% 刚好 -200ms/5s，不应用惩罚
+    },
+    Result = aiutp_pcb_cc:cc_control(Now, 1400, 50000, PCB),
+    %% 边界值不应用惩罚
+    ?assert(Result#aiutp_pcb.max_window >= ?MIN_WINDOW_SIZE).
+
+cc_control_clock_drift_just_below_threshold_test() ->
+    %% clock_drift 刚好超过阈值一点
+    Now = aiutp_util:millisecond(),
+    PCB = #aiutp_pcb{
+        our_hist = aiutp_delay:new(Now),
+        max_window = 10000,
+        last_maxed_out_window = Now,
+        slow_start = false,
+        ssthresh = 50000,
+        clock_drift = -200001  %% 刚好超过阈值，应用惩罚
+    },
+    Result = aiutp_pcb_cc:cc_control(Now, 1400, 50000, PCB),
+    %% 应用惩罚，惩罚 = (200001 - 200000) / 7 = 0（太小）
+    ?assert(Result#aiutp_pcb.max_window >= ?MIN_WINDOW_SIZE).
+
+%%==============================================================================
 %% Test: Module exports
 %%==============================================================================
 

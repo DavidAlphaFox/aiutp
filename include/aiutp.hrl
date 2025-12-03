@@ -301,9 +301,6 @@
     %% 用户已调用 close()
     close_requested = false :: boolean(),
 
-    %% 读取已禁用（半关闭）
-    read_shutdown = false :: boolean(),
-
     %%--------------------------------------------------------------------------
     %% 序列号管理
     %%--------------------------------------------------------------------------
@@ -313,9 +310,6 @@
 
     %% 我们已确认的最后序列号（所有此序列号之前的包已收到）
     ack_nr = 0 :: non_neg_integer(),
-
-    %% 用于超时检测的序列号
-    timeout_seq_nr = 0 :: non_neg_integer(),
 
     %% 下一个允许快速重发的序列号（防止重复快速重发）
     fast_resend_seq_nr = 1 :: non_neg_integer(),
@@ -355,8 +349,9 @@
     max_window = 0 :: non_neg_integer(),
 
     %% 对端通告的最大接收窗口（字节）
-    %% 默认 256 个包大小，使用 2 的幂次
-    max_window_user = 256 * ?PACKET_SIZE :: non_neg_integer(),
+    %% libutp: max_window_user = 255 * PACKET_SIZE
+    %% 减 1 为 FIN 包预留空间
+    max_window_user = 255 * ?PACKET_SIZE :: non_neg_integer(),
 
     %% 我们通告的最后接收窗口（字节）
     last_rcv_win = 0 :: non_neg_integer(),

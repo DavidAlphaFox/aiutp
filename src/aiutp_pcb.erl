@@ -528,7 +528,7 @@ close(#aiutp_pcb{state = State} = PCB)
     PCB0 = aiutp_net:send_reset(PCB),
     PCB0#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{fin_sent_acked = FinSentAcked, fin_sent = FinSent} = PCB) ->
-    PCB0 = PCB#aiutp_pcb{read_shutdown = true, close_requested = true},
+    PCB0 = PCB#aiutp_pcb{close_requested = true},
     if FinSent == false ->
         aiutp_net:send_fin(PCB0#aiutp_pcb{fin_sent = true});
        FinSentAcked == true ->
