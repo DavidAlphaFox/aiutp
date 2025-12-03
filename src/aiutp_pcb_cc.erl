@@ -238,7 +238,8 @@ selective_ack_packet([], _, PCB) -> PCB;
 selective_ack_packet(SAckedPackets,
                      MicroNow,
                      #aiutp_pcb{seq_nr = SeqNR,
-                                cur_window_packets = CurWindowPackets} = PCB) ->
+                                cur_window_packets = CurWindowPackets,
+                                fast_resend_seq_nr = FastResendSeqNR} = PCB) ->
     Now0 = aiutp_util:millisecond(),
 
     %% 从 SACK 的包更新 RTT 和窗口
@@ -261,14 +262,28 @@ selective_ack_packet(SAckedPackets,
     },
 
     %% 计算快速重传的序列号范围
+    %% libutp: 只重传序列号 >= fast_resend_seq_nr 的包，防止重复重传
     [El | _] = SAckedPackets,
-    MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
+    OldestUnackedSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
     Packet = El#aiutp_packet_wrap.packet,
     MaxSeq = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1),
 
+    %% libutp: MinSeq 应该是 max(OldestUnackedSeq, FastResendSeqNR)
+    %% 这样可以避免重传已经快速重传过的包
+    MinSeq = case ?WRAPPING_DIFF_16(FastResendSeqNR, OldestUnackedSeq) > 0 of
+        true -> FastResendSeqNR;
+        false -> OldestUnackedSeq
+    end,
+
+    %% 构建 SACK 确认的序列号集合，用于精确筛选需要重传的包
+    SAckedSeqs = sets:from_list([
+        (W#aiutp_packet_wrap.packet)#aiutp_packet.seq_nr || W <- SAckedPackets
+    ]),
+
     if ?WRAPPING_DIFF_16(MaxSeq, MinSeq) > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-        %% 触发快速重传
-        {Sent, LastSeq, PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
+        %% 触发快速重传：只重传被跳过的包（不在 SACK 集合中的包）
+        {Sent, LastSeq, PCB1} = aiutp_net:send_skipped_packets(
+            MinSeq, MaxSeq, SAckedSeqs, 4, PCB0),
         PCB2 = PCB1#aiutp_pcb{
             fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
             duplicate_ack = erlang:length(SAckedPackets)

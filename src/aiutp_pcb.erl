@@ -296,39 +296,89 @@ handle_duplicate_acks(Packet, PCB) ->
 
 %% @private 阶段 3：处理 ACK、SACK 并应用拥塞控制
 %%
-%% 这是核心 ACK 处理阶段，负责：
-%% - 从发送缓冲区提取已确认的包
-%% - 根据已确认的包计算 RTT
-%% - LEDBAT 拥塞控制更新
-%% - 零窗口处理
-%% - 选择性确认（SACK）处理
-%% - 连接建立的状态转换
-process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
-                                   wnd = PktMaxWindowUser,
-                                   extension = Exts} = Packet,
-                     #aiutp_pcb{state = State,
-                                time = Now,
-                                fast_resend_seq_nr = FastResendSeqNR,
-                                fast_timeout = FastTimeout,
-                                zerowindow_time = ZeroWindowTime,
-                                fin_sent = FinSent,
-                                close_requested = CloseRequested,
-                                fin_sent_acked = FinSentAcked,
-                                recv_time = RecvTime} = PCB) ->
+%% 这是核心 ACK 处理阶段，分为以下子步骤：
+%% 1. extract_and_process_acks - 提取已确认的包并更新跳过计数
+%% 2. apply_congestion_control - 应用 LEDBAT 拥塞控制
+%% 3. update_ack_state - 更新 ACK 相关状态（零窗口、连接状态等）
+%% 4. process_rtt_from_acks - 从已确认包计算 RTT
+%% 5. handle_fast_retransmit - 处理快速重传逻辑
+%%
+%% 关于快速重传的详细场景说明，请参考：
+%% docs/development/fast-retransmit-scenarios.md
+process_ack_and_sack(Packet, PCB) ->
+    %% 步骤 1: 提取已确认的包并更新跳过计数
+    {AckedPackets, SAckedPackets, SAckedSeqs, PCB1} = extract_and_process_acks(Packet, PCB),
+
+    %% 步骤 2: 应用 LEDBAT 拥塞控制
+    PCB2 = apply_congestion_control(Packet, AckedPackets, SAckedPackets, PCB1),
+
+    %% 步骤 3: 更新 ACK 相关状态
+    PCB3 = update_ack_state(Packet, PCB2),
+
+    %% 步骤 4: 从已确认包计算 RTT
+    PCB4 = process_rtt_from_acks(AckedPackets, PCB3),
+
+    %% 步骤 5: 处理快速重传（流水线发送、快速超时恢复、SACK 触发重传）
+    PCB5 = handle_fast_retransmit(SAckedPackets, SAckedSeqs, PCB4),
+
+    update_connection_state(Packet, PCB5).
+
+%%------------------------------------------------------------------------------
+%% process_ack_and_sack 子函数
+%%------------------------------------------------------------------------------
+
+%% @private 步骤 1: 提取已确认的包并更新 SACK 跳过计数
+%%
+%% 处理流程：
+%% 1. 从 outbuf 提取被累积确认的包（seq_nr <= ack_nr）
+%% 2. 从 outbuf 提取被选择性确认的包（在 SACK 位图中）
+%% 3. 解析 SACK 扩展获取序列号列表
+%% 4. 更新被跳过包的 skip_count，达到阈值时标记 need_resend=true
+%%
+%% SACK 跳过计数机制（参考 libutp）：
+%% - 当包 A 的序列号小于 SACK 中的序列号，且 A 不在 SACK 中时，A 被"跳过"
+%% - 每次被跳过时 skip_count++
+%% - 当 skip_count >= DUPLICATE_ACKS_BEFORE_RESEND (3) 时触发快速重传
+%%
+%% 示例：发送 10,11,12,13，包 11 丢失，收到 SACK={12,13}
+%%       包 11 的 skip_count 增加，多次后触发快速重传
+-spec extract_and_process_acks(#aiutp_packet{}, #aiutp_pcb{}) ->
+    {[#aiutp_packet_wrap{}], [#aiutp_packet_wrap{}], [non_neg_integer()], #aiutp_pcb{}}.
+extract_and_process_acks(#aiutp_packet{ack_nr = PktAckNR, extension = Exts} = Packet, PCB) ->
     %% 从发送缓冲区提取已确认的包
     {AckedPackets, SAckedPackets, PCB0} = aiutp_tx:extract_acked(Packet, PCB),
 
-    %% BEP-29：更新被 SACK 跳过的包的跳过计数
-    %% 从扩展中提取 SACK 序列号
+    %% BEP-29：解析 SACK 扩展获取被选择性确认的序列号列表
+    %% SACK 覆盖范围从 ack_nr + 2 开始（ack_nr + 1 是期望的下一个包）
     SAckedSeqs = aiutp_tx:parse_sack_extension(Exts, aiutp_util:bit16(PktAckNR + 2)),
-    {_SkippedCount, PCB0a} = aiutp_tx:update_skip_counts(SAckedSeqs, PCB0),
 
+    %% 更新被 SACK 跳过的包的跳过计数
+    %% 这可能导致某些包被标记为 need_resend=true
+    {_SkippedCount, PCB1} = aiutp_tx:update_skip_counts(SAckedSeqs, PCB0),
+
+    {AckedPackets, SAckedPackets, SAckedSeqs, PCB1}.
+
+%% @private 步骤 2: 应用 LEDBAT 拥塞控制
+%%
+%% LEDBAT (Low Extra Delay Background Transport) 算法：
+%% - 目标延迟: 100ms
+%% - 当延迟低于目标时增加窗口
+%% - 当延迟高于目标时减少窗口
+%% - 包含慢启动和拥塞避免两个阶段
+%%
+%% 时钟漂移惩罚：
+%% - 检测对端时钟变慢超过 200ms/5s 时应用惩罚
+%% - 防止对端通过减慢时钟"作弊"获取更多带宽
+-spec apply_congestion_control(#aiutp_packet{}, [#aiutp_packet_wrap{}],
+                               [#aiutp_packet_wrap{}], #aiutp_pcb{}) -> #aiutp_pcb{}.
+apply_congestion_control(Packet, AckedPackets, SAckedPackets,
+                         #aiutp_pcb{time = Now, recv_time = RecvTime} = PCB) ->
     %% 计算已确认字节总数和最小 RTT
     {AckedBytes, MinRTT} = aiutp_pcb_cc:caculate_acked_bytes(
                                {0, ?RTT_MAX}, RecvTime, AckedPackets, SAckedPackets),
 
     %% 根据时间戳差计算实际单向延迟
-    {ActualDelay, PCB1} = aiutp_rtt:caculate_delay(Now, RecvTime, Packet, PCB0a),
+    {ActualDelay, PCB1} = aiutp_rtt:caculate_delay(Now, RecvTime, Packet, PCB),
 
     %% 更新延迟历史记录用于 LEDBAT
     OurHist = PCB1#aiutp_pcb.our_hist,
@@ -339,16 +389,34 @@ process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
            true -> OurHist
         end,
 
-    %% 如果收到 ACK 则应用 LEDBAT 拥塞控制
-    PCB2 =
-        if (ActualDelay /= 0) and (AckedBytes > 0) ->
-            aiutp_pcb_cc:cc_control(Now, AckedBytes, MinRTT,
-                                    PCB1#aiutp_pcb{our_hist = OurHist0});
-           true ->
-            PCB1#aiutp_pcb{our_hist = OurHist0}
-        end,
+    %% 如果收到有效 ACK 则应用 LEDBAT 拥塞控制
+    if (ActualDelay /= 0) and (AckedBytes > 0) ->
+        aiutp_pcb_cc:cc_control(Now, AckedBytes, MinRTT,
+                                PCB1#aiutp_pcb{our_hist = OurHist0});
+       true ->
+        PCB1#aiutp_pcb{our_hist = OurHist0}
+    end.
 
-    %% 处理零窗口 - 设置探测定时器
+%% @private 步骤 3: 更新 ACK 相关状态
+%%
+%% 处理：
+%% - 零窗口探测定时器（对端窗口为 0 时设置 15 秒探测）
+%% - 连接状态转换（SYN_RECV -> CONNECTED, SYN_SENT -> CONNECTED）
+%% - FIN 确认状态（当所有包包括 FIN 都被确认时）
+%% - 更新 max_window_user（对端通告的接收窗口）
+%% - 更新 fast_resend_seq_nr（防止重复快速重传）
+-spec update_ack_state(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
+update_ack_state(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
+                               wnd = PktMaxWindowUser},
+                 #aiutp_pcb{state = State,
+                            time = Now,
+                            fast_resend_seq_nr = FastResendSeqNR,
+                            zerowindow_time = ZeroWindowTime,
+                            fin_sent = FinSent,
+                            close_requested = CloseRequested,
+                            fin_sent_acked = FinSentAcked,
+                            cur_window_packets = CurWindowPackets} = PCB) ->
+    %% 处理零窗口 - 当对端通告窗口为 0 时设置探测定时器
     ZeroWindowTime0 =
         if PktMaxWindowUser == 0 -> Now + 15000;
            true -> ZeroWindowTime
@@ -360,11 +428,12 @@ process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
            true -> State
         end,
 
+    %% 检查 FIN 是否被确认和最终状态转换
     {State1, FinSentAcked0} =
         if (PktType == ?ST_STATE) and (State0 == ?CS_SYN_SENT) ->
             %% 收到 SYN-ACK，连接已建立
             {?CS_CONNECTED, false};
-           (FinSent == true) and (PCB2#aiutp_pcb.cur_window_packets == 0) ->
+           (FinSent == true) and (CurWindowPackets == 0) ->
             %% 包括 FIN 在内的所有包都已被确认
             if CloseRequested -> {?CS_DESTROY, true};
                true -> {State0, true}
@@ -372,28 +441,47 @@ process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
            true -> {State0, FinSentAcked}
         end,
 
-    %% 更新快速重发序列号
+    %% 更新 fast_resend_seq_nr 防止重复快速重传
+    %% 当收到更新的 ACK 时，更新此值以跳过已确认的序列号范围
     PktAckNR0 = aiutp_util:bit16(PktAckNR + 1),
     FastResendSeqNR0 =
         if ?WRAPPING_DIFF_16(FastResendSeqNR, PktAckNR0) < 0 -> PktAckNR0;
            true -> FastResendSeqNR
         end,
 
-    %% 处理已确认的包用于 RTT 计算（Karn 算法）
-    {_, CurWindow0, RTT0, RTO0, RTTVar0, RTTHist0} =
-        lists:foldr(
-            fun(I, AccPCB) -> aiutp_pcb_cc:ack_packet(RecvTime, I, AccPCB) end,
-            {Now, PCB2#aiutp_pcb.cur_window, PCB2#aiutp_pcb.rtt, PCB2#aiutp_pcb.rto,
-             PCB2#aiutp_pcb.rtt_var, PCB2#aiutp_pcb.rtt_hist},
-            AckedPackets),
-
-    Now0 = aiutp_util:millisecond(),
-    PCB3 = PCB2#aiutp_pcb{
+    PCB#aiutp_pcb{
         max_window_user = PktMaxWindowUser,
         state = State1,
         fin_sent_acked = FinSentAcked0,
         fast_resend_seq_nr = FastResendSeqNR0,
-        zerowindow_time = ZeroWindowTime0,
+        zerowindow_time = ZeroWindowTime0
+    }.
+
+%% @private 步骤 4: 从已确认包计算 RTT 并更新 RTO
+%%
+%% RTT 计算使用 Karn 算法：
+%% - 只使用首次传输的包计算 RTT（重传的包不用于 RTT 计算）
+%% - RTT 平滑：SRTT = (1-α)*SRTT + α*R，α = 1/8
+%% - RTT 变差：RTTVAR = (1-β)*RTTVAR + β*|SRTT-R|，β = 1/4
+%% - RTO = SRTT + 4*RTTVAR，限制在 [600ms, 6000ms]
+%%
+%% 同时更新 cur_window（从确认的包中减去已确认的字节）
+-spec process_rtt_from_acks([#aiutp_packet_wrap{}], #aiutp_pcb{}) -> #aiutp_pcb{}.
+process_rtt_from_acks(AckedPackets,
+                      #aiutp_pcb{time = Now, recv_time = RecvTime,
+                                 cur_window = CurWindow,
+                                 rtt = RTT, rto = RTO,
+                                 rtt_var = RTTVar,
+                                 rtt_hist = RTTHist} = PCB) ->
+    %% 使用 foldr 处理已确认的包（Karn 算法）
+    {_, CurWindow0, RTT0, RTO0, RTTVar0, RTTHist0} =
+        lists:foldr(
+            fun(I, AccPCB) -> aiutp_pcb_cc:ack_packet(RecvTime, I, AccPCB) end,
+            {Now, CurWindow, RTT, RTO, RTTVar, RTTHist},
+            AckedPackets),
+
+    Now0 = aiutp_util:millisecond(),
+    PCB#aiutp_pcb{
         cur_window = CurWindow0,
         rtt = RTT0,
         rtt_var = RTTVar0,
@@ -402,32 +490,66 @@ process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
         retransmit_count = 0,
         retransmit_timeout = RTO0,
         rto_timeout = RTO0 + Now0
-    },
+    }.
 
-    %% 如果只有一个包在传输中，发送下一个包（流水线）
-    PCB4 =
-        if PCB3#aiutp_pcb.cur_window_packets == 1 ->
-            aiutp_net:send_packet(aiutp_buffer:head(PCB3#aiutp_pcb.outbuf), PCB3);
-           true -> PCB3
+%% @private 步骤 5: 处理快速重传
+%%
+%% 快速重传触发场景：
+%%
+%% 1. 流水线发送：当只有一个包在传输中时，立即发送下一个包以保持流水线
+%%
+%% 2. 快速超时恢复（fast_timeout 模式）：
+%%    - 当 RTO 超时后进入此模式
+%%    - 每收到一个 ACK 就重传一个包
+%%    - 直到最旧未确认包改变（说明丢失的包已恢复）
+%%
+%%    示例：发送 10,11,12，包 10 丢失后 RTO 超时
+%%          进入 fast_timeout，每次收到 ACK 重传一个包
+%%          当包 10 被确认后退出 fast_timeout
+%%
+%% 3. SACK 触发的批量重传：
+%%    - 当 SACK 表明有包被跳过超过 3 次时
+%%    - 最多重传 4 个包
+%%    - 触发窗口衰减（max_window *= 0.5）
+%%
+%%    示例：发送 10-20，包 11,13,15 丢失
+%%          收到 SACK={12,14,16,17,18,19,20}
+%%          检测到跨度超过阈值，重传 11,13,15（最多 4 个）
+-spec handle_fast_retransmit([#aiutp_packet_wrap{}], [non_neg_integer()], #aiutp_pcb{}) ->
+    #aiutp_pcb{}.
+handle_fast_retransmit(SAckedPackets, _SAckedSeqs,
+                       #aiutp_pcb{cur_window_packets = CurWindowPackets,
+                                  fast_timeout = FastTimeout,
+                                  fast_resend_seq_nr = FastResendSeqNR,
+                                  seq_nr = SeqNR,
+                                  outbuf = OutBuf,
+                                  recv_time = RecvTime} = PCB) ->
+    %% 场景 1: 流水线发送 - 保持传输流畅
+    PCB1 =
+        if CurWindowPackets == 1 ->
+            aiutp_net:send_packet(aiutp_buffer:head(OutBuf), PCB);
+           true -> PCB
         end,
 
-    %% 处理快速超时恢复
-    PCB5 =
+    %% 场景 2: 快速超时恢复
+    %% 在 RTO 超时后进入此模式，每收到 ACK 重传一个包
+    PCB2 =
         if FastTimeout ->
-            if ?WRAPPING_DIFF_16(PCB4#aiutp_pcb.seq_nr,
-                                 PCB4#aiutp_pcb.cur_window_packets) /= FastResendSeqNR0 ->
-                PCB4#aiutp_pcb{fast_timeout = false};
+            OldestUnackedSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
+            if OldestUnackedSeq /= FastResendSeqNR ->
+                %% 最旧未确认包已改变，退出快速超时模式
+                PCB1#aiutp_pcb{fast_timeout = false};
                true ->
+                %% 继续重传下一个包
                 aiutp_net:send_packet(
-                    aiutp_buffer:head(PCB4#aiutp_pcb.outbuf),
-                    PCB4#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(FastResendSeqNR0 + 1)})
+                    aiutp_buffer:head(PCB1#aiutp_pcb.outbuf),
+                    PCB1#aiutp_pcb{fast_resend_seq_nr = aiutp_util:bit16(FastResendSeqNR + 1)})
             end;
-           true -> PCB4
+           true -> PCB1
         end,
 
-    %% 处理选择性确认用于拥塞控制
-    PCB6 = aiutp_pcb_cc:selective_ack_packet(SAckedPackets, RecvTime, PCB5),
-    update_connection_state(Packet, PCB6).
+    %% 场景 3: SACK 触发的批量快速重传
+    aiutp_pcb_cc:selective_ack_packet(SAckedPackets, RecvTime, PCB2).
 
 %% @private 阶段 4：更新连接状态机
 %%

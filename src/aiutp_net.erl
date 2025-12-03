@@ -41,6 +41,7 @@
     flush_queue/1,
     send_packet/2,
     send_n_packets/4,
+    send_skipped_packets/5,
     %% 控制包发送
     schedule_ack/1,
     send_ack/1,
@@ -188,6 +189,29 @@ send_packet(Pos, #aiutp_pcb{time = Now,
 send_n_packets(MinSeq, MaxSeq, Limit, #aiutp_pcb{outbuf = OutBuf} = PCB) ->
     Iter = aiutp_buffer:head(OutBuf),
     {Remain, LastSeq, PCB1} = send_n_packets_loop(MinSeq, MaxSeq, Limit, Iter, PCB),
+    {Limit - Remain, LastSeq, PCB1}.
+
+%%------------------------------------------------------------------------------
+%% @doc 发送被 SACK 跳过的数据包（精确快速重传）
+%%
+%% libutp 风格：只重传在指定范围内且未被 SACK 确认的包。
+%% 这比 send_n_packets 更精确，避免重传已被 SACK 确认的包。
+%%
+%% @param MinSeq 最小序列号
+%% @param MaxSeq 最大序列号
+%% @param SAckedSeqs SACK 确认的序列号集合
+%% @param Limit 最多发送的包数
+%% @param PCB 协议控制块
+%% @returns {SentCount, LastSeqNR, UpdatedPCB}
+%% @end
+%%------------------------------------------------------------------------------
+-spec send_skipped_packets(non_neg_integer(), non_neg_integer(), sets:set(),
+                           non_neg_integer(), #aiutp_pcb{}) ->
+    {non_neg_integer(), non_neg_integer(), #aiutp_pcb{}}.
+send_skipped_packets(MinSeq, MaxSeq, SAckedSeqs, Limit, #aiutp_pcb{outbuf = OutBuf} = PCB) ->
+    Iter = aiutp_buffer:head(OutBuf),
+    {Remain, LastSeq, PCB1} = send_skipped_packets_loop(
+        MinSeq, MaxSeq, SAckedSeqs, Limit, Iter, PCB),
     {Limit - Remain, LastSeq, PCB1}.
 
 %%==============================================================================
@@ -633,6 +657,83 @@ send_n_packets_loop(MinSeq, MaxSeq, Limit, Iter,
                     %% 包序列号小于 MinSeq，继续查找
                     Next = aiutp_buffer:next(Iter, OutBuf),
                     send_n_packets_loop(MinSeq, MaxSeq, Limit, Next, PCB);
+                false ->
+                    %% 包序列号超出范围，停止
+                    {Limit, MinSeq, PCB}
+            end
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 发送被跳过的数据包（精确快速重传）
+%%
+%% libutp 风格：只重传在指定范围内、未被 SACK 确认、且已发送过的包。
+%% 这比 send_n_packets_loop 更精确，避免重传已被 SACK 确认的包。
+%%
+%% 筛选条件：
+%% 1. 序列号在 [MinSeq, MaxSeq) 范围内
+%% 2. 不在 SAckedSeqs 集合中（未被 SACK 确认）
+%% 3. transmissions > 0（已经发送过）
+%%------------------------------------------------------------------------------
+-spec send_skipped_packets_loop(non_neg_integer(), non_neg_integer(), sets:set(),
+                                non_neg_integer(), integer(), #aiutp_pcb{}) ->
+    {non_neg_integer(), non_neg_integer(), #aiutp_pcb{}}.
+send_skipped_packets_loop(MinSeq, _MaxSeq, _SAckedSeqs, Limit, Iter, PCB)
+  when Limit == 0; Iter == -1 ->
+    {Limit, MinSeq, PCB};
+send_skipped_packets_loop(MinSeq, MaxSeq, SAckedSeqs, Limit, Iter,
+                          #aiutp_pcb{time = Now,
+                                     socket = Socket,
+                                     max_window = MaxWindow,
+                                     outbuf = OutBuf,
+                                     cur_window = CurWindow,
+                                     inbuf = InBuf,
+                                     reply_micro = ReplyMicro,
+                                     ack_nr = AckNR} = PCB) ->
+    WrapPacket = aiutp_buffer:data(Iter, OutBuf),
+    Packet = WrapPacket#aiutp_packet_wrap.packet,
+    PktSeqNR = Packet#aiutp_packet.seq_nr,
+    Transmissions = WrapPacket#aiutp_packet_wrap.transmissions,
+
+    %% 检查是否在序列号范围内
+    InRange = (?WRAPPING_DIFF_16(MaxSeq, PktSeqNR) > 0) andalso
+              (?WRAPPING_DIFF_16(PktSeqNR, MinSeq) >= 0),
+
+    %% libutp: 只重传满足以下条件的包：
+    %% 1. 在范围内
+    %% 2. 已发送过 (transmissions > 0)
+    %% 3. 未被 SACK 确认（不在 SAckedSeqs 中）
+    ShouldResend = InRange andalso
+                   (Transmissions > 0) andalso
+                   (not sets:is_element(PktSeqNR, SAckedSeqs)),
+
+    case InRange of
+        true ->
+            Next = aiutp_buffer:next(Iter, OutBuf),
+            case ShouldResend of
+                true ->
+                    %% 重传这个被跳过的包
+                    MicroNow = aiutp_util:microsecond(),
+                    WindowSize = window_size(MaxWindow, InBuf),
+                    {SendBytes, WrapPacket1, Content} =
+                        prepare_packet_for_send(MicroNow, ReplyMicro, WindowSize, AckNR, WrapPacket),
+                    OutBuf1 = aiutp_buffer:replace(Iter, WrapPacket1, OutBuf),
+                    do_send(Socket, Content),
+                    send_skipped_packets_loop(
+                        PktSeqNR, MaxSeq, SAckedSeqs, Limit - 1, Next,
+                        PCB#aiutp_pcb{cur_window = CurWindow + SendBytes,
+                                      outbuf = OutBuf1,
+                                      last_sent_packet = Now});
+                false ->
+                    %% 包在范围内但不需要重传（已被 SACK 确认或未发送），继续查找
+                    send_skipped_packets_loop(MinSeq, MaxSeq, SAckedSeqs, Limit, Next, PCB)
+            end;
+        false ->
+            case ?WRAPPING_DIFF_16(MinSeq, PktSeqNR) > 0 of
+                true ->
+                    %% 包序列号小于 MinSeq，继续查找
+                    Next = aiutp_buffer:next(Iter, OutBuf),
+                    send_skipped_packets_loop(MinSeq, MaxSeq, SAckedSeqs, Limit, Next, PCB);
                 false ->
                     %% 包序列号超出范围，停止
                     {Limit, MinSeq, PCB}
