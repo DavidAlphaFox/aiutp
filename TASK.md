@@ -22,6 +22,15 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_delay 延迟估计模块重构
+  - 重写模块文档，详细说明 LEDBAT 延迟估计算法
+  - 说明核心概念：Base Delay、Current Delay、Queuing Delay
+  - 说明时钟漂移处理机制
+  - 说明 32 位环绕处理
+  - 改进 record 字段注释
+  - 重写所有函数的 edoc 文档
+  - 新增 6 个测试用例（共 17 个）
+  - 153 个测试全部通过
 - [x] LEDBAT 拥塞控制重构（对齐 RFC 6817 和 libutp）
   - 重构 `aiutp_pcb_cc.erl`:
     - 移除动态 target_delay 更新，使用固定 100ms（RFC 6817）
