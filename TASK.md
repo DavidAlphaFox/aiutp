@@ -14,10 +14,14 @@
 
 | 任务 | 描述 | 优先级 |
 |------|------|--------|
+| clock_drift 惩罚机制 | 实现 libutp 的时钟漂移惩罚，防止作弊 | 高 |
+| 清理死代码 | 删除未使用的 PCB 字段和无效导出 | 中 |
+| 清理无效导出 | 移除仅内部使用的函数导出 | 中 |
 | 属性测试 | 使用 PropEr 添加属性测试 | 中 |
 | API 文档 | 添加 edoc 格式的 API 文档 | 中 |
 | 性能测试 | 建立性能基准测试 | 低 |
 | Hex 发布 | 准备发布到 Hex.pm | 低 |
+| 删除测试文件 | 删除 src/aiutp_test.erl | 低 |
 
 ## 已完成任务
 
@@ -265,6 +269,44 @@
 - [x] 添加 dialyzer 类型规范检查 (已完成 2025-12-03)
 - [x] 使用 maps 替代部分 record，提高可读性 (已完成 2025-12-03)
 - [ ] 考虑支持 IPv6
+
+### 代码清理（2025-12-03 扫描发现）
+
+#### 🔴 高优先级 - libutp 功能缺失
+- [ ] **clock_drift 惩罚机制** - `aiutp_rtt.erl` 计算了 clock_drift 但从未使用
+  - libutp: 当 `clock_drift < -200000` 时应用惩罚延迟
+  - 目的: 防止对端通过减慢时钟来"作弊"
+  - 影响模块: `aiutp_pcb_cc.erl`, `aiutp_rtt.erl`
+
+#### ⚠️ 中优先级 - 死代码清理
+
+**未使用的 PCB 字段（设置但从不读取）:**
+- [ ] `read_shutdown` - `aiutp_pcb.erl:531` 设置，从不读取
+- [ ] `timeout_seq_nr` - `aiutp_pcb_timeout.erl:330` 设置，从不读取
+
+**死计算（计算但结果从不使用）:**
+- [ ] `clock_drift` - 在 `aiutp_rtt.erl` 计算但从不用于拥塞控制
+- [ ] `average_delay` - 在 `aiutp_rtt.erl` 计算但从不使用
+- [ ] `average_delay_base` - 死计算的一部分
+- [ ] `current_delay_sum` - 死计算的一部分
+- [ ] `current_delay_samples` - 死计算的一部分
+
+**无效导出（仅内部使用，不应导出）:**
+- [ ] `aiutp_pcb:new/3` - 仅 connect/accept 内部调用
+- [ ] `aiutp_pcb:process/2` - 向后兼容别名，从未被调用
+- [ ] `aiutp_pcb_cc:maybe_decay_win/1` - 仅内部使用
+- [ ] `aiutp_pcb_timeout:mark_need_resend/4` - 仅内部使用
+
+**仅测试使用的导出（考虑保留或移除）:**
+- [ ] `aiutp_buffer:tail/1`
+- [ ] `aiutp_delay:new/0`
+- [ ] `aiutp_packet:fin/2` - 生产中用不同方式创建 FIN
+- [ ] `aiutp_queue:back/1`, `pop_back/1`
+- [ ] `aiutp_util:bit32_random/0`
+- [ ] `aiutp_util:wrapping_compare_less/3`
+
+#### 📝 低优先级 - 可选清理
+- [ ] 删除 `src/aiutp_test.erl` - 手动测试文件，非必需
 
 ## 里程碑
 
