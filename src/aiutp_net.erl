@@ -374,7 +374,9 @@ flush_packets_loop(-1, PCB) ->
 flush_packets_loop(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB) ->
     {IsFull, PCB1} = is_full(-1, PCB),
     case IsFull of
-        true -> PCB1;
+        true ->
+            %% 窗口已满，检查是否需要转换到 CS_CONNECTED_FULL
+            maybe_transition_to_full(PCB1);
         false ->
             Next = aiutp_buffer:next(Iter, OutBuf),
             WrapPacket = aiutp_buffer:data(Iter, OutBuf),
@@ -388,6 +390,20 @@ flush_packets_loop(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB) ->
                     flush_packets_loop(Next, PCB1)
             end
     end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查是否需要从 CS_CONNECTED 转换到 CS_CONNECTED_FULL
+%%
+%% 根据 libutp：当 is_full() 返回 true 且当前状态是 CS_CONNECTED 时，
+%% 转换到 CS_CONNECTED_FULL 状态。
+%% @end
+%%------------------------------------------------------------------------------
+-spec maybe_transition_to_full(#aiutp_pcb{}) -> #aiutp_pcb{}.
+maybe_transition_to_full(#aiutp_pcb{state = ?CS_CONNECTED} = PCB) ->
+    PCB#aiutp_pcb{state = ?CS_CONNECTED_FULL};
+maybe_transition_to_full(PCB) ->
+    PCB.
 
 %%------------------------------------------------------------------------------
 %% @private

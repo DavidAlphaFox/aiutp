@@ -58,6 +58,9 @@
 %% 数据被包装为 {ST_DATA, Binary} 放入 outque，
 %% 然后调用 flush_queue 尝试发送。
 %%
+%% 根据 libutp 实现，当发送缓冲区满时，状态从 CS_CONNECTED 转换为
+%% CS_CONNECTED_FULL，用于流量控制。
+%%
 %% @param Data 要发送的二进制数据
 %% @param PCB 协议控制块
 %% @returns 更新后的 PCB
@@ -66,7 +69,28 @@
 -spec in(binary(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 in(Data, #aiutp_pcb{outque = OutQue} = PCB) ->
     OutQue1 = aiutp_queue:push_back({?ST_DATA, Data}, OutQue),
-    aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue1}).
+    PCB1 = aiutp_net:flush_queue(PCB#aiutp_pcb{outque = OutQue1}),
+    %% 检查是否需要转换到 CS_CONNECTED_FULL 状态
+    maybe_transition_to_full(PCB1).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查是否需要从 CS_CONNECTED 转换到 CS_CONNECTED_FULL
+%%
+%% 根据 libutp：当 is_full() 返回 true 且当前状态是 CS_CONNECTED 时，
+%% 转换到 CS_CONNECTED_FULL 状态。这是流量控制的一部分，表示发送
+%% 窗口已满，需要等待 ACK 释放空间后才能继续发送。
+%% @end
+%%------------------------------------------------------------------------------
+-spec maybe_transition_to_full(#aiutp_pcb{}) -> #aiutp_pcb{}.
+maybe_transition_to_full(#aiutp_pcb{state = ?CS_CONNECTED} = PCB) ->
+    {IsFull, PCB1} = aiutp_net:is_full(-1, PCB),
+    case IsFull of
+        true -> PCB1#aiutp_pcb{state = ?CS_CONNECTED_FULL};
+        false -> PCB1
+    end;
+maybe_transition_to_full(PCB) ->
+    PCB.
 
 %%------------------------------------------------------------------------------
 %% @doc 提取所有被 ACK 和 SACK 确认的数据包
