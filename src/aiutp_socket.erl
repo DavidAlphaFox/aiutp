@@ -43,7 +43,7 @@
 %% gen_server 回调导出
 %%==============================================================================
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+-export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3, format_status/1]).
 
 %%==============================================================================
@@ -213,10 +213,14 @@ unregister_channel(Socket, Remote, ConnId) ->
 %% @doc 初始化服务器
 %%
 %% 打开 UDP 套接字并初始化状态。
-%% 从父监督者获取 channel_sup 的 pid。
+%% 使用 handle_continue 延迟获取 channel_sup 的 pid，避免死锁。
+%%
+%% 死锁说明：
+%% 如果在 init 中调用 supervisor:which_children(Parent)，
+%% 会导致死锁，因为 supervisor 正在等待 init 返回。
 %% @end
 %%------------------------------------------------------------------------------
--spec init(list()) -> {ok, state()} | {stop, term()}.
+-spec init(list()) -> {ok, state(), {continue, get_channel_sup}} | {stop, term()}.
 init([Port, Options]) ->
     process_flag(trap_exit, true),
 
@@ -227,28 +231,40 @@ init([Port, Options]) ->
     %% 解析 uTP 选项
     UTPOptions = proplists:get_value(utp, Options, []),
 
-    %% 从父监督者获取 channel_sup pid
-    %% 注意：channel_sup 在监督树中先于 socket 启动
+    %% 打开 UDP 套接字
+    case open_udp_socket(Port, UDPOptions1) of
+        {ok, Socket} ->
+            %% 使用 continue 延迟获取 channel_sup，避免死锁
+            {ok, #{
+                socket => Socket,
+                channel_sup => undefined,  %% 延迟初始化
+                conns => #{},
+                monitors => #{},
+                conn_count => 0,
+                max_conns => ?DEFAULT_MAX_CONNS,
+                acceptor => closed,
+                options => UTPOptions
+            }, {continue, get_channel_sup}};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 延迟初始化 - 获取 channel_sup
+%%
+%% 在 init 返回后执行，此时 supervisor 已经不再阻塞，
+%% 可以安全调用 supervisor:which_children。
+%% @end
+%%------------------------------------------------------------------------------
+-spec handle_continue(get_channel_sup, state()) ->
+    {noreply, state()} | {stop, term(), state()}.
+handle_continue(get_channel_sup, State) ->
     case get_sibling_channel_sup() of
         {ok, ChannelSup} ->
-            %% 打开 UDP 套接字
-            case open_udp_socket(Port, UDPOptions1) of
-                {ok, Socket} ->
-                    {ok, #{
-                        socket => Socket,
-                        channel_sup => ChannelSup,
-                        conns => #{},
-                        monitors => #{},
-                        conn_count => 0,
-                        max_conns => ?DEFAULT_MAX_CONNS,
-                        acceptor => closed,
-                        options => UTPOptions
-                    }};
-                {error, Reason} ->
-                    {stop, Reason}
-            end;
+            {noreply, State#{channel_sup := ChannelSup}};
         {error, Reason} ->
-            {stop, {channel_sup_not_found, Reason}}
+            {stop, {channel_sup_not_found, Reason}, State}
     end.
 
 %%------------------------------------------------------------------------------
