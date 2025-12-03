@@ -190,7 +190,7 @@ handle_call({close,Controll},From,#state{pcb = PCB,controller = Controll,
       if ControlMonitor /= undefined -> erlang:demonitor(ControlMonitor,[flush]);
          true -> ok
       end,
-      {reply,ok,State#state{controller = undefiend,
+      {reply,ok,State#state{controller = undefined,
                             controller_monitor = undefined,
                             active = false}};
     _ ->
@@ -311,11 +311,12 @@ handle_info({'DOWN', MRef, process, Parent, _Reason},
      (Active == true) -> Controller ! {utp_closed,{utp,Parent,self()},crash};
      true -> ok
   end,
-  {stop,crash,undefiend};
+  {stop,crash,undefined};
 
 %% 控制进程崩溃了，那么快速失败吧
 handle_info({'DOWN', MRef, process, Control, _Reason},
-            #state{controller = Control,
+            #state{parent = Parent,
+                   controller = Control,
                    remote = Remote,
                    controller_monitor = MRef,
                    pcb = PCB,
@@ -326,7 +327,7 @@ handle_info({'DOWN', MRef, process, Control, _Reason},
   if Timer == undefined ->
       %% 此处不应当发生
       %% contrller被monitor的时候，timer也同步建立了
-      if ConnId /= undefined -> aiutp_socket:remove_conn(Remote,ConnId);
+      if ConnId /= undefined -> aiutp_socket:free_conn(Parent,Remote,ConnId);
          true -> ok
       end,
       {stop,normal,undefined};

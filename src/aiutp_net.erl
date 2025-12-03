@@ -342,11 +342,20 @@ flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
 schedule_ack(#aiutp_pcb{ida = false} = PCB) -> PCB;
 schedule_ack(PCB) -> send_ack(PCB#aiutp_pcb{ida = false}).
 
+%% @doc Send UDP packet with retry logic
+%% BEP-29: Network send failures should be handled gracefully.
+%% The protocol's timeout and retransmission mechanisms will handle packet loss.
+%% We log errors but don't crash - let the PCB timeout logic decide when to give up.
 do_send(Socket,Remote,Count,Content)->
   case gen_udp:send(Socket,Remote,Content) of
-    ok -> ok ;
-    Error ->
-      if Count == 0 -> error(Error);
+    ok -> ok;
+    {error, Reason} = Error ->
+      if Count == 0 ->
+          %% All retries exhausted, log warning and return error
+          %% The PCB timeout mechanism will handle connection recovery
+          logger:warning("uTP UDP send failed after retries: ~p, remote: ~p",
+                        [Reason, Remote]),
+          Error;
          true ->
           timer:sleep(150),
           do_send(Socket,Remote,Count -1,Content)

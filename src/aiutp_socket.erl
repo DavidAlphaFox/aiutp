@@ -165,10 +165,11 @@ handle_info({udp, Socket, IP, Port, Payload},
             #state{socket = Socket} = State)->
   case aiutp_packet:decode(Payload) of
     {ok,Packet} -> dispatch({IP,Port},Packet, State);
-    _ -> ok
-    %{error,_Reason}->
-      %error_logger:info_report([decode_error,Reason]),
-     % ok
+    {error, Reason} ->
+      %% BEP-29: Log decode errors for debugging, but don't crash
+      %% This can happen with malformed packets or protocol version mismatch
+      logger:debug("uTP packet decode failed from ~p:~p, reason: ~p, size: ~p",
+                   [IP, Port, Reason, byte_size(Payload)])
   end,
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};

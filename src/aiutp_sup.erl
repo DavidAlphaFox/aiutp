@@ -19,7 +19,7 @@ init([]) ->
                 type => supervisor,
                 modules => [aiutp_socket_sup]
                },
-  WorkerSup = #{id => aiutp_woker_sup,
+  WorkerSup = #{id => aiutp_worker_sup,
                 start => {aiutp_worker_sup,start_link,[]},
                 restart => transient,
                 shutdown => 5000,
