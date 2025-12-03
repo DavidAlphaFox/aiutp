@@ -19,6 +19,7 @@
 - aiutp_pcb 模块拆分 (2025-12-03)
 - aiutp_pcb_timeout 重构 (2025-12-03)
 - aiutp_delay 重构 (2025-12-03)
+- process_ack_and_sack 重构为子函数 (2025-12-03)
 
 ### Bug 修复
 - aiutp_channel closing 状态修复 (2025-12-03)
@@ -31,6 +32,10 @@
 - 常量优化 BEP-29 合规性 (2025-12-03)
 - clock_drift 惩罚机制 libutp 对齐 (2025-12-03)
 - 缓冲区常量对齐 libutp (2025-12-03)
+- 快速重传对齐 libutp (2025-12-03)
+  - 添加 fast_resend_seq_nr 检查防止重复重传
+  - 添加 send_skipped_packets 精确筛选需重传的包
+- CS_CONNECTED_FULL 状态转换实现 (2025-12-03)
 
 ### 架构改进
 - Worker 重构为 Channel gen_statem (2025-12-03)
@@ -45,6 +50,8 @@
 - 项目初始化和文档完善 (2025-12-03)
 - BEP-29 协议分析报告 (2025-12-03)
 - PCB 和常量重构文档 (2025-12-03)
+- need_resend 和 skip_count 字段详解文档 (2025-12-03)
+- 快速重传场景对照表更新 (2025-12-03)
 
 ## 统计
 

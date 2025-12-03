@@ -14,6 +14,7 @@
 
 | 任务 | 描述 | 优先级 |
 |------|------|--------|
+| **MTU 发现** | 实现路径 MTU 发现功能 | **高** |
 | 清理无效导出 | 移除仅内部使用的函数导出 | 中 |
 | 属性测试 | 使用 PropEr 添加属性测试 | 中 |
 | API 文档 | 添加 edoc 格式的 API 文档 | 中 |
@@ -21,12 +22,52 @@
 | Hex 发布 | 准备发布到 Hex.pm | 低 |
 | 删除测试文件 | 删除 src/aiutp_test.erl | 低 |
 
+---
+
+## MTU 发现功能任务分解
+
+> 详细设计文档: [docs/requirements/features/mtu-discovery.md](./docs/requirements/features/mtu-discovery.md)
+
+### 阶段 1: 基础设施准备
+
+| 任务 ID | 任务 | 描述 | 状态 |
+|---------|------|------|------|
+| MTU-1.1 | 常量定义 | 在 aiutp.hrl 添加 MTU 相关常量 | [ ] |
+| MTU-1.2 | PCB 记录扩展 | 添加 mtu_floor, mtu_ceiling 等字段 | [ ] |
+| MTU-1.3 | packet_wrap 扩展 | 添加 is_mtu_probe 标记 | [ ] |
+| MTU-1.4 | 配置接口 | 添加 MTU 配置读取/设置函数 | [ ] |
+
+### 阶段 2: 核心逻辑实现
+
+| 任务 ID | 任务 | 描述 | 状态 |
+|---------|------|------|------|
+| MTU-2.1 | aiutp_mtu 模块 | 创建新模块实现核心 MTU 逻辑 | [ ] |
+| MTU-2.2 | 探测包发送集成 | 修改 aiutp_net.erl 支持探测包 | [ ] |
+| MTU-2.3 | ACK 处理集成 | 修改 aiutp_pcb_cc.erl 处理探测 ACK | [ ] |
+| MTU-2.4 | 超时处理集成 | 修改 aiutp_pcb_timeout.erl 处理探测超时 | [ ] |
+| MTU-2.5 | 丢包检测集成 | 修改 aiutp_tx.erl 检测探测包丢失 | [ ] |
+| MTU-2.6 | 周期性重新探测 | 实现 30 分钟周期重新探测 | [ ] |
+| MTU-2.7 | PCB 初始化集成 | 修改 aiutp_pcb.erl 初始化 MTU 状态 | [ ] |
+
+### 阶段 3: 测试和文档
+
+| 任务 ID | 任务 | 描述 | 状态 |
+|---------|------|------|------|
+| MTU-3.1 | 单元测试 | 创建 aiutp_mtu_tests.erl | [ ] |
+| MTU-3.2 | 集成测试 | 创建 MTU 集成测试场景 | [ ] |
+| MTU-3.3 | 性能验证 | 验证探测开销和收敛时间 | [ ] |
+| MTU-3.4 | 文档更新 | 更新 README 和 API 文档 | [ ] |
+
 ## 已完成任务
 
 > 详细的已完成任务记录请参见 [TASK_DONE.md](./TASK_DONE.md)
 
 ### 最近完成 (2025-12-03)
 
+- [x] 快速重传对齐 libutp (fast_resend_seq_nr 检查、send_skipped_packets)
+- [x] process_ack_and_sack 重构为子函数
+- [x] need_resend 和 skip_count 字段文档
+- [x] CS_CONNECTED_FULL 状态转换实现
 - [x] aiutp_buffer/aiutp_queue 模块重构
 - [x] aiutp_channel closing 状态修复
 - [x] aiutp_rx/aiutp_tx/aiutp_net 模块重构
@@ -67,6 +108,7 @@
 
 ### 改进建议
 - [ ] 考虑支持 IPv6
+- [ ] MTU 发现功能（已规划，见上方任务分解）
 
 ### 代码清理
 
