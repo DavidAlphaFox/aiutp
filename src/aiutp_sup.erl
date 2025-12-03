@@ -4,18 +4,18 @@
 -export([start_link/0]).
 -export([init/1]).
 
-%% @doc Start the top-level supervisor
+%% @doc 启动顶层监督者
 -spec start_link() -> {ok, pid()} | {error, term()} | ignore.
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%% @doc Initialize the supervisor with child specifications
+%% @doc 使用子进程规范初始化监督者
 -spec init(term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
-  %% Use rest_for_one strategy:
-  %% - Channels depend on sockets (need UDP to send/receive)
-  %% - If socket_sup crashes, channel_sup must restart (channels become invalid)
-  %% - If channel_sup crashes, socket_sup continues working (sockets are independent)
+  %% 使用 rest_for_one 策略：
+  %% - Channel 依赖于 socket（需要 UDP 来发送/接收）
+  %% - 如果 socket_sup 崩溃，channel_sup 必须重启（channel 变得无效）
+  %% - 如果 channel_sup 崩溃，socket_sup 继续工作（socket 是独立的）
   SupFlags = #{strategy => rest_for_one,
                intensity => 1,
                period => 5},

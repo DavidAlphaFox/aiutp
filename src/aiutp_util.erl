@@ -44,11 +44,11 @@ clamp(Val, Min, _Max) when Val < Min -> Min;
 clamp(Val, _Min, Max) when Val > Max -> Max;
 clamp(Val, _Min, _Max) -> Val.
 
-%% @doc Compare two sequence numbers with wrapping semantics.
-%% Returns true if L < R considering wrapping around Mask.
-%% Mask should be 16#FFFF for 16-bit sequence numbers.
-%% Example: wrapping_compare_less(65534, 1, 16#FFFF) -> true
-%% because 65534 is "before" 1 when the sequence wraps at 65535.
+%% @doc 使用回绕语义比较两个序列号
+%% 考虑到 Mask 的回绕，如果 L < R 则返回 true。
+%% 对于 16 位序列号，Mask 应为 16#FFFF。
+%% 例如：wrapping_compare_less(65534, 1, 16#FFFF) -> true
+%% 因为当序列在 65535 处回绕时，65534 在 1 "之前"。
 -spec wrapping_compare_less(integer(), integer(), integer()) -> boolean().
 wrapping_compare_less(L, R, Mask) ->
   Down = (L - R) band Mask,

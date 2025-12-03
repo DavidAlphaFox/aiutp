@@ -9,7 +9,7 @@
 -type extension() :: {sack, binary()} | {ext_bits, binary() | undefined}.
 -type extension_list() :: [extension()].
 
-%% Extension types are now defined in aiutp.hrl
+%% 扩展类型现在定义在 aiutp.hrl 中
 %% EXT_SACK = 1, EXT_EXT_BITS = 2
 
 -spec reset(non_neg_integer(), non_neg_integer()) -> #aiutp_packet{}.

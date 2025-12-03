@@ -2,23 +2,22 @@
 %%% @author David Gao <david.alpha.fox@gmail.com>
 %%% @copyright (C) 2025, David Gao
 %%% @doc
-%%% uTP Channel - Connection state machine using gen_statem
+%%% uTP 通道 - 使用 gen_statem 的连接状态机
 %%%
-%%% This module manages a single uTP connection using gen_statem behavior.
-%%% It replaces the previous gen_server based aiutp_worker with clearer
-%%% state management.
+%%% 本模块使用 gen_statem 行为管理单个 uTP 连接。
+%%% 它取代了之前基于 gen_server 的 aiutp_worker，提供更清晰的状态管理。
 %%%
-%%% State Machine:
+%%% 状态机：
 %%%   idle -> connecting -> connected -> closing -> closed
 %%%        -> accepting  -> connected -> closing -> closed
 %%%
-%%% States:
-%%%   - idle: Initial state, waiting for connect or accept
-%%%   - connecting: Client initiated, SYN sent, waiting for SYN-ACK
-%%%   - accepting: Server received SYN, sent ACK, waiting for data
-%%%   - connected: Connection established, bidirectional data transfer
-%%%   - closing: FIN sent or received, graceful shutdown in progress
-%%%   - closed: Terminal state, process will stop
+%%% 状态说明：
+%%%   - idle: 初始状态，等待连接或接受命令
+%%%   - connecting: 客户端发起连接，已发送 SYN，等待 SYN-ACK
+%%%   - accepting: 服务端收到 SYN，已发送 ACK，等待数据
+%%%   - connected: 连接已建立，可双向传输数据
+%%%   - closing: 已发送或收到 FIN，正在优雅关闭
+%%%   - closed: 终止状态，进程将停止
 %%%
 %%% @end
 %%% Created : 20 Jun 2025 by David Gao <david.alpha.fox@gmail.com>
@@ -29,35 +28,35 @@
 
 -include("aiutp.hrl").
 
-%% API
+%% API 导出
 -export([start_link/2]).
 -export([connect/4, accept/4, incoming/2]).
 -export([send/2, recv/2, active/2, close/2]).
 -export([controlling_process/2]).
 
-%% gen_statem callbacks
+%% gen_statem 回调
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
 
-%% State functions
+%% 状态函数
 -export([idle/3, connecting/3, accepting/3, connected/3, closing/3]).
 
 -define(SERVER, ?MODULE).
 
 %%------------------------------------------------------------------------------
-%% Channel State Data (map)
+%% 通道状态数据 (map)
 %%
-%% Keys:
-%% - parent: pid() - Parent socket process
-%% - parent_monitor: reference() - Monitor ref for parent
-%% - socket: gen_udp:socket() - UDP socket
-%% - remote: {inet:ip_address(), inet:port_number()} | undefined - Remote address
-%% - conn_id: non_neg_integer() | undefined - Connection ID
-%% - controller: pid() | undefined - Controlling process
-%% - controller_monitor: reference() | undefined - Monitor ref for controller
-%% - pcb: #aiutp_pcb{} | undefined - Protocol Control Block
-%% - tick_timer: reference() | undefined - Timer reference
-%% - blocker: gen_statem:from() | undefined - Blocked caller
-%% - active: boolean() - Active mode flag
+%% 键说明：
+%% - parent: pid() - 父套接字进程
+%% - parent_monitor: reference() - 父进程监视器引用
+%% - socket: gen_udp:socket() - UDP 套接字
+%% - remote: {inet:ip_address(), inet:port_number()} | undefined - 远程地址
+%% - conn_id: non_neg_integer() | undefined - 连接 ID
+%% - controller: pid() | undefined - 控制进程
+%% - controller_monitor: reference() | undefined - 控制进程监视器引用
+%% - pcb: #aiutp_pcb{} | undefined - 协议控制块
+%% - tick_timer: reference() | undefined - 定时器引用
+%% - blocker: gen_statem:from() | undefined - 阻塞的调用者
+%% - active: boolean() - 主动模式标志
 %%------------------------------------------------------------------------------
 -type data() :: #{
     parent := pid(),
@@ -78,7 +77,7 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Start a new channel process
+%% @doc 启动新的通道进程
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(pid(), port()) -> {ok, pid()} | {error, term()}.
@@ -86,7 +85,7 @@ start_link(Parent, Socket) ->
     gen_statem:start_link(?MODULE, [Parent, Socket], []).
 
 %%--------------------------------------------------------------------
-%% @doc Initiate outbound connection
+%% @doc 发起出站连接
 %% @end
 %%--------------------------------------------------------------------
 -spec connect(pid(), pid(), inet:ip_address() | string(), inet:port_number()) ->
@@ -95,7 +94,7 @@ connect(Pid, Caller, Address, Port) ->
     gen_statem:call(Pid, {connect, Caller, {Address, Port}}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Accept inbound connection
+%% @doc 接受入站连接
 %% @end
 %%--------------------------------------------------------------------
 -spec accept(pid(), pid(), tuple(), term()) -> ok | {error, term()}.
@@ -103,7 +102,7 @@ accept(Pid, Caller, Remote, Packet) ->
     gen_statem:call(Pid, {accept, Caller, Remote, Packet}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Handle incoming packet
+%% @doc 处理传入的数据包
 %% @end
 %%--------------------------------------------------------------------
 -spec incoming(pid(), term()) -> ok.
@@ -111,7 +110,7 @@ incoming(Pid, Packet) ->
     gen_statem:cast(Pid, {packet, Packet}).
 
 %%--------------------------------------------------------------------
-%% @doc Send data
+%% @doc 发送数据
 %% @end
 %%--------------------------------------------------------------------
 -spec send(pid(), iodata()) -> ok | {error, term()}.
@@ -119,7 +118,7 @@ send(Pid, Data) ->
     gen_statem:call(Pid, {send, Data}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Receive data (placeholder - actual recv logic in connected state)
+%% @doc 接收数据（占位符 - 实际接收逻辑在 connected 状态中）
 %% @end
 %%--------------------------------------------------------------------
 -spec recv(pid(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
@@ -127,7 +126,7 @@ recv(Pid, Len) ->
     gen_statem:call(Pid, {recv, Len}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Set active mode
+%% @doc 设置主动模式
 %% @end
 %%--------------------------------------------------------------------
 -spec active(pid(), boolean()) -> ok.
@@ -135,7 +134,7 @@ active(Pid, V) ->
     gen_statem:call(Pid, {active, V}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Close connection
+%% @doc 关闭连接
 %% @end
 %%--------------------------------------------------------------------
 -spec close(pid(), pid()) -> ok | {error, term()}.
@@ -143,7 +142,7 @@ close(Pid, Caller) ->
     gen_statem:call(Pid, {close, Caller}, infinity).
 
 %%--------------------------------------------------------------------
-%% @doc Transfer control to another process
+%% @doc 将控制权转移给另一个进程
 %% @end
 %%--------------------------------------------------------------------
 -spec controlling_process(pid(), pid()) -> ok | {error, term()}.
@@ -166,7 +165,7 @@ controlling_process(Pid, NewOwner) ->
     end.
 
 %%%===================================================================
-%%% gen_statem callbacks
+%%% gen_statem 回调函数
 %%%===================================================================
 
 -spec callback_mode() -> gen_statem:callback_mode_result().
@@ -184,8 +183,8 @@ init([Parent, Socket]) ->
     {ok, idle, Data}.
 
 %%--------------------------------------------------------------------
-%% State: idle
-%% Initial state, waiting for connect or accept command
+%% 状态: idle
+%% 初始状态，等待连接或接受命令
 %%--------------------------------------------------------------------
 idle(enter, _OldState, Data) ->
     {keep_state, Data};
@@ -245,8 +244,8 @@ idle(info, _Msg, _Data) ->
     keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% State: connecting
-%% Client initiated connection, SYN sent, waiting for SYN-ACK
+%% 状态: connecting
+%% 客户端发起连接，已发送 SYN，等待 SYN-ACK
 %%--------------------------------------------------------------------
 connecting(enter, idle, _Data) ->
     {keep_state_and_data, []};
@@ -291,11 +290,14 @@ connecting(info, {'DOWN', MRef, process, Parent, _Reason},
     {stop_and_reply, normal, Actions};
 
 connecting(info, {'DOWN', MRef, process, Controller, _Reason},
-           #{controller := Controller, controller_monitor := MRef} = Data) ->
-    %% Controller crashed during connect, close the connection
+           #{controller := Controller, controller_monitor := MRef,
+             pcb := PCB} = Data) ->
+    %% 控制进程在连接过程中崩溃，发送 RESET 通知对端并关闭连接
+    PCB1 = aiutp_pcb:close(PCB),
     {next_state, closing, Data#{controller := undefined,
                                 controller_monitor := undefined,
-                                blocker := undefined}};
+                                blocker := undefined,
+                                pcb := PCB1}};
 
 connecting({call, From}, _Msg, _Data) ->
     {keep_state_and_data, [{reply, From, {error, connecting}}]};
@@ -304,11 +306,11 @@ connecting(info, _Msg, _Data) ->
     keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% State: accepting
-%% Server received SYN, sent ACK, transitioning to connected
+%% 状态: accepting
+%% 服务端收到 SYN，已发送 ACK，正在转换到已连接状态
 %%--------------------------------------------------------------------
 accepting(enter, idle, #{pcb := PCB} = Data) ->
-    %% Check if already connected (SYN-ACK exchange complete)
+    %% 检查是否已连接（SYN-ACK 交换完成）
     case aiutp_pcb:state(PCB) of
         ?CS_CONNECTED ->
             {next_state, connected, Data};
@@ -345,9 +347,13 @@ accepting(info, {'DOWN', MRef, process, Parent, _Reason},
     {stop, normal};
 
 accepting(info, {'DOWN', MRef, process, Controller, _Reason},
-          #{controller := Controller, controller_monitor := MRef} = Data) ->
+          #{controller := Controller, controller_monitor := MRef,
+            pcb := PCB} = Data) ->
+    %% 控制进程在接受连接过程中崩溃，发送 RESET 通知对端并关闭连接
+    PCB1 = aiutp_pcb:close(PCB),
     {next_state, closing, Data#{controller := undefined,
-                                controller_monitor := undefined}};
+                                controller_monitor := undefined,
+                                pcb := PCB1}};
 
 accepting({call, From}, _Msg, _Data) ->
     {keep_state_and_data, [{reply, From, {error, accepting}}]};
@@ -356,17 +362,17 @@ accepting(info, _Msg, _Data) ->
     keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% State: connected
-%% Connection established, bidirectional data transfer
+%% 状态: connected
+%% 连接已建立，可双向传输数据
 %%--------------------------------------------------------------------
 connected(enter, _OldState, Data) ->
     {keep_state, active_read(Data)};
 
 connected({call, From}, {send, SendData}, #{pcb := PCB} = Data) ->
     case aiutp_pcb:write(SendData, PCB) of
-        {Error, PCB1} ->
+        {{error, _} = Error, PCB1} ->
             {keep_state, Data#{pcb := PCB1}, [{reply, From, Error}]};
-        PCB1 ->
+        {ok, PCB1} ->
             {keep_state, Data#{pcb := PCB1}, [{reply, From, ok}]}
     end;
 
@@ -420,7 +426,7 @@ connected({call, From}, {close, _NotOwner}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_owner}}]};
 
 connected({call, From}, {recv, _Len}, _Data) ->
-    %% TODO: Implement blocking recv
+    %% TODO: 实现阻塞式接收
     {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
 
 connected(cast, {packet, Packet}, #{pcb := PCB} = Data) ->
@@ -469,8 +475,8 @@ connected(info, _Msg, _Data) ->
     keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% State: closing
-%% FIN sent or received, graceful shutdown in progress
+%% 状态: closing
+%% 已发送或收到 FIN，正在优雅关闭
 %%--------------------------------------------------------------------
 closing(enter, _OldState, #{parent := Parent,
                             controller := Controller,
@@ -479,17 +485,17 @@ closing(enter, _OldState, #{parent := Parent,
     Remote = maps:get(remote, Data, undefined),
     ConnId = maps:get(conn_id, Data, undefined),
     Blocker = maps:get(blocker, Data, undefined),
-    %% Notify blocker if any
+    %% 通知阻塞的调用者（如有）
     Actions = case Blocker of
         undefined -> [];
         _ -> [{reply, Blocker, ok}]
     end,
-    %% Notify controller if in active mode
+    %% 如果处于主动模式，通知控制进程
     if Controller /= undefined andalso Active == true ->
             Controller ! {utp_closed, make_utp_socket(Data), normal};
        true -> ok
     end,
-    %% Free connection from socket
+    %% 从套接字释放连接
     if ConnId /= undefined ->
             aiutp_socket:free_conn(Parent, Remote, ConnId);
        true -> ok
@@ -506,7 +512,7 @@ closing(info, _Msg, _Data) ->
     keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% terminate callback
+%% terminate 回调
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: term(), State :: term(), Data :: term()) -> any().
 terminate(_Reason, _State, Data) ->
@@ -514,7 +520,7 @@ terminate(_Reason, _State, Data) ->
     ok.
 
 %%--------------------------------------------------------------------
-%% code_change callback
+%% code_change 回调
 %%--------------------------------------------------------------------
 -spec code_change(
         OldVsn :: term() | {down, term()},
@@ -524,11 +530,11 @@ code_change(_OldVsn, State, Data, _Extra) ->
     {ok, State, Data}.
 
 %%%===================================================================
-%%% Internal functions
+%%% 内部函数
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Try to add connection ID, retry up to 3 times
+%% @doc 尝试添加连接 ID，最多重试 3 次
 %% @end
 %%--------------------------------------------------------------------
 -spec add_conn(pid(), {inet:ip_address(), inet:port_number()}) ->
@@ -548,7 +554,7 @@ add_conn(Parent, Remote, N) ->
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Start tick timer for periodic timeout checks
+%% @doc 启动定期超时检查的定时器
 %% @end
 %%--------------------------------------------------------------------
 -spec start_tick_timer(pos_integer()) -> reference().
@@ -556,7 +562,7 @@ start_tick_timer(Interval) ->
     erlang:start_timer(Interval, self(), tick).
 
 %%--------------------------------------------------------------------
-%% @doc Cancel tick timer
+%% @doc 取消定时器
 %% @end
 %%--------------------------------------------------------------------
 -spec cancel_tick_timer(reference() | undefined) -> ok.
@@ -567,7 +573,7 @@ cancel_tick_timer(TRef) ->
     ok.
 
 %%--------------------------------------------------------------------
-%% @doc Cleanup all monitors
+%% @doc 清理所有监视器
 %% @end
 %%--------------------------------------------------------------------
 -spec cleanup_monitors(data()) -> ok.
@@ -585,7 +591,7 @@ cleanup_monitors(Data) ->
     ok.
 
 %%--------------------------------------------------------------------
-%% @doc Handle active mode - read and deliver data
+%% @doc 处理主动模式 - 读取并投递数据
 %% @end
 %%--------------------------------------------------------------------
 -spec active_read(data()) -> data().
@@ -598,18 +604,18 @@ active_read(#{pcb := PCB, controller := Controller, active := true} = Data) ->
         {Payload, PCB1} ->
             UTPSocket = make_utp_socket(Data),
             Controller ! {utp_data, UTPSocket, Payload},
-            %% After sending data, set active to false (once mode behavior)
+            %% 发送数据后将 active 设为 false（once 模式行为）
             Data#{pcb := PCB1, active := false}
     end;
 active_read(#{pcb := PCB} = Data) ->
     PCB1 = aiutp_pcb:flush(PCB),
     Data#{pcb := PCB1};
 active_read(Data) ->
-    %% No PCB yet, just return data unchanged
+    %% 尚无 PCB，直接返回原数据
     Data.
 
 %%--------------------------------------------------------------------
-%% @doc Create UTP socket tuple for messages
+%% @doc 创建用于消息的 UTP 套接字元组
 %% @end
 %%--------------------------------------------------------------------
 -spec make_utp_socket(data()) -> {utp, pid(), pid()}.
@@ -617,7 +623,7 @@ make_utp_socket(#{parent := Parent}) ->
     {utp, Parent, self()}.
 
 %%--------------------------------------------------------------------
-%% @doc Sync input messages to new owner during controlling_process
+%% @doc 在 controlling_process 期间同步输入消息给新所有者
 %% @end
 %%--------------------------------------------------------------------
 -spec sync_input(term(), pid(), boolean()) -> boolean().

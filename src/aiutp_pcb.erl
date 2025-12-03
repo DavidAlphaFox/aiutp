@@ -33,7 +33,7 @@
 %% 向后兼容别名
 -export([process/2]).
 
-%% Type definition for socket reference
+%% socket 引用的类型定义
 -type socket_ref() :: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}}.
 
 %%------------------------------------------------------------------------------
@@ -499,7 +499,8 @@ write(_, #aiutp_pcb{fin_sent = FinSent} = PCB)
   when FinSent == true ->
     {{error, closed}, PCB};
 write(Data, PCB) ->
-    aiutp_tx:in(Data, PCB#aiutp_pcb{time = aiutp_util:millisecond()}).
+    PCB0 = aiutp_tx:in(Data, PCB#aiutp_pcb{time = aiutp_util:millisecond()}),
+    {ok, PCB0}.
 
 %%------------------------------------------------------------------------------
 %% @doc 关闭连接

@@ -23,14 +23,14 @@
 -define(SERVER, ?MODULE).
 -define(BACKLOG, 128).
 
-%% State is a map with the following keys:
-%% - parent: pid() - parent socket process
-%% - socket: gen_udp:socket() - UDP socket
-%% - acceptors: queue:queue({pid(), term()}) - waiting acceptors
-%% - syns: queue:queue(syn_request()) - pending SYN requests
-%% - syn_len: non_neg_integer() - current SYN queue length
-%% - max_syn_len: pos_integer() - maximum SYN queue length (backlog)
-%% - options: list() - UTP options
+%% 状态是一个 map，包含以下键：
+%% - parent: pid() - 父套接字进程
+%% - socket: gen_udp:socket() - UDP 套接字
+%% - acceptors: queue:queue({pid(), term()}) - 等待的接受器队列
+%% - syns: queue:queue(syn_request()) - 待处理的 SYN 请求队列
+%% - syn_len: non_neg_integer() - 当前 SYN 队列长度
+%% - max_syn_len: pos_integer() - 最大 SYN 队列长度（backlog）
+%% - options: list() - UTP 选项
 -type syn_request() :: {{inet:ip_address(), inet:port_number()},
                         {#aiutp_packet{}, non_neg_integer()}}.
 -type state() :: #{
@@ -47,18 +47,18 @@
 %%% API
 %%%===================================================================
 
-%% @doc Register an acceptor waiting for incoming connections
+%% @doc 注册等待传入连接的接受器
 -spec accept(pid(), {pid(), term()}) -> ok.
 accept(Pid,Acceptor)->
   gen_server:cast(Pid,{accept,Acceptor}).
 
-%% @doc Handle incoming SYN request
+%% @doc 处理传入的 SYN 请求
 -spec incoming(pid(), term()) -> ok.
 incoming(Pid,Req)->
   gen_server:cast(Pid,Req).
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the server
+%% 启动服务器
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(pid(),port(),list(),list()) -> {ok, Pid :: pid()} |
@@ -75,7 +75,7 @@ start_link(Parent,Socket,Options,UTPOptions) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Initializes the server
+%% 初始化服务器
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) -> {ok, State :: term()} |
@@ -100,7 +100,7 @@ init([Parent,Socket,Options,UTPOptions]) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling call messages
+%% 处理 call 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_call(Request :: term(), From :: {pid(), term()}, State :: term()) ->
@@ -119,7 +119,7 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling cast messages
+%% 处理 cast 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_cast(Request :: term(), State :: term()) ->
@@ -141,7 +141,7 @@ handle_cast(_, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling all non call/cast messages
+%% 处理所有非 call/cast 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_info(Info :: timeout() | term(), State :: term()) ->
@@ -158,10 +158,9 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
+%% 当 gen_server 即将终止时调用此函数。它应该与 Module:init/1 相反，
+%% 执行任何必要的清理工作。当它返回时，gen_server 以 Reason 终止。
+%% 返回值被忽略。
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
@@ -172,7 +171,7 @@ terminate(_Reason, _State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Convert process state when code is changed
+%% 代码变更时转换进程状态
 %% @end
 %%--------------------------------------------------------------------
 -spec code_change(OldVsn :: term() | {down, term()},
@@ -185,9 +184,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called for changing the form and appearance
-%% of gen_server status when it is returned from sys:get_status/1,2
-%% or when it appears in termination error logs.
+%% 当从 sys:get_status/1,2 返回或出现在终止错误日志中时，
+%% 调用此函数来更改 gen_server 状态的形式和外观。
 %% @end
 %%--------------------------------------------------------------------
 -spec format_status(Status :: map()) -> Status :: map().
@@ -195,10 +193,10 @@ format_status(Status) ->
   Status.
 
 %%%===================================================================
-%%% Internal functions
+%%% 内部函数
 %%%===================================================================
 
-%% @private Accept an incoming connection from pending SYN requests
+%% @private 从待处理的 SYN 请求中接受传入连接
 -spec accept_incoming({pid(), term()}, state()) ->
     {noreply, state()} | {noreply, state(), timeout()}.
 accept_incoming(Acceptor, #{acceptors := Acceptors, syn_len := 0} = State)->
@@ -220,7 +218,7 @@ accept_incoming({Caller,_} = Acceptor,
       accept_incoming(Acceptor, State#{syns := Syns0, syn_len := SynLen - 1})
   end.
 
-%% @private Pair incoming SYN with pending acceptor or queue it
+%% @private 将传入的 SYN 与等待的接受器配对或加入队列
 -spec pair_incoming({inet:ip_address(), inet:port_number()},
                     {#aiutp_packet{}, integer()}, state()) ->
     {noreply, state()} | {noreply, state(), timeout()}.

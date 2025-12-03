@@ -397,8 +397,8 @@ do_send(Socket,Remote,Count,Content)->
     ok -> ok;
     {error, Reason} = Error ->
       if Count == 0 ->
-          %% All retries exhausted, log warning and return error
-          %% The PCB timeout mechanism will handle connection recovery
+          %% 所有重试已耗尽，记录警告并返回错误
+          %% PCB 超时机制将处理连接恢复
           logger:warning("uTP UDP send failed after retries: ~p, remote: ~p",
                         [Reason, Remote]),
           Error;

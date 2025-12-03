@@ -13,21 +13,21 @@
 %% API
 -export([start_link/0]).
 
-%% Supervisor callbacks
+%% 监督者回调
 -export([init/1]).
 -export([open/1,open/2]).
 
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
-%%% API functions
+%%% API 函数
 %%%===================================================================
 
-%% @doc Open a uTP socket on the specified port
+%% @doc 在指定端口打开一个 uTP 套接字
 -spec open(inet:port_number()) -> {ok, {utp, pid()}} | {error, term()}.
 open(Port)-> open(Port,[]).
 
-%% @doc Open a uTP socket on the specified port with options
+%% @doc 在指定端口打开一个带选项的 uTP 套接字
 -spec open(inet:port_number(), list()) -> {ok, {utp, pid()}} | {error, term()}.
 open(Port,Options)->
   case supervisor:start_child(?SERVER, [Port,Options]) of
@@ -37,7 +37,7 @@ open(Port,Options)->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the supervisor
+%% 启动监督者
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link() -> {ok, Pid :: pid()} |
@@ -49,16 +49,14 @@ start_link() ->
   supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 %%%===================================================================
-%%% Supervisor callbacks
+%%% 监督者回调
 %%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Whenever a supervisor is started using supervisor:start_link/[2,3],
-%% this function is called by the new process to find out about
-%% restart strategy, maximum restart intensity, and child
-%% specifications.
+%% 当使用 supervisor:start_link/[2,3] 启动监督者时，
+%% 新进程调用此函数来获取重启策略、最大重启强度和子进程规范。
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
@@ -79,5 +77,5 @@ init([]) ->
   {ok, {SupFlags, [Socket]}}.
 
 %%%===================================================================
-%%% Internal functions
+%%% 内部函数
 %%%===================================================================

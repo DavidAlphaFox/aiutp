@@ -49,9 +49,8 @@ shift(Offset,#aiutp_delay{delay_base_hist = Hist} = Delay)->
 
 -spec add_sample(non_neg_integer(), integer(), aiutp_delay()) -> aiutp_delay().
 add_sample(Sample,CurMilli,#aiutp_delay{delay_base_initialized = false} = Delay)->
-    % delay_base being 0 suggests that we haven't initialized
-    % it or its history with any real measurements yet. Initialize
-    % everything with this sample.
+    %% delay_base 为 0 表示我们尚未用任何实际测量值
+    %% 初始化它或它的历史记录。用此样本初始化所有内容。
   add_sample(Sample,CurMilli,
             Delay#aiutp_delay{delay_base_initialized = true,
                              delay_base_hist = array:new(?DELAY_BASE_HISTORY,[{default,Sample},{fixed,true}]),

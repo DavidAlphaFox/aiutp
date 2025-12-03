@@ -22,13 +22,13 @@
 -define(SERVER, ?MODULE).
 -define(DEFAULT_MAX_CONNS, 100).
 
-%% State is a map with the following keys:
-%% - socket: gen_udp:socket() | undefined
-%% - conns: #{conn_key() => {pid(), reference()}}
-%% - monitors: #{reference() => conn_key()}
-%% - max_conns: pos_integer()
-%% - acceptor: pid() | closed
-%% - options: list()
+%% 状态是一个 map，包含以下键：
+%% - socket: gen_udp:socket() | undefined - UDP 套接字
+%% - conns: #{conn_key() => {pid(), reference()}} - 连接映射
+%% - monitors: #{reference() => conn_key()} - 监视器映射
+%% - max_conns: pos_integer() - 最大连接数
+%% - acceptor: pid() | closed - 接受器进程或已关闭
+%% - options: list() - 选项列表
 -type conn_key() :: {{inet:ip_address(), inet:port_number()}, non_neg_integer()}.
 -type state() :: #{
     socket := gen_udp:socket() | undefined,
@@ -43,7 +43,7 @@
 %%% API
 %%%===================================================================
 
-%% @doc Connect to a remote uTP endpoint
+%% @doc 连接到远程 uTP 端点
 -spec connect(pid(), inet:ip_address() | string(), inet:port_number()) ->
     {ok, {utp, pid(), pid()}} | {error, term()}.
 connect(UTPSocket,Address,Port)->
@@ -56,27 +56,27 @@ connect(UTPSocket,Address,Port)->
     Error -> Error
   end.
 
-%% @doc Start listening for incoming connections
+%% @doc 开始监听传入连接
 -spec listen(pid(), list()) -> ok | {error, term()}.
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
 
-%% @doc Accept an incoming connection
+%% @doc 接受传入连接
 -spec accept(pid()) -> {ok, {utp, pid(), pid()}} | {error, term()}.
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
 
-%% @doc Register a connection ID for a worker process
+%% @doc 为工作进程注册连接 ID
 -spec add_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) ->
     ok | exists | overflow.
 add_conn(UTPSocket,Remote,ConnId) ->
   Worker = self(),
   gen_server:call(UTPSocket,{add_conn,Remote,ConnId,Worker},infinity).
 
-%% @doc Free a connection ID
+%% @doc 释放连接 ID
 -spec free_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) -> ok.
 free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnId},infinity).
 %%--------------------------------------------------------------------
 %% @doc
-%% Starts the server
+%% 启动服务器
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link(integer(),list()) -> {ok, Pid :: pid()} |
@@ -93,7 +93,7 @@ start_link(Port,Options) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Initializes the server
+%% 初始化服务器
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args :: term()) -> {ok, State :: term()} |
@@ -127,7 +127,7 @@ init([Port,Options]) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling call messages
+%% 处理 call 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_call(Request :: term(), From :: {pid(), term()}, State :: term()) ->
@@ -167,7 +167,7 @@ handle_call(_Request, _From, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling cast messages
+%% 处理 cast 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_cast(Request :: term(), State :: term()) ->
@@ -181,7 +181,7 @@ handle_cast(_Request, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handling all non call/cast messages
+%% 处理所有非 call/cast 消息
 %% @end
 %%--------------------------------------------------------------------
 -spec handle_info(Info :: timeout() | term(), State :: term()) ->
@@ -195,8 +195,8 @@ handle_info({udp, Socket, IP, Port, Payload},
   case aiutp_packet:decode(Payload) of
     {ok,Packet} -> dispatch({IP,Port},Packet, State);
     {error, Reason} ->
-      %% BEP-29: Log decode errors for debugging, but don't crash
-      %% This can happen with malformed packets or protocol version mismatch
+      %% BEP-29：记录解码错误用于调试，但不崩溃
+      %% 这可能发生在畸形数据包或协议版本不匹配时
       logger:debug("uTP packet decode failed from ~p:~p, reason: ~p, size: ~p",
                    [IP, Port, Reason, byte_size(Payload)])
   end,
@@ -222,10 +222,9 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_server terminates
-%% with Reason. The return value is ignored.
+%% 当 gen_server 即将终止时调用此函数。它应该与 Module:init/1 相反，
+%% 执行任何必要的清理工作。当它返回时，gen_server 以 Reason 终止。
+%% 返回值被忽略。
 %% @end
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
@@ -238,7 +237,7 @@ terminate(_Reason, #{socket := Socket}) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Convert process state when code is changed
+%% 代码变更时转换进程状态
 %% @end
 %%--------------------------------------------------------------------
 -spec code_change(OldVsn :: term() | {down, term()},
@@ -251,9 +250,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function is called for changing the form and appearance
-%% of gen_server status when it is returned from sys:get_status/1,2
-%% or when it appears in termination error logs.
+%% 当从 sys:get_status/1,2 返回或出现在终止错误日志中时，
+%% 调用此函数来更改 gen_server 状态的形式和外观。
 %% @end
 %%--------------------------------------------------------------------
 -spec format_status(Status :: map()) -> Status :: map().
@@ -261,10 +259,10 @@ format_status(Status) ->
   Status.
 
 %%%===================================================================
-%%% Internal functions
+%%% 内部函数
 %%%===================================================================
 
-%% @private Send a reset packet to the remote peer
+%% @private 向远程对端发送重置包
 -spec reset_conn(gen_udp:socket(), {inet:ip_address(), inet:port_number()},
                  non_neg_integer(), non_neg_integer()) -> ok | {error, term()}.
 reset_conn(Socket,Remote,ConnID,AckNR)->
@@ -272,7 +270,7 @@ reset_conn(Socket,Remote,ConnID,AckNR)->
   Bin = aiutp_packet:encode(Packet),
   gen_udp:send(Socket,Remote,Bin).
 
-%% @private Add a connection to the internal state
+%% @private 向内部状态添加连接
 -spec add_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
                      pid(), state()) -> {ok | exists | overflow, state()}.
 add_conn_inner(Remote, ConnId, Worker,
@@ -290,7 +288,7 @@ add_conn_inner(Remote, ConnId, Worker,
       end
   end.
 
-%% @private Free a connection from the internal state
+%% @private 从内部状态释放连接
 -spec free_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
                       state()) -> state().
 free_conn_inner(Remote, ConnId, #{conns := Conns, monitors := Monitors} = State)->
@@ -304,7 +302,7 @@ free_conn_inner(Remote, ConnId, #{conns := Conns, monitors := Monitors} = State)
              conns := maps:remove(Key, Conns)}
   end.
 
-%% @private Dispatch incoming packet to appropriate handler
+%% @private 将传入的数据包分发到适当的处理程序
 -spec dispatch({inet:ip_address(), inet:port_number()}, #aiutp_packet{}, state()) -> ok.
 dispatch(Remote, #aiutp_packet{conn_id = ConnId, type = PktType, seq_nr = AckNR} = Packet,
          #{socket := Socket, conns := Conns, acceptor := Acceptor, max_conns := MaxConns})->

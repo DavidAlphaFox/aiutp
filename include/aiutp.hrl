@@ -1,8 +1,8 @@
 %%------------------------------------------------------------------------------
-%% @doc aiutp - uTP Protocol Constants and Records
+%% @doc aiutp - uTP 协议常量和记录定义
 %%
-%% This file defines constants and records according to BEP-29 specification.
-%% Reference: https://www.bittorrent.org/beps/bep_0029.html
+%% 本文件根据 BEP-29 规范定义常量和记录。
+%% 参考: https://www.bittorrent.org/beps/bep_0029.html
 %%
 %% @end
 %%------------------------------------------------------------------------------
@@ -11,21 +11,21 @@
 -define(AIUTP_HRL, true).
 
 %%==============================================================================
-%% Section 1: Protocol Version (BEP-29)
+%% 第 1 节: 协议版本 (BEP-29)
 %%==============================================================================
 
 -define(UTP_VERSION, 1).
 
 %%==============================================================================
-%% Section 2: Packet Types (BEP-29)
+%% 第 2 节: 数据包类型 (BEP-29)
 %%
-%% | Type     | Value | Description                    |
-%% |----------|-------|--------------------------------|
-%% | ST_DATA  | 0     | Regular data packet            |
-%% | ST_FIN   | 1     | Finalize connection            |
-%% | ST_STATE | 2     | ACK packet (no payload)        |
-%% | ST_RESET | 3     | Forcefully terminate           |
-%% | ST_SYN   | 4     | Initiate connection            |
+%% | 类型     | 值  | 描述                           |
+%% |----------|-----|--------------------------------|
+%% | ST_DATA  | 0   | 常规数据包                     |
+%% | ST_FIN   | 1   | 结束连接                       |
+%% | ST_STATE | 2   | ACK 包（无载荷）               |
+%% | ST_RESET | 3   | 强制终止连接                   |
+%% | ST_SYN   | 4   | 发起连接                       |
 %%==============================================================================
 
 -define(ST_DATA,  0).
@@ -35,22 +35,22 @@
 -define(ST_SYN,   4).
 
 %%==============================================================================
-%% Section 3: Extension Types (BEP-29)
+%% 第 3 节: 扩展类型 (BEP-29)
 %%
-%% Extensions are chained, each starting with a type byte and length byte.
-%% Type 0 means no more extensions.
+%% 扩展以链式结构存储，每个扩展以类型字节和长度字节开头。
+%% 类型 0 表示没有更多扩展。
 %%==============================================================================
 
--define(EXT_NONE, 0).        %% No more extensions
--define(EXT_SACK, 1).        %% Selective ACK bitmask
--define(EXT_EXT_BITS, 2).    %% Extension bits (reserved for future use)
+-define(EXT_NONE, 0).        %% 无更多扩展
+-define(EXT_SACK, 1).        %% 选择性确认位图
+-define(EXT_EXT_BITS, 2).    %% 扩展位（保留供将来使用）
 
 %%==============================================================================
-%% Section 4: Connection States
+%% 第 4 节: 连接状态
 %%
-%% State machine:
-%%   Initiator: IDLE -> SYN_SENT -> CONNECTED -> DESTROY
-%%   Responder: IDLE -> SYN_RECV -> CONNECTED -> DESTROY
+%% 状态机:
+%%   发起方: IDLE -> SYN_SENT -> CONNECTED -> DESTROY
+%%   响应方: IDLE -> SYN_RECV -> CONNECTED -> DESTROY
 %%==============================================================================
 
 -define(CS_UNINITIALIZED, 'CS_UNINITIALIZED').
@@ -58,112 +58,112 @@
 -define(CS_SYN_SENT,      'CS_SYN_SENT').
 -define(CS_SYN_RECV,      'CS_SYN_RECV').
 -define(CS_CONNECTED,     'CS_CONNECTED').
--define(CS_CONNECTED_FULL,'CS_CONNECTED_FULL').  %% Send buffer full
+-define(CS_CONNECTED_FULL,'CS_CONNECTED_FULL').  %% 发送缓冲区已满
 -define(CS_RESET,         'CS_RESET').
 -define(CS_DESTROY,       'CS_DESTROY').
 
 %%==============================================================================
-%% Section 5: Timeout Parameters (BEP-29)
+%% 第 5 节: 超时参数 (BEP-29)
 %%
-%% RTO calculation: timeout = max(rtt + rtt_var * 4, RTO_MIN)
-%% On consecutive timeouts: timeout *= 2 (exponential backoff)
+%% RTO 计算: timeout = max(rtt + rtt_var * 4, RTO_MIN)
+%% 连续超时时: timeout *= 2（指数退避）
 %%==============================================================================
 
-%% BEP-29: Minimum packet timeout is 500ms
+%% BEP-29: 最小包超时为 500ms
 -define(RTO_MIN, 500).
 
-%% BEP-29: Maximum RTO (implementation specific)
+%% BEP-29: 最大 RTO（实现相关）
 -define(RTO_MAX, 6000).
 
-%% BEP-29: Initial timeout before any RTT samples
+%% BEP-29: 任何 RTT 样本之前的初始超时
 -define(RTO_INITIAL, 1000).
 
-%% Initial RTT variance estimate (ms)
+%% 初始 RTT 方差估计（毫秒）
 -define(RTT_VAR_INITIAL, 800).
 
-%% Keep-alive interval: 29 seconds
-%% Reason: Measured from many home NAT devices to prevent NAT timeout
+%% Keep-alive 间隔: 29 秒
+%% 原因: 根据多数家用 NAT 设备测量，用于防止 NAT 超时
 -define(KEEPALIVE_INTERVAL, 29000).
 
-%% Timeout check interval (ms)
+%% 超时检查间隔（毫秒）
 -define(TIMEOUT_CHECK_INTERVAL, 150).
 
-%% RST info cache timeout (ms)
+%% RST 信息缓存超时（毫秒）
 -define(RST_INFO_TIMEOUT, 10000).
 -define(RST_INFO_LIMIT, 1000).
 
 %%==============================================================================
-%% Section 6: Window and Buffer Parameters
+%% 第 6 节: 窗口和缓冲区参数
 %%==============================================================================
 
-%% BEP-29: Fixed header size is 20 bytes
+%% BEP-29: 固定头部大小为 20 字节
 -define(UTP_HEADER_SIZE, 20).
 
-%% Maximum payload size per packet (MTU - headers)
-%% Typical: 1500 (MTU) - 20 (IP) - 8 (UDP) - 20 (uTP) = 1452
-%% Conservative value for path MTU issues
+%% 每个包的最大载荷大小（MTU - 头部）
+%% 典型值: 1500 (MTU) - 20 (IP) - 8 (UDP) - 20 (uTP) = 1452
+%% 保守值，用于处理路径 MTU 问题
 -define(PACKET_SIZE, 1296).
 
-%% BEP-29: Minimum window size is 150 bytes
-%% This prevents the window from shrinking to zero
-%% Note: Current implementation uses larger value for performance
+%% BEP-29: 最小窗口大小为 150 字节
+%% 这防止窗口缩小到零
+%% 注意: 当前实现使用较大值以提高性能
 -define(MIN_WINDOW_SIZE_BEP29, 150).
 -define(MIN_WINDOW_SIZE, 2906).  %% = 2 * PACKET_SIZE + 314
 
-%% Maximum send buffer size (packets)
+%% 最大发送缓冲区大小（包数）
 -define(OUTGOING_BUFFER_MAX_SIZE, 1024).
 
-%% Maximum reorder buffer size (packets)
+%% 最大重排序缓冲区大小（包数）
 -define(REORDER_BUFFER_MAX_SIZE, 1024).
 -define(REORDER_BUFFER_SIZE, 32).
 
-%% Burst mode buffer size
+%% 突发模式缓冲区大小
 -define(BURST_OUTGOING_BUFFER_SIZE, 255).
 
 %%==============================================================================
-%% Section 7: Congestion Control Parameters (LEDBAT)
+%% 第 7 节: 拥塞控制参数 (LEDBAT)
 %%
-%% LEDBAT (Low Extra Delay Background Transport) aims to:
-%% - Minimize delay impact on the network
-%% - Yield to other traffic
-%% Reference: RFC 6817
+%% LEDBAT（低额外延迟后台传输）目标:
+%% - 最小化对网络的延迟影响
+%% - 让步于其他流量
+%% 参考: RFC 6817
 %%==============================================================================
 
-%% BEP-29: Target delay is 100ms (CCONTROL_TARGET)
--define(TARGET_DELAY, 100000).  %% microseconds
+%% BEP-29: 目标延迟为 100ms (CCONTROL_TARGET)
+-define(TARGET_DELAY, 100000).  %% 微秒
 
-%% Maximum window increase per RTT (bytes)
-%% TCP increases by 1 MSS (~1500 bytes) per RTT
+%% 每个 RTT 的最大窗口增长（字节）
+%% TCP 每个 RTT 增加 1 个 MSS（约 1500 字节）
 -define(MAX_CWND_INCREASE_BYTES_PER_RTT, 3000).
 
-%% Window decay time when no packets sent (ms)
+%% 无包发送时的窗口衰减时间（毫秒）
 -define(MAX_WINDOW_DECAY, 100).
 
-%% Number of delay samples to keep
+%% 保留的延迟样本数量
 -define(CUR_DELAY_SIZE, 3).
 
-%% Delay base history entries (reset every 13 minutes)
-%% Reason: Clock skew of ~10ms per 325 seconds is possible
+%% 延迟基准历史条目数（每 13 分钟重置）
+%% 原因: 每 325 秒可能有约 10ms 的时钟偏移
 -define(DELAY_BASE_HISTORY, 13).
 
-%% Slow-start threshold initial value
+%% 慢启动阈值初始值
 -define(SSTHRESH_INITIAL, (?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE)).
 
 %%==============================================================================
-%% Section 8: Retransmission Parameters
+%% 第 8 节: 重传参数
 %%==============================================================================
 
-%% BEP-29: Duplicate ACK threshold for fast retransmit is 3
-%% Note: Implementation uses 4 for more conservative behavior
+%% BEP-29: 快速重传的重复 ACK 阈值为 3
+%% 注意: 实现使用 4 以获得更保守的行为
 -define(DUPLICATE_ACKS_BEFORE_RESEND_BEP29, 3).
 -define(DUPLICATE_ACKS_BEFORE_RESEND, 4).
 
-%% ACK number allowed window
-%% A non-SYN packet with ack_nr difference > this is considered suspicious
+%% ACK 号允许窗口
+%% ack_nr 差值大于此值的非 SYN 包被视为可疑
 -define(ACK_NR_ALLOWED_WINDOW, 4).
 
 %%==============================================================================
-%% Section 9: Bit Masks and Limits
+%% 第 9 节: 位掩码和限制
 %%==============================================================================
 
 -define(SEQ_NR_MASK, 16#FFFF).
@@ -172,10 +172,10 @@
 -define(RTT_MAX, 16#FFFFFFFFFFFFFFFF).
 
 %%==============================================================================
-%% Section 10: Utility Macros
+%% 第 10 节: 工具宏
 %%
-%% Wrapping difference for sequence number comparison.
-%% Returns negative if L < R, positive if L > R (considering wrap-around)
+%% 用于序列号比较的环绕差值计算。
+%% 如果 L < R 返回负数，如果 L > R 返回正数（考虑环绕）
 %%==============================================================================
 
 -define(WRAPPING_DIFF_32(L, R),
@@ -185,301 +185,301 @@
         (((R - L) band 16#FFFF) - ((L - R) band 16#FFFF))).
 
 %%==============================================================================
-%% Section 11: Packet Record
+%% 第 11 节: 数据包记录
 %%
-%% Represents a uTP packet as per BEP-29 header format.
+%% 根据 BEP-29 头部格式表示 uTP 数据包。
 %%==============================================================================
 
 -record(aiutp_packet, {
-    %% Packet type: ST_DATA | ST_FIN | ST_STATE | ST_RESET | ST_SYN
+    %% 包类型: ST_DATA | ST_FIN | ST_STATE | ST_RESET | ST_SYN
     type :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN,
 
-    %% Connection ID (16-bit)
-    %% Receiver uses conn_id, sender uses conn_id + 1
-    %% May be undefined when packet is being constructed incrementally
+    %% 连接 ID（16 位）
+    %% 接收方使用 conn_id，发送方使用 conn_id + 1
+    %% 包增量构建时可能为 undefined
     conn_id :: non_neg_integer() | undefined,
 
-    %% Advertised receive window size (32-bit, bytes)
+    %% 通告的接收窗口大小（32 位，字节）
     wnd = 0 :: non_neg_integer(),
 
-    %% Sequence number of this packet (16-bit)
+    %% 本包的序列号（16 位）
     seq_nr = 0 :: non_neg_integer(),
 
-    %% Last received sequence number (16-bit)
+    %% 最后接收的序列号（16 位）
     ack_nr = 0 :: non_neg_integer(),
 
-    %% Timestamp when packet was sent (32-bit, microseconds)
+    %% 包发送时的时间戳（32 位，微秒）
     tv_usec = 0 :: non_neg_integer(),
 
-    %% Timestamp difference: our_timestamp - their_timestamp (32-bit, microseconds)
-    %% Used by receiver to calculate one-way delay
+    %% 时间戳差值: 我方时间戳 - 对方时间戳（32 位，微秒）
+    %% 接收方用于计算单向延迟
     reply_micro = 0 :: non_neg_integer(),
 
-    %% Extensions: [{sack, binary()} | {ext_bits, binary()}]
+    %% 扩展: [{sack, binary()} | {ext_bits, binary()}]
     extension = [] :: list(),
 
-    %% Payload data
+    %% 载荷数据
     payload = <<>> :: binary()
 }).
 
 %%==============================================================================
-%% Section 12: Packet Wrapper Record
+%% 第 12 节: 数据包包装记录
 %%
-%% Wraps a packet with transmission metadata for the send buffer.
+%% 包装数据包及其传输元数据，用于发送缓冲区。
 %%==============================================================================
 
 -record(aiutp_packet_wrap, {
-    %% The packet to send
+    %% 待发送的数据包
     packet :: #aiutp_packet{},
 
-    %% Serialized packet content (cached for retransmission)
+    %% 序列化的包内容（缓存用于重传）
     content = undefined :: undefined | binary(),
 
-    %% Payload size in bytes
+    %% 载荷大小（字节）
     payload = 0 :: non_neg_integer(),
 
-    %% Time when packet was sent (microseconds)
+    %% 包发送时间（微秒）
     time_sent = 0 :: non_neg_integer(),
 
-    %% Number of times this packet has been transmitted
+    %% 本包已传输次数
     transmissions = 0 :: non_neg_integer(),
 
-    %% Flag indicating packet needs retransmission
+    %% 标记包需要重传
     need_resend = false :: boolean(),
 
-    %% BEP-29: Number of times this packet was skipped by SACK
-    %% When skip_count >= 3, packet should be marked for fast retransmit
+    %% BEP-29: 本包被 SACK 跳过的次数
+    %% 当 skip_count >= 3 时，包应标记为快速重传
     skip_count = 0 :: non_neg_integer()
 }).
 
 %%==============================================================================
-%% Section 13: Protocol Control Block (PCB) Record
+%% 第 13 节: 协议控制块 (PCB) 记录
 %%
-%% The PCB contains all state for a single uTP connection.
-%% Fields are organized by functional area for clarity.
+%% PCB 包含单个 uTP 连接的所有状态。
+%% 字段按功能区域组织以提高清晰度。
 %%==============================================================================
 
 -record(aiutp_pcb, {
     %%--------------------------------------------------------------------------
-    %% Connection Identity
+    %% 连接标识
     %%--------------------------------------------------------------------------
 
-    %% Connection ID for packets we receive
+    %% 接收包的连接 ID
     conn_id_recv :: non_neg_integer() | undefined,
 
-    %% Connection ID for packets we send (= conn_id_recv + 1 for initiator)
+    %% 发送包的连接 ID（发起方为 conn_id_recv + 1）
     conn_id_send :: non_neg_integer() | undefined,
 
-    %% Reference to the UDP socket and remote address
-    %% Format: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}} | undefined
+    %% UDP socket 和远端地址的引用
+    %% 格式: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}} | undefined
     socket :: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}} | undefined,
 
     %%--------------------------------------------------------------------------
-    %% Connection State
+    %% 连接状态
     %%--------------------------------------------------------------------------
 
-    %% Current connection state
+    %% 当前连接状态
     state = ?CS_UNINITIALIZED :: atom(),
 
-    %% User has called close()
+    %% 用户已调用 close()
     close_requested = false :: boolean(),
 
-    %% Reading is disabled (half-close)
+    %% 读取已禁用（半关闭）
     read_shutdown = false :: boolean(),
 
     %%--------------------------------------------------------------------------
-    %% Sequence Number Management
+    %% 序列号管理
     %%--------------------------------------------------------------------------
 
-    %% Next sequence number to send (starts at 1 for SYN)
+    %% 下一个要发送的序列号（SYN 从 1 开始）
     seq_nr = 1 :: non_neg_integer(),
 
-    %% Last sequence number we have ACKed (all packets up to this received)
+    %% 我们已确认的最后序列号（所有此序列号之前的包已收到）
     ack_nr = 0 :: non_neg_integer(),
 
-    %% Sequence number for timeout detection
+    %% 用于超时检测的序列号
     timeout_seq_nr = 0 :: non_neg_integer(),
 
-    %% Next sequence number allowed for fast resend (prevents duplicate fast resends)
+    %% 下一个允许快速重发的序列号（防止重复快速重发）
     fast_resend_seq_nr = 1 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% FIN Handling (Connection Termination)
+    %% FIN 处理（连接终止）
     %%--------------------------------------------------------------------------
 
-    %% Received a FIN packet
+    %% 收到了 FIN 包
     got_fin = false :: boolean(),
 
-    %% All packets up to FIN have been received
+    %% FIN 之前的所有包都已收到
     got_fin_reached = false :: boolean(),
 
-    %% We have sent our FIN
+    %% 我们已发送 FIN
     fin_sent = false :: boolean(),
 
-    %% Our FIN has been ACKed
+    %% 我们的 FIN 已被确认
     fin_sent_acked = false :: boolean(),
 
-    %% Sequence number of the received FIN packet
+    %% 收到的 FIN 包的序列号
     eof_pkt = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% Window Management
+    %% 窗口管理
     %%--------------------------------------------------------------------------
 
-    %% Bytes currently in-flight (sent but not ACKed)
-    %% Does not include packets marked for resend
+    %% 当前在途字节数（已发送但未确认）
+    %% 不包括标记为重发的包
     cur_window = 0 :: non_neg_integer(),
 
-    %% Number of packets in send queue (including those needing resend)
-    %% Oldest unacked packet is at seq_nr - cur_window_packets
+    %% 发送队列中的包数量（包括需要重发的）
+    %% 最老的未确认包在 seq_nr - cur_window_packets
     cur_window_packets = 0 :: non_neg_integer(),
 
-    %% Maximum send window (bytes), adjusted by congestion control
+    %% 最大发送窗口（字节），由拥塞控制调整
     max_window = 0 :: non_neg_integer(),
 
-    %% Maximum receive window advertised by peer (bytes)
+    %% 对端通告的最大接收窗口（字节）
     max_window_user = 255 * ?PACKET_SIZE :: non_neg_integer(),
 
-    %% Last receive window we advertised (bytes)
+    %% 我们通告的最后接收窗口（字节）
     last_rcv_win = 0 :: non_neg_integer(),
 
-    %% Timestamp when window was last decayed (wraps)
+    %% 窗口最后衰减的时间戳（会环绕）
     last_rwin_decay = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% RTT/RTO Management
+    %% RTT/RTO 管理
     %%--------------------------------------------------------------------------
 
-    %% Smoothed Round Trip Time (milliseconds)
+    %% 平滑往返时间（毫秒）
     rtt = 0 :: non_neg_integer(),
 
-    %% RTT variance (milliseconds)
+    %% RTT 方差（毫秒）
     rtt_var = ?RTT_VAR_INITIAL :: non_neg_integer(),
 
-    %% Retransmission Timeout (milliseconds)
-    %% Calculated as: max(rtt + rtt_var * 4, RTO_MIN)
+    %% 重传超时（毫秒）
+    %% 计算公式: max(rtt + rtt_var * 4, RTO_MIN)
     rto = ?RTO_INITIAL :: non_neg_integer(),
 
-    %% RTT history for min RTT calculation
+    %% RTT 历史，用于计算最小 RTT
     rtt_hist :: any(),
 
-    %% Current retransmit timeout value (may be backed off)
+    %% 当前重传超时值（可能已退避）
     retransmit_timeout = 0 :: non_neg_integer(),
 
-    %% Absolute time when RTO expires
+    %% RTO 到期的绝对时间
     rto_timeout = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% Congestion Control (LEDBAT)
+    %% 拥塞控制 (LEDBAT)
     %%--------------------------------------------------------------------------
 
-    %% Target delay for LEDBAT (microseconds)
-    %% BEP-29 specifies 100ms = 100000us
+    %% LEDBAT 目标延迟（微秒）
+    %% BEP-29 指定 100ms = 100000us
     target_delay = ?TARGET_DELAY :: non_neg_integer(),
 
-    %% Slow-start threshold (bytes)
+    %% 慢启动阈值（字节）
     ssthresh = ?SSTHRESH_INITIAL :: non_neg_integer(),
 
-    %% In slow-start phase (exponential growth)
+    %% 处于慢启动阶段（指数增长）
     slow_start = true :: boolean(),
 
-    %% Timestamp when window was last fully utilized
-    %% Used to prevent window growth when not sending at capacity
+    %% 窗口最后满载使用的时间戳
+    %% 用于在未满负荷发送时防止窗口增长
     last_maxed_out_window = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% Delay Statistics (for LEDBAT)
+    %% 延迟统计（用于 LEDBAT）
     %%--------------------------------------------------------------------------
 
-    %% Our delay history (samples we measure)
+    %% 我方延迟历史（我们测量的样本）
     our_hist :: any(),
 
-    %% Their delay history (samples they report)
+    %% 对方延迟历史（对方报告的样本）
     their_hist :: any(),
 
-    %% Average delay relative to initial sample (microseconds)
+    %% 相对于初始样本的平均延迟（微秒）
     average_delay = 0 :: integer(),
 
-    %% Sum of recent delay samples (for averaging)
+    %% 最近延迟样本的总和（用于平均）
     current_delay_sum = 0 :: integer(),
 
-    %% Number of samples in current_delay_sum
+    %% current_delay_sum 中的样本数
     current_delay_samples = 0 :: non_neg_integer(),
 
-    %% First raw delay sample (baseline for relative delays)
+    %% 第一个原始延迟样本（相对延迟的基准）
     average_delay_base = 0 :: non_neg_integer(),
 
-    %% Next time to add an average delay sample
+    %% 下次添加平均延迟样本的时间
     average_sample_time = 0 :: non_neg_integer(),
 
-    %% Last measured delay (microseconds)
+    %% 最后测量的延迟（微秒）
     last_measured_delay = 0 :: non_neg_integer(),
 
-    %% Estimated clock drift (microseconds per 5 seconds)
+    %% 估计的时钟漂移（每 5 秒的微秒数）
     clock_drift = 0 :: integer(),
 
     %%--------------------------------------------------------------------------
-    %% Retransmission Management
+    %% 重传管理
     %%--------------------------------------------------------------------------
 
-    %% Number of consecutive retransmissions
+    %% 连续重传次数
     retransmit_count = 0 :: non_neg_integer(),
 
-    %% Number of duplicate ACKs received
+    %% 收到的重复 ACK 数量
     duplicate_ack = 0 :: non_neg_integer(),
 
-    %% Fast timeout flag
+    %% 快速超时标志
     fast_timeout = false :: boolean(),
 
-    %% Number of reordered packets
+    %% 乱序包数量
     reorder_count = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% Timestamps
+    %% 时间戳
     %%--------------------------------------------------------------------------
 
-    %% Current time (set before processing)
+    %% 当前时间（处理前设置）
     time = undefined :: non_neg_integer() | undefined,
 
-    %% Time when last packet was received
+    %% 最后收到包的时间
     recv_time = undefined :: non_neg_integer() | undefined,
 
-    %% Last time we received any packet (for keep-alive)
+    %% 最后收到任何包的时间（用于 keep-alive）
     last_got_packet = 0 :: non_neg_integer(),
 
-    %% Last time we sent any packet
+    %% 最后发送任何包的时间
     last_sent_packet = 0 :: non_neg_integer(),
 
-    %% Timestamp difference to echo back to sender
+    %% 要回显给发送方的时间戳差值
     reply_micro = 0 :: non_neg_integer(),
 
-    %% Timer for zero window probing (send packet every 30s when window is 0)
+    %% 零窗口探测定时器（窗口为 0 时每 30 秒发送包）
     zerowindow_time = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
-    %% Buffers and Queues
+    %% 缓冲区和队列
     %%--------------------------------------------------------------------------
 
-    %% Receive buffer (ring buffer for reassembly)
+    %% 接收缓冲区（用于重组的环形缓冲区）
     inbuf :: any(),
 
-    %% Send buffer (ring buffer for unacked packets)
+    %% 发送缓冲区（用于未确认包的环形缓冲区）
     outbuf :: any(),
 
-    %% Receive queue (ordered data ready for application)
+    %% 接收队列（准备好供应用程序读取的有序数据）
     inque :: any(),
 
-    %% Send queue (data waiting to be packetized)
+    %% 发送队列（等待打包的数据）
     outque :: any(),
 
     %%--------------------------------------------------------------------------
-    %% Special Modes
+    %% 特殊模式
     %%--------------------------------------------------------------------------
 
-    %% Immediate Data Acknowledgment mode
+    %% 立即数据确认模式
     ida = false :: boolean(),
 
-    %% Burst mode (send multiple packets without waiting for ACK)
+    %% 突发模式（不等待 ACK 就发送多个包）
     burst = true :: boolean()
 }).
 

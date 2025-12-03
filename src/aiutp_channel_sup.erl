@@ -2,7 +2,7 @@
 %%% @author David Gao <david.alpha.fox@gmail.com>
 %%% @copyright (C) 2025, David Gao
 %%% @doc
-%%% Supervisor for uTP channel processes (gen_statem)
+%%% uTP channel 进程的监督者（gen_statem）
 %%% @end
 %%% Created : 3 Dec 2025
 %%%-------------------------------------------------------------------
@@ -14,17 +14,17 @@
 -export([start_link/0]).
 -export([new/2]).
 
-%% Supervisor callbacks
+%% 监督者回调
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
-%%% API functions
+%%% API 函数
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Start a new channel process
+%% @doc 启动一个新的 channel 进程
 %% @end
 %%--------------------------------------------------------------------
 -spec new(pid(), port()) -> {ok, pid()} | {error, term()}.
@@ -32,7 +32,7 @@ new(Parent, Socket) ->
     supervisor:start_child(?SERVER, [Parent, Socket]).
 
 %%--------------------------------------------------------------------
-%% @doc Starts the supervisor
+%% @doc 启动监督者
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link() -> {ok, Pid :: pid()} |
@@ -44,7 +44,7 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 %%%===================================================================
-%%% Supervisor callbacks
+%%% 监督者回调
 %%%===================================================================
 
 -spec init(Args :: term()) ->

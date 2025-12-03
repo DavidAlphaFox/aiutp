@@ -1,15 +1,14 @@
 %%------------------------------------------------------------------------------
-%% @doc Congestion Control for uTP Protocol Control Block
+%% @doc uTP 协议控制块的拥塞控制
 %%
-%% This module implements LEDBAT (Low Extra Delay Background Transport)
-%% congestion control algorithm as specified in BEP-29.
+%% 本模块实现 BEP-29 规范中的 LEDBAT（低额外延迟后台传输）拥塞控制算法。
 %%
-%% Key functions:
-%% - cc_control/4: Main LEDBAT congestion control logic
-%% - maybe_decay_win/1: Window decay on timeout
-%% - ack_packet/3: Process acknowledged packet for RTT calculation
-%% - caculate_acked_bytes/4: Calculate total acknowledged bytes and min RTT
-%% - selective_ack_packet/3: Handle selective ACK (SACK) processing
+%% 主要函数：
+%% - cc_control/4: LEDBAT 拥塞控制主逻辑
+%% - maybe_decay_win/1: 超时时窗口衰减
+%% - ack_packet/3: 处理已确认的包以计算 RTT
+%% - caculate_acked_bytes/4: 计算已确认字节总数和最小 RTT
+%% - selective_ack_packet/3: 处理选择性确认（SACK）
 %% @end
 %%------------------------------------------------------------------------------
 -module(aiutp_pcb_cc).
@@ -22,16 +21,16 @@
          selective_ack_packet/3]).
 
 %%------------------------------------------------------------------------------
-%% @doc LEDBAT congestion control algorithm
+%% @doc LEDBAT 拥塞控制算法
 %%
-%% Adjusts the congestion window based on measured delay relative to target.
-%% Implements slow start and congestion avoidance phases.
+%% 根据相对于目标的测量延迟调整拥塞窗口。
+%% 实现慢启动和拥塞避免两个阶段。
 %%
-%% @param Now Current timestamp in milliseconds
-%% @param AckedBytes Number of bytes acknowledged
-%% @param RTT Measured round-trip time
-%% @param PCB Protocol control block
-%% @returns Updated PCB with new window size
+%% @param Now 当前时间戳（毫秒）
+%% @param AckedBytes 已确认字节数
+%% @param RTT 测量的往返时间
+%% @param PCB 协议控制块
+%% @returns 更新窗口大小后的 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec cc_control(integer(), integer(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -43,13 +42,13 @@ cc_control(Now, AckedBytes, RTT,
     OurHistValue = aiutp_delay:value(OurHist),
     OurDelay = erlang:min(aiutp_util:bit32(RTT), OurHistValue),
 
-    %% Target delay defaults to 100ms if not set
+    %% 目标延迟默认为 100ms（如未设置）
     Target =
         if TargetDelay =< 0 -> 100000;
            true -> TargetDelay
         end,
 
-    %% Clock drift compensation penalty
+    %% 时钟漂移补偿惩罚
     Penalty =
         if ClockDrift < -200000 -> (200000 + ClockDrift) div 7;
            true -> 0
@@ -58,23 +57,23 @@ cc_control(Now, AckedBytes, RTT,
     OurDelay0 = OurDelay + Penalty,
     OffTarget = Target - OurDelay0,
 
-    %% Calculate window and delay factors
+    %% 计算窗口因子和延迟因子
     Win0 = erlang:min(AckedBytes, MaxWindow),
     Win1 = erlang:max(AckedBytes, MaxWindow),
     WindowFactor = Win0 / Win1,
     DelayFactor = OffTarget / Target,
 
-    %% Calculate scaled gain for window adjustment
+    %% 计算窗口调整的缩放增益
     ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
     ScaledGain0 =
         if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
            true -> erlang:trunc(ScaledGain)
         end,
 
-    %% LEDBAT congestion window
+    %% LEDBAT 拥塞窗口
     LedbetCwnd = erlang:max(?MIN_WINDOW_SIZE, (MaxWindow + ScaledGain0)),
 
-    %% Slow start or congestion avoidance
+    %% 慢启动或拥塞避免
     {SlowStart0, SSThresh0, MaxWindow0} =
         if SlowStart ->
             SSCwnd = MaxWindow + erlang:trunc(WindowFactor * ?MIN_WINDOW_SIZE),
@@ -94,13 +93,13 @@ cc_control(Now, AckedBytes, RTT,
     }.
 
 %%------------------------------------------------------------------------------
-%% @doc Decay window on inactivity
+%% @doc 不活跃时窗口衰减
 %%
-%% Reduces the congestion window by 20% if enough time has passed since
-%% the last decay. Used to prevent stale window sizes.
+%% 如果自上次衰减以来已过去足够时间，则将拥塞窗口减少 20%。
+%% 用于防止陈旧的窗口大小。
 %%
-%% @param PCB Protocol control block
-%% @returns Updated PCB with potentially decayed window
+%% @param PCB 协议控制块
+%% @returns 可能衰减窗口后的更新 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec maybe_decay_win(#aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -123,15 +122,15 @@ maybe_decay_win(#aiutp_pcb{time = Now,
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc Process acknowledged packet for RTT calculation
+%% @doc 处理已确认的包以计算 RTT
 %%
-%% Updates RTT estimates and current window based on acknowledged packet.
-%% Only uses first transmission for RTT calculation (Karn's algorithm).
+%% 根据已确认的包更新 RTT 估计值和当前窗口。
+%% 仅使用首次传输来计算 RTT（Karn 算法）。
 %%
-%% @param MicroNow Current time in microseconds
-%% @param WrapPacket The acknowledged packet wrapper
-%% @param Acc Accumulator tuple {Now, CurWindow, RTT, RTO, RTTVar, RTTHist}
-%% @returns Updated accumulator
+%% @param MicroNow 当前时间（微秒）
+%% @param WrapPacket 已确认的包装包
+%% @param Acc 累加器元组 {Now, CurWindow, RTT, RTO, RTTVar, RTTHist}
+%% @returns 更新后的累加器
 %% @end
 %%------------------------------------------------------------------------------
 -spec ack_packet(integer(), #aiutp_packet_wrap{}, tuple()) -> tuple().
@@ -143,7 +142,7 @@ ack_packet(MicroNow,
            {Now, CurWindow, RTT, RTO, RTTVar, RTTHist}) ->
     {RTT1, RTTVar1, RTO0, RTTHist1} =
         if Transmissions == 1 ->
-            %% Only calculate RTT for first transmission (Karn's algorithm)
+            %% 仅对首次传输计算 RTT（Karn 算法）
             {RTT0, RTTVar0, ERTT} = aiutp_rtt:caculate_rtt(RTT, RTTVar, TimeSent, MicroNow),
             RTTHist0 =
                 if RTT /= 0 -> aiutp_delay:add_sample(ERTT, Now, RTTHist);
@@ -153,7 +152,7 @@ ack_packet(MicroNow,
            true -> {RTT, RTTVar, RTO, RTTHist}
         end,
 
-    %% Adjust current window (don't count resent packets)
+    %% 调整当前窗口（不计算重发的包）
     CurWindow0 =
         if NeedResend == false -> CurWindow - Payload;
            true -> CurWindow
@@ -162,15 +161,15 @@ ack_packet(MicroNow,
     {Now, CurWindow0, RTT1, RTO0, RTTVar1, RTTHist1}.
 
 %%------------------------------------------------------------------------------
-%% @doc Calculate total acknowledged bytes and minimum RTT
+%% @doc 计算已确认字节总数和最小 RTT
 %%
-%% Processes lists of acknowledged and selectively acknowledged packets
-%% to compute total bytes and minimum RTT for congestion control.
+%% 处理已确认和选择性确认的包列表，
+%% 计算拥塞控制所需的总字节数和最小 RTT。
 %%
-%% @param Acc Initial accumulator {Bytes, RTT}
-%% @param Now Current timestamp
-%% @param AckedPackets List of normally acknowledged packets
-%% @param SAckedPackets List of selectively acknowledged packets
+%% @param Acc 初始累加器 {Bytes, RTT}
+%% @param Now 当前时间戳
+%% @param AckedPackets 正常确认的包列表
+%% @param SAckedPackets 选择性确认的包列表
 %% @returns {TotalBytes, MinRTT}
 %% @end
 %%------------------------------------------------------------------------------
@@ -188,18 +187,18 @@ caculate_acked_bytes(Acc, Now, AckedPackets, SAckedPackets) ->
     lists:foldl(Fun, Acc0, SAckedPackets).
 
 %%------------------------------------------------------------------------------
-%% @doc Process selective ACK (SACK) packets
+%% @doc 处理选择性确认（SACK）包
 %%
-%% Handles selectively acknowledged packets, updating RTT estimates and
-%% triggering fast retransmit if needed.
+%% 处理选择性确认的包，更新 RTT 估计值，
+%% 并在需要时触发快速重传。
 %%
-%% Note: Current implementation may waste bandwidth compared to C++ version.
-%% This is a known limitation for future optimization.
+%% 注意：当前实现与 C++ 版本相比可能浪费带宽。
+%% 这是未来优化的已知限制。
 %%
-%% @param SAckedPackets List of selectively acknowledged packets
-%% @param MicroNow Current time in microseconds
-%% @param PCB Protocol control block
-%% @returns Updated PCB
+%% @param SAckedPackets 选择性确认的包列表
+%% @param MicroNow 当前时间（微秒）
+%% @param PCB 协议控制块
+%% @returns 更新后的 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec selective_ack_packet(list(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -212,7 +211,7 @@ selective_ack_packet(SAckedPackets,
                                 cur_window_packets = CurWindowPackets} = PCB) ->
     Now0 = aiutp_util:millisecond(),
 
-    %% Update RTT and window from SACK'd packets
+    %% 从 SACK 的包更新 RTT 和窗口
     {_, CurWindow0, RTT0, RTO0, RTTVar0, RTTHist0} =
         lists:foldr(
             fun(I, AccPCB) -> ack_packet(MicroNow, I, AccPCB) end,
@@ -231,14 +230,14 @@ selective_ack_packet(SAckedPackets,
         rto_timeout = RTO0 + Now0
     },
 
-    %% Calculate sequence range for fast retransmit
+    %% 计算快速重传的序列号范围
     [El | _] = SAckedPackets,
     MinSeq = aiutp_util:bit16(SeqNR - CurWindowPackets),
     Packet = El#aiutp_packet_wrap.packet,
     MaxSeq = aiutp_util:bit16(Packet#aiutp_packet.seq_nr - 1),
 
     if ?WRAPPING_DIFF_16(MaxSeq, MinSeq) > ?DUPLICATE_ACKS_BEFORE_RESEND ->
-        %% Trigger fast retransmit
+        %% 触发快速重传
         {Sent, LastSeq, PCB1} = aiutp_net:send_n_packets(MinSeq, MaxSeq, 4, PCB0),
         PCB2 = PCB1#aiutp_pcb{
             fast_resend_seq_nr = aiutp_util:bit16(LastSeq + 1),
