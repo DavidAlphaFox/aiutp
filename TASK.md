@@ -22,6 +22,17 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_socket 代码重构和注释
+  - 添加完整模块文档和架构图
+  - 函数重命名: `add_conn_inner` → `do_register_channel`, `free_conn_inner` → `do_unregister_channel`
+  - 函数重命名: `reset_conn` → `send_reset`, `dispatch` → `dispatch_packet`
+  - 新增 API: `register_channel/3`, `unregister_channel/3` (保留向后兼容别名)
+  - 拆分复杂函数: `handle_udp_packet/4`, `dispatch_packet/3`, `handle_unknown_connection/10`
+  - 新增辅助函数: `open_udp_socket/2`, `ensure_binary_mode/1`, `close_socket_if_open/1`
+  - 添加 UDP 缓冲区大小宏定义
+  - 代码按功能分组: API、gen_server 回调、内部函数
+  - 全部使用中文注释
+  - 146 个测试全部通过
 - [x] aiutp_socket 代码优化
   - 改进 `connect` 函数错误处理，使用嵌套 case 替代模式匹配崩溃
   - 添加 `conn_count` 字段缓存连接数，避免 `dispatch` 中重复调用 `maps:size`
