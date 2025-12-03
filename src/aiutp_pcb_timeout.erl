@@ -119,7 +119,9 @@ check_timeouts_0(#aiutp_pcb{time = Now,
 %%------------------------------------------------------------------------------
 check_timeouts_1(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
-    {false, PCB#aiutp_pcb{state = ?CS_DESTROY}};
+    %% SYN_RECV 超时，发送 RESET 通知对端后销毁连接
+    PCB0 = aiutp_net:send_reset(PCB),
+    {false, PCB0#aiutp_pcb{state = ?CS_DESTROY}};
 
 check_timeouts_1(#aiutp_pcb{time = Now,
                             last_got_packet = LastGotPacket,

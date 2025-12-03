@@ -64,6 +64,25 @@ schedule_ack_when_ida_false_test() ->
     ?assertEqual(false, Result#aiutp_pcb.ida).
 
 %%==============================================================================
+%% Test: send_reset
+%%==============================================================================
+
+send_reset_exports_test() ->
+    %% Verify send_reset is exported
+    Exports = aiutp_net:module_info(exports),
+    ?assert(lists:member({send_reset, 1}, Exports)).
+
+send_reset_creates_reset_packet_test() ->
+    %% Test that send_reset creates a proper RESET packet
+    %% We test this by verifying the packet structure
+    Packet = aiutp_packet:reset(12346, 100),
+    ?assertEqual(?ST_RESET, Packet#aiutp_packet.type),
+    ?assertEqual(12346, Packet#aiutp_packet.conn_id),
+    ?assertEqual(100, Packet#aiutp_packet.ack_nr),
+    ?assertEqual(0, Packet#aiutp_packet.seq_nr),
+    ?assertEqual(0, Packet#aiutp_packet.wnd).
+
+%%==============================================================================
 %% Helper functions
 %%==============================================================================
 

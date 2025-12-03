@@ -81,31 +81,40 @@ state(#aiutp_pcb{state = State}) -> State.
 %%------------------------------------------------------------------------------
 %% @doc 检查连接是否已关闭并返回原因
 %%
+%% 根据 libutp 实现，连接关闭的判断逻辑：
+%% - CS_RESET: 连接被对端强制重置
+%% - CS_DESTROY: 连接进入销毁状态
+%%   - fin_sent_acked = true: 我们的 FIN 已被确认 -> normal
+%%   - got_fin_reached = true: 对端 FIN 及之前的包都已收到 -> normal
+%%   - 无 FIN 交换: 超时或错误导致的销毁 -> timeout
+%%
+%% 注意: got_fin_reached=true 在非 CS_DESTROY 状态下不触发关闭。
+%% 这表示对端已发送 FIN（半关闭），但本地连接仍然有效，
+%% 需要上层调用 close() 来完成关闭流程。
+%%
 %% @returns {closed, Reason} | not_closed
-%% 其中 Reason 可能是: normal | reset | timeout | crash
+%% 其中 Reason: normal | reset | timeout
 %% @end
 %%------------------------------------------------------------------------------
--spec closed(#aiutp_pcb{}) -> {closed, atom()} | not_closed.
-closed(#aiutp_pcb{state = State})
-  when State == ?CS_RESET -> {closed, reset};
-closed(#aiutp_pcb{state = State,
-                  fin_sent = FinSent,
+-spec closed(#aiutp_pcb{}) -> {closed, normal | reset | timeout} | not_closed.
+%% 连接被重置
+closed(#aiutp_pcb{state = ?CS_RESET}) ->
+    {closed, reset};
+%% 连接进入销毁状态
+closed(#aiutp_pcb{state = ?CS_DESTROY,
                   fin_sent_acked = FinSentAcked,
-                  got_fin = GotFin,
-                  got_fin_reached = GotFinReached,
-                  cur_window_packets = CurWindowPackets})
-  when State == ?CS_DESTROY ->
-    if (FinSent and FinSentAcked) or
-       (GotFin and GotFinReached) -> {closed, normal};
-       FinSent and CurWindowPackets == 1 -> {closed, normal};
-       (FinSent == false) and
-       (GotFin == false) -> {closed, timeout};
-       true -> {closed, crash}
+                  got_fin_reached = GotFinReached}) ->
+    if
+        %% 我们的 FIN 已被确认，正常关闭
+        FinSentAcked -> {closed, normal};
+        %% 对端 FIN 及之前的包都已收到，正常关闭
+        GotFinReached -> {closed, normal};
+        %% 无 FIN 交换就进入 DESTROY，说明是超时
+        true -> {closed, timeout}
     end;
-closed(#aiutp_pcb{got_fin = GotFin, got_fin_reached = GotFinReached}) ->
-    if (GotFin and GotFinReached) -> {closed, normal};
-       true -> not_closed
-    end.
+%% 其他状态：连接未关闭
+closed(_) ->
+    not_closed.
 
 %%------------------------------------------------------------------------------
 %% @doc 处理入站数据包
@@ -507,15 +516,16 @@ close(#aiutp_pcb{state = State} = PCB)
        State == ?CS_IDLE;
        State == ?CS_DESTROY ->
     PCB#aiutp_pcb{state = ?CS_DESTROY};
-close(#aiutp_pcb{state = State, rto = RTO} = PCB)
+close(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_SENT ->
-    PCB#aiutp_pcb{
-        rto_timeout = erlang:min(RTO * 2, 60) + aiutp_util:millisecond(),
-        state = ?CS_DESTROY
-    };
+    %% 连接建立中被取消，发送 RESET 通知对端
+    PCB0 = aiutp_net:send_reset(PCB),
+    PCB0#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
-    PCB#aiutp_pcb{state = ?CS_DESTROY};
+    %% 接受连接过程中被取消，发送 RESET 通知对端
+    PCB0 = aiutp_net:send_reset(PCB),
+    PCB0#aiutp_pcb{state = ?CS_DESTROY};
 close(#aiutp_pcb{fin_sent_acked = FinSentAcked, fin_sent = FinSent} = PCB) ->
     PCB0 = PCB#aiutp_pcb{read_shutdown = true, close_requested = true},
     if FinSent == false ->

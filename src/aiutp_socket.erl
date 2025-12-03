@@ -15,18 +15,29 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3, format_status/2]).
+         terminate/2, code_change/3, format_status/1]).
 -export([connect/3,listen/2,accept/1,
          add_conn/3,free_conn/3]).
 
 -define(SERVER, ?MODULE).
+-define(DEFAULT_MAX_CONNS, 100).
 
--record(state, {socket,
-                conns,
-                monitors,
-                max_conns = 100, %% 可以增加接口后期修改
-                acceptor = closed,
-                options}).
+%% State is a map with the following keys:
+%% - socket: gen_udp:socket() | undefined
+%% - conns: #{conn_key() => {pid(), reference()}}
+%% - monitors: #{reference() => conn_key()}
+%% - max_conns: pos_integer()
+%% - acceptor: pid() | closed
+%% - options: list()
+-type conn_key() :: {{inet:ip_address(), inet:port_number()}, non_neg_integer()}.
+-type state() :: #{
+    socket := gen_udp:socket() | undefined,
+    conns := #{conn_key() => {pid(), reference()}},
+    monitors := #{reference() => conn_key()},
+    max_conns := pos_integer(),
+    acceptor := pid() | closed,
+    options := list()
+}.
 
 %%%===================================================================
 %%% API
@@ -104,10 +115,12 @@ init([Port,Options]) ->
     {ok,Socket} ->
       ok = inet:setopts(Socket, [{active,once},
                                  {high_msgq_watermark,6553500}]),
-      {ok, #state{socket = Socket,
-                  conns = maps:new(),
-                  monitors = maps:new(),
-                  options = UTPOptions}};
+      {ok, #{socket => Socket,
+             conns => #{},
+             monitors => #{},
+             max_conns => ?DEFAULT_MAX_CONNS,
+             acceptor => closed,
+             options => UTPOptions}};
     {error,Reason} -> {stop,Reason}
   end.
 
@@ -132,19 +145,19 @@ handle_call({add_conn,Remote,ConnId,Worker},_From,State)->
 handle_call({free_conn,Remote,ConnId},_From,State) ->
   {reply,ok,free_conn_inner(Remote,ConnId,State)};
 
-handle_call(socket,_From,#state{socket = Socket,options = Options} = State)->
+handle_call(socket,_From,#{socket := Socket, options := Options} = State)->
   {reply,{ok,{Socket,Options}},State};
 handle_call({listen,Options},_From,
-            #state{socket = Socket,acceptor = closed,
-                   options = UTPOptions} = State)->
+            #{socket := Socket, acceptor := closed,
+              options := UTPOptions} = State)->
   Parent = self(),
   {ok,Acceptor} = aiutp_acceptor:start_link(Parent,Socket,Options,UTPOptions),
-  {reply,ok,State#state{acceptor = Acceptor}};
+  {reply,ok,State#{acceptor := Acceptor}};
 handle_call({listen,_},_From,State) ->
   {reply,{error,listening},State};
-handle_call(accept,_From,#state{acceptor = closed} = State)->
+handle_call(accept,_From,#{acceptor := closed} = State)->
   {reply,{error,not_listening},State};
-handle_call(accept,From,#state{acceptor = Acceptor} = State)->
+handle_call(accept,From,#{acceptor := Acceptor} = State)->
   aiutp_acceptor:accept(Acceptor,From),
   {noreply,State};
 handle_call(_Request, _From, State) ->
@@ -178,7 +191,7 @@ handle_cast(_Request, State) ->
         {stop, Reason :: normal | term(), NewState :: term()}.
 
 handle_info({udp, Socket, IP, Port, Payload},
-            #state{socket = Socket} = State)->
+            #{socket := Socket} = State)->
   case aiutp_packet:decode(Payload) of
     {ok,Packet} -> dispatch({IP,Port},Packet, State);
     {error, Reason} ->
@@ -190,19 +203,19 @@ handle_info({udp, Socket, IP, Port, Payload},
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
 handle_info({'DOWN',MRef,process,_Worker,_Reason},
-            #state{monitors = Monitors,conns = Conns} = State)->
+            #{monitors := Monitors, conns := Conns} = State)->
   case maps:get(MRef,Monitors,undefined) of
     undefined -> {noreply,State};
     Key -> {noreply,
-            State#state{monitors = maps:remove(MRef, Monitors),
-                        conns = maps:remove(Key,Conns)}}
+            State#{monitors := maps:remove(MRef, Monitors),
+                   conns := maps:remove(Key,Conns)}}
   end;
 handle_info({'EXIT',Acceptor,Reason},
-            #state{acceptor = Acceptor,socket = Socket} = State) ->
+            #{acceptor := Acceptor, socket := Socket} = State) ->
   if Socket /= undefined -> gen_udp:close(Socket);
      true -> ok
   end,
-  {stop,Reason,State#state{socket = undefined}};
+  {stop,Reason,State#{socket := undefined}};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -217,8 +230,8 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
                 State :: term()) -> any().
-terminate(_Reason,#state{socket = undefined})-> ok;
-terminate(_Reason, #state{socket = Socket }) ->
+terminate(_Reason, #{socket := undefined})-> ok;
+terminate(_Reason, #{socket := Socket}) ->
   gen_udp:close(Socket),
   ok.
 
@@ -243,9 +256,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% or when it appears in termination error logs.
 %% @end
 %%--------------------------------------------------------------------
--spec format_status(Opt :: normal | terminate,
-                    Status :: list()) -> Status :: term().
-format_status(_Opt, Status) ->
+-spec format_status(Status :: map()) -> Status :: map().
+format_status(Status) ->
   Status.
 
 %%%===================================================================
@@ -262,54 +274,52 @@ reset_conn(Socket,Remote,ConnID,AckNR)->
 
 %% @private Add a connection to the internal state
 -spec add_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
-                     pid(), #state{}) -> {ok | exists | overflow, #state{}}.
-add_conn_inner(Remote,ConnId,Worker,
-         #state{conns = Conns,monitors = Monitors,max_conns = MaxConns} = State)->
-  Key = {Remote,ConnId},
+                     pid(), state()) -> {ok | exists | overflow, state()}.
+add_conn_inner(Remote, ConnId, Worker,
+               #{conns := Conns, monitors := Monitors, max_conns := MaxConns} = State)->
+  Key = {Remote, ConnId},
   case maps:is_key(Key, Conns) of
-    true -> {exists,State};
+    true -> {exists, State};
     false ->
       ConnsSize = maps:size(Conns),
-      if ConnsSize > MaxConns -> {overflow,State};
+      if ConnsSize > MaxConns -> {overflow, State};
          true ->
           Monitor = erlang:monitor(process, Worker),
-          Conns0 = maps:put(Key, {Worker,Monitor}, Conns),
-          Monitors0 = maps:put(Monitor,Key,Monitors),
-          {ok,State#state{conns = Conns0,monitors = Monitors0}}
+          {ok, State#{conns := maps:put(Key, {Worker, Monitor}, Conns),
+                      monitors := maps:put(Monitor, Key, Monitors)}}
       end
   end.
 
 %% @private Free a connection from the internal state
 -spec free_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
-                      #state{}) -> #state{}.
-free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
-  Key = {Remote,ConnId},
-  case maps:is_key(Key,Conns) of
+                      state()) -> state().
+free_conn_inner(Remote, ConnId, #{conns := Conns, monitors := Monitors} = State)->
+  Key = {Remote, ConnId},
+  case maps:is_key(Key, Conns) of
     false -> State;
     true ->
-      {_,Monitor} = maps:get(Key,Conns),
-      erlang:demonitor(Monitor,[flush]),
-      State#state{
-        monitors = maps:remove(Monitor, Monitors),
-        conns = maps:remove(Key,Conns)}
+      {_, Monitor} = maps:get(Key, Conns),
+      erlang:demonitor(Monitor, [flush]),
+      State#{monitors := maps:remove(Monitor, Monitors),
+             conns := maps:remove(Key, Conns)}
   end.
 
 %% @private Dispatch incoming packet to appropriate handler
--spec dispatch({inet:ip_address(), inet:port_number()}, #aiutp_packet{}, #state{}) -> ok.
-dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
-         #state{socket = Socket,conns = Conns,acceptor = Acceptor,max_conns = MaxConns})->
-  Key = {Remote,ConnId},
+-spec dispatch({inet:ip_address(), inet:port_number()}, #aiutp_packet{}, state()) -> ok.
+dispatch(Remote, #aiutp_packet{conn_id = ConnId, type = PktType, seq_nr = AckNR} = Packet,
+         #{socket := Socket, conns := Conns, acceptor := Acceptor, max_conns := MaxConns})->
+  Key = {Remote, ConnId},
   RecvTime = aiutp_util:microsecond(),
-  case maps:get(Key,Conns,undefined) of
+  case maps:get(Key, Conns, undefined) of
     undefined ->
       if (PktType == ?ST_SYN) and
          (Acceptor /= closed) ->
           ConnsSize = maps:size(Conns),
           if ConnsSize >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
-             true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN,Remote,{Packet,RecvTime}})
+             true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN, Remote, {Packet, RecvTime}})
           end;
          (PktType == ?ST_RESET) -> ok;
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
-    {Channel,_}-> aiutp_channel:incoming(Channel, {Packet,RecvTime})
+    {Channel, _} -> aiutp_channel:incoming(Channel, {Packet, RecvTime})
   end.

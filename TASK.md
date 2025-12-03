@@ -93,6 +93,49 @@
     - aiutp_pcb_cc_tests.erl (11 个测试)
     - aiutp_pcb_timeout_tests.erl (9 个测试)
   - 总计 135 个测试用例通过
+- [x] PCB Packet Processing 重构 (BEP-29 合规性改进)
+  - 阶段 1: 函数重命名
+    - process/2 → process_incoming/2 (保留兼容别名)
+    - process_by_type/3 → dispatch_by_type/3
+    - process_packet/2 → validate_and_init/2
+    - process_packet_1/2 → handle_duplicate_acks/2
+    - process_packet_2/2 → process_ack_and_sack/2
+    - process_packet_3/2 → update_connection_state/2
+    - process_packet_4/2 → handle_data_and_fin/2
+  - 阶段 2: 连接断开处理改进
+    - 添加 aiutp_net:send_reset/1 函数
+    - 超时时发送 RESET 包通知对端 (BEP-29)
+  - 阶段 3: SACK 处理改进
+    - 添加 skip_count 字段跟踪包被 SACK 跳过次数
+    - 实现 aiutp_tx:update_skip_counts/2 检测 SACK 缺口
+    - 被跳过 3+ 次的包标记为快速重传 (BEP-29)
+  - 阶段 4: 测试验证
+    - 添加 aiutp_tx_tests.erl (9 个测试)
+    - 添加 aiutp_net 额外测试 (2 个测试)
+  - 总计 146 个测试用例通过
+- [x] Dialyzer 类型规范支持
+  - 配置 rebar.config 添加 dialyzer 设置
+  - 为数据结构添加 opaque 类型 (aiutp_queue, aiutp_buffer, aiutp_delay)
+  - 为 API 添加导出类型 (utp_socket, utp_connection, socket_ref)
+  - 为所有模块添加 -spec 类型规范
+  - 修复类型不一致 (PCB socket 字段、packet conn_id 字段、整数运算)
+  - Dialyzer 警告: 62 → 19 (剩余为风格警告)
+  - 146 个测试全部通过
+- [x] OTP 模块状态 record 转换为 maps
+  - aiutp_socket.erl: #state{} → maps (6 个字段)
+  - aiutp_acceptor.erl: #state{} → maps (7 个字段)
+  - aiutp_channel.erl: #data{} → maps (11 个字段)
+  - 添加详细类型规范 (-type state(), -type data())
+  - 保留性能关键 records: #aiutp_pcb{}, #aiutp_packet{}, #aiutp_buffer{}
+  - 146 个测试全部通过
+- [x] CS_DESTROY 状态转换修复 (对齐 libutp 实现)
+  - 分析报告: docs/report/cs-destroy-analysis-2025-12-03.md
+  - 修复 SYN_RECV 超时: 添加 send_reset 调用
+  - 修复 closed/1: 移除非 CS_DESTROY 状态下对 got_fin_reached 的处理
+  - 修复 close() 在 SYN_SENT/SYN_RECV: 发送 RESET 后进入 CS_DESTROY
+  - 优化 closed/1 函数: 简化逻辑，移除 crash 返回值
+  - 修复 format_status 废弃警告 (format_status/2 → format_status/1)
+  - 146 个测试全部通过
 
 ### 历史任务
 - [x] 实现 uTP 协议核心逻辑 (aiutp_pcb)
@@ -136,8 +179,8 @@
 - [ ] 配置管理改用应用环境变量
 
 ### 改进建议
-- [ ] 添加 dialyzer 类型规范检查
-- [ ] 考虑使用 maps 替代部分 record，提高可读性
+- [x] 添加 dialyzer 类型规范检查 (已完成 2025-12-03)
+- [x] 使用 maps 替代部分 record，提高可读性 (已完成 2025-12-03)
 - [ ] 考虑支持 IPv6
 
 ## 里程碑
@@ -150,7 +193,8 @@
 
 ### v0.2.0 (进行中)
 - [x] gen_statem 重构 (aiutp_channel)
-- [ ] 完整测试覆盖 (当前 115 个测试)
+- [x] PCB Packet Processing 重构 (BEP-29 合规性)
+- [ ] 完整测试覆盖 (当前 146 个测试)
 - [ ] 性能优化
 - [ ] API 稳定化
 

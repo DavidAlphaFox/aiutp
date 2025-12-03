@@ -16,22 +16,32 @@
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3, format_status/2]).
+         terminate/2, code_change/3, format_status/1]).
 
 -export([accept/2,incoming/2]).
 
 -define(SERVER, ?MODULE).
 -define(BACKLOG, 128).
--record(state, {
-                parent,
-                socket,
-                acceptors,
-                monitors,
-                syns,
-                syn_len,
-                max_syn_len,
-                options
-               }).
+
+%% State is a map with the following keys:
+%% - parent: pid() - parent socket process
+%% - socket: gen_udp:socket() - UDP socket
+%% - acceptors: queue:queue({pid(), term()}) - waiting acceptors
+%% - syns: queue:queue(syn_request()) - pending SYN requests
+%% - syn_len: non_neg_integer() - current SYN queue length
+%% - max_syn_len: pos_integer() - maximum SYN queue length (backlog)
+%% - options: list() - UTP options
+-type syn_request() :: {{inet:ip_address(), inet:port_number()},
+                        {#aiutp_packet{}, non_neg_integer()}}.
+-type state() :: #{
+    parent := pid(),
+    socket := gen_udp:socket(),
+    acceptors := queue:queue({pid(), term()}),
+    syns := queue:queue(syn_request()),
+    syn_len := non_neg_integer(),
+    max_syn_len := pos_integer(),
+    options := list()
+}.
 
 %%%===================================================================
 %%% API
@@ -77,16 +87,15 @@ init([Parent,Socket,Options,UTPOptions]) ->
   Backlog =
     case Options of
       undefined -> ?BACKLOG;
-      _ ->proplists:get_value(backlog, Options,?BACKLOG)
+      _ -> proplists:get_value(backlog, Options, ?BACKLOG)
     end,
-  {ok, #state{
-          parent = Parent,
-          socket = Socket,
-          acceptors = queue:new(),
-          syns = queue:new(),
-          syn_len = 0,
-          max_syn_len = Backlog,
-          options = UTPOptions}}.
+  {ok, #{parent => Parent,
+         socket => Socket,
+         acceptors => queue:new(),
+         syns => queue:new(),
+         syn_len => 0,
+         max_syn_len => Backlog,
+         options => UTPOptions}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -119,10 +128,10 @@ handle_call(_Request, _From, State) ->
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: term(), NewState :: term()}.
 handle_cast({accept,Acceptor},
-            #state{acceptors = Acceptors, syn_len = SynLen} = State)->
+            #{acceptors := Acceptors, syn_len := SynLen} = State)->
   if
-    SynLen > 0 -> accept_incoming(Acceptor,State);
-    true -> {noreply,State#state{ acceptors = queue:in(Acceptor, Acceptors) }}
+    SynLen > 0 -> accept_incoming(Acceptor, State);
+    true -> {noreply, State#{acceptors := queue:in(Acceptor, Acceptors)}}
   end;
 handle_cast({?ST_SYN,Remote,Packet},State)->
   pair_incoming(Remote,Packet,State);
@@ -140,9 +149,9 @@ handle_cast(_, State) ->
         {noreply, NewState :: term(), Timeout :: timeout()} |
         {noreply, NewState :: term(), hibernate} |
         {stop, Reason :: normal | term(), NewState :: term()}.
-handle_info(timeout,#state{acceptors = Acceptors} = State)->
-  {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
-  accept_incoming(Acceptor, State#state{acceptors = Acceptors0});
+handle_info(timeout, #{acceptors := Acceptors} = State)->
+  {{value,Acceptor}, Acceptors0} = queue:out(Acceptors),
+  accept_incoming(Acceptor, State#{acceptors := Acceptors0});
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -181,9 +190,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% or when it appears in termination error logs.
 %% @end
 %%--------------------------------------------------------------------
--spec format_status(Opt :: normal | terminate,
-                    Status :: list()) -> Status :: term().
-format_status(_Opt, Status) ->
+-spec format_status(Status :: map()) -> Status :: map().
+format_status(Status) ->
   Status.
 
 %%%===================================================================
@@ -191,57 +199,57 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 
 %% @private Accept an incoming connection from pending SYN requests
--spec accept_incoming({pid(), term()}, #state{}) ->
-    {noreply, #state{}} | {noreply, #state{}, timeout()}.
-accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
-  {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
+-spec accept_incoming({pid(), term()}, state()) ->
+    {noreply, state()} | {noreply, state(), timeout()}.
+accept_incoming(Acceptor, #{acceptors := Acceptors, syn_len := 0} = State)->
+  {noreply, State#{acceptors := queue:in(Acceptor, Acceptors)}};
 accept_incoming({Caller,_} = Acceptor,
-                #state{ syns = Syns,syn_len = SynLen,
-                       parent = Parent,socket = Socket} = State)->
-  {ok,Channel} = aiutp_channel_sup:new(Parent,Socket),
-  {{value,Req},Syns0} = queue:out(Syns),
-  {Remote,{SYN,_} = P} = Req,
-  case aiutp_channel:accept(Channel, Caller,Remote, P) of
+                #{syns := Syns, syn_len := SynLen,
+                  parent := Parent, socket := Socket} = State)->
+  {ok, Channel} = aiutp_channel_sup:new(Parent, Socket),
+  {{value, Req}, Syns0} = queue:out(Syns),
+  {Remote, {SYN, _} = P} = Req,
+  case aiutp_channel:accept(Channel, Caller, Remote, P) of
     ok ->
-      gen_server:reply(Acceptor, {ok,{utp,Parent,Channel}}),
-      {noreply,State#state{syns = Syns0, syn_len = SynLen - 1}};
+      gen_server:reply(Acceptor, {ok, {utp, Parent, Channel}}),
+      {noreply, State#{syns := Syns0, syn_len := SynLen - 1}};
     _ ->
-      Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+      Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id, SYN#aiutp_packet.seq_nr),
       Bin = aiutp_packet:encode(Packet),
-      gen_udp:send(Socket,Remote,Bin),
-      accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
+      gen_udp:send(Socket, Remote, Bin),
+      accept_incoming(Acceptor, State#{syns := Syns0, syn_len := SynLen - 1})
   end.
 
 %% @private Pair incoming SYN with pending acceptor or queue it
 -spec pair_incoming({inet:ip_address(), inet:port_number()},
-                    {#aiutp_packet{}, integer()}, #state{}) ->
-    {noreply, #state{}} | {noreply, #state{}, timeout()}.
-pair_incoming(Remote,{SYN,_},
-              #state{socket = Socket,
-                     syn_len = SynLen,
-                     max_syn_len = MaxSynLen} = State) when SynLen >= MaxSynLen ->
-  Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id,SYN#aiutp_packet.seq_nr),
+                    {#aiutp_packet{}, integer()}, state()) ->
+    {noreply, state()} | {noreply, state(), timeout()}.
+pair_incoming(Remote, {SYN, _},
+              #{socket := Socket,
+                syn_len := SynLen,
+                max_syn_len := MaxSynLen} = State) when SynLen >= MaxSynLen ->
+  Packet = aiutp_packet:reset(SYN#aiutp_packet.conn_id, SYN#aiutp_packet.seq_nr),
   Bin = aiutp_packet:encode(Packet),
-  gen_udp:send(Socket,Remote,Bin),
-  {noreply,State};
+  gen_udp:send(Socket, Remote, Bin),
+  {noreply, State};
 
-pair_incoming(Remote,{Packet,_} = P,
-              #state{acceptors = Acceptors,syns = Syns} = State) ->
+pair_incoming(Remote, {Packet, _} = P,
+              #{acceptors := Acceptors, syns := Syns} = State) ->
   Syns0 =
     queue:filter(
-      fun({Remote0,{SYN,_}})->
-          if (Remote ==  Remote0) andalso
+      fun({Remote0, {SYN, _}})->
+          if (Remote == Remote0) andalso
              (SYN#aiutp_packet.conn_id == Packet#aiutp_packet.conn_id) -> false;
             true -> true
           end
       end, Syns),
-  Syns1 = queue:in({Remote,P},Syns0),
+  Syns1 = queue:in({Remote, P}, Syns0),
   Empty = queue:is_empty(Acceptors),
   if
-    Empty == true -> {noreply,State#state{syns = Syns1,syn_len = queue:len(Syns1)}};
+    Empty == true -> {noreply, State#{syns := Syns1, syn_len := queue:len(Syns1)}};
     true ->
-      {{value,Acceptor},Acceptors0} = queue:out(Acceptors),
-      accept_incoming(Acceptor,State#state{syns = Syns1,
-                                           syn_len = queue:len(Syns1),
-                                           acceptors = Acceptors0})
+      {{value, Acceptor}, Acceptors0} = queue:out(Acceptors),
+      accept_incoming(Acceptor, State#{syns := Syns1,
+                                       syn_len := queue:len(Syns1),
+                                       acceptors := Acceptors0})
   end.
