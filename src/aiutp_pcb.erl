@@ -256,7 +256,7 @@ maybe_decay_win(#aiutp_pcb {time = Now,
                            } = PCB)->
   if (Now - LastRWinDecay) < ?MAX_WINDOW_DECAY -> PCB;
      true ->
-      MaxWindow0 = erlang:trunc(MaxWindow * 0.5),
+      MaxWindow0 = erlang:trunc(MaxWindow * 0.8),
       MaxWindow1 =
         if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
            true -> MaxWindow0
@@ -447,7 +447,7 @@ check_timeouts_0(#aiutp_pcb{time =Now,
         check_timeouts_2(check_timeouts_1(PCB0));
        (Brust == true) and
        (CurWindowPackets > 0) and
-       ((State == ?CS_CONNECTED) or (State == ?CS_CONNECTED_FULL))->
+       (State == ?CS_CONNECTED) ->
         case check_timeouts_1(PCB0) of
           {true,_} ->
             Iter = aiutp_buffer:head(OutBuf),
