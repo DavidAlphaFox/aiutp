@@ -137,9 +137,9 @@ maybe_decay_win_after_interval_test() ->
     },
     Result = aiutp_pcb_cc:maybe_decay_win(PCB),
 
-    %% Window should be reduced by 20%
-    ?assertEqual(8000, Result#aiutp_pcb.max_window),
-    ?assertEqual(8000, Result#aiutp_pcb.ssthresh),
+    %% libutp: Window should be reduced by 50% (was 20%)
+    ?assertEqual(5000, Result#aiutp_pcb.max_window),
+    ?assertEqual(5000, Result#aiutp_pcb.ssthresh),
     ?assertEqual(false, Result#aiutp_pcb.slow_start),
     ?assertEqual(Now, Result#aiutp_pcb.last_rwin_decay).
 

@@ -26,68 +26,85 @@
 %% 根据相对于目标的测量延迟调整拥塞窗口。
 %% 实现慢启动和拥塞避免两个阶段。
 %%
+%% 算法来源: RFC 6817 和 libutp (utp_internal.cpp)
+%%
+%% LEDBAT 公式:
+%%   cwnd += GAIN * off_target * bytes_acked * MSS / cwnd
+%%   其中 off_target = (TARGET - queuing_delay) / TARGET
+%%
 %% @param Now 当前时间戳（毫秒）
 %% @param AckedBytes 已确认字节数
-%% @param RTT 测量的往返时间
+%% @param RTT 测量的往返时间（微秒）
 %% @param PCB 协议控制块
 %% @returns 更新窗口大小后的 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec cc_control(integer(), integer(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 cc_control(Now, AckedBytes, RTT,
-           #aiutp_pcb{our_hist = OurHist, target_delay = TargetDelay,
-                      clock_drift = ClockDrift, max_window = MaxWindow,
+           #aiutp_pcb{our_hist = OurHist,
+                      max_window = MaxWindow,
                       last_maxed_out_window = LastMaxedOutWindow,
                       slow_start = SlowStart, ssthresh = SSThresh} = PCB) ->
+    %% 获取当前延迟估计（取历史最小值和当前 RTT 的较小者）
     OurHistValue = aiutp_delay:value(OurHist),
     OurDelay = erlang:min(aiutp_util:bit32(RTT), OurHistValue),
 
-    %% 目标延迟默认为 100ms（如未设置）
-    Target =
-        if TargetDelay =< 0 -> 100000;
-           true -> TargetDelay
-        end,
+    %% 目标延迟固定为 100ms（RFC 6817 要求 <= 100ms）
+    Target = ?TARGET_DELAY,
 
-    %% 时钟漂移补偿惩罚
-    Penalty =
-        if ClockDrift < -200000 -> (200000 + ClockDrift) div 7;
-           true -> 0
-        end,
+    %% 计算偏离目标的程度
+    %% off_target > 0: 延迟低于目标，可以增加窗口
+    %% off_target < 0: 延迟高于目标，需要减小窗口
+    OffTarget = Target - OurDelay,
 
-    OurDelay0 = OurDelay + Penalty,
-    OffTarget = Target - OurDelay0,
-
-    %% 计算窗口因子和延迟因子
+    %% 计算窗口因子和延迟因子（libutp 公式）
+    %% window_factor = min(bytes_acked, max_window) / max(max_window, bytes_acked)
     Win0 = erlang:min(AckedBytes, MaxWindow),
     Win1 = erlang:max(AckedBytes, MaxWindow),
     WindowFactor = Win0 / Win1,
-    DelayFactor = OffTarget / Target,
+
+    %% delay_factor = off_target / target
+    %% 限制 off_target 到 [-target, target] 范围，防止异常值
+    ClampedOffTarget = aiutp_util:clamp(OffTarget, -Target, Target),
+    DelayFactor = ClampedOffTarget / Target,
 
     %% 计算窗口调整的缩放增益
+    %% scaled_gain = MAX_CWND_INCREASE_BYTES_PER_RTT * window_factor * delay_factor
     ScaledGain = ?MAX_CWND_INCREASE_BYTES_PER_RTT * WindowFactor * DelayFactor,
+
+    %% libutp: 如果窗口在 WINDOW_SATURATION_TIMEOUT 内没有被充分利用，不增长窗口
+    %% 这防止了在速率受限时窗口无限增长
     ScaledGain0 =
-        if (ScaledGain > 0) and (Now - LastMaxedOutWindow > 3000) -> 0;
+        if (ScaledGain > 0) andalso (Now - LastMaxedOutWindow > ?WINDOW_SATURATION_TIMEOUT) -> 0;
            true -> erlang:trunc(ScaledGain)
         end,
 
     %% LEDBAT 拥塞窗口
-    LedbetCwnd = erlang:max(?MIN_WINDOW_SIZE, (MaxWindow + ScaledGain0)),
+    LedbatCwnd = erlang:max(?MIN_WINDOW_SIZE, (MaxWindow + ScaledGain0)),
 
     %% 慢启动或拥塞避免
+    %% libutp: 慢启动时每 RTT 增加一个 PACKET_SIZE
     {SlowStart0, SSThresh0, MaxWindow0} =
         if SlowStart ->
-            SSCwnd = MaxWindow + erlang:trunc(WindowFactor * ?MIN_WINDOW_SIZE),
-            if SSCwnd > SSThresh -> {false, SSThresh, MaxWindow};
-               OurDelay0 > Target * 0.9 -> {false, MaxWindow, MaxWindow};
-               true -> {SlowStart, SSThresh, erlang:max(SSCwnd, LedbetCwnd)}
+            SSCwnd = MaxWindow + erlang:trunc(WindowFactor * ?PACKET_SIZE),
+            if SSCwnd > SSThresh ->
+                %% 超过慢启动阈值，退出慢启动
+                {false, SSThresh, MaxWindow};
+               OurDelay > Target * 0.9 ->
+                %% 延迟达到目标的 90%，退出慢启动
+                {false, MaxWindow, MaxWindow};
+               true ->
+                %% 继续慢启动，取 SSCwnd 和 LedbatCwnd 的较大者
+                {SlowStart, SSThresh, erlang:max(SSCwnd, LedbatCwnd)}
             end;
-           true -> {SlowStart, SSThresh, LedbetCwnd}
+           true ->
+            %% 拥塞避免阶段
+            {SlowStart, SSThresh, LedbatCwnd}
         end,
 
     PCB#aiutp_pcb{
         slow_start = SlowStart0,
         ssthresh = SSThresh0,
-        target_delay = (Target * 3 + OurDelay0) div 4,
         max_window = aiutp_util:clamp(MaxWindow0, ?MIN_WINDOW_SIZE,
                                       ?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE)
     }.
@@ -95,8 +112,10 @@ cc_control(Now, AckedBytes, RTT,
 %%------------------------------------------------------------------------------
 %% @doc 不活跃时窗口衰减
 %%
-%% 如果自上次衰减以来已过去足够时间，则将拥塞窗口减少 20%。
+%% libutp: 如果自上次衰减以来已过去足够时间，则将拥塞窗口减少 50%。
 %% 用于防止陈旧的窗口大小。
+%%
+%% RFC 6817: 丢包时 cwnd = min(cwnd, max(cwnd/2, MIN_CWND * MSS))
 %%
 %% @param PCB 协议控制块
 %% @returns 可能衰减窗口后的更新 PCB
@@ -108,15 +127,12 @@ maybe_decay_win(#aiutp_pcb{time = Now,
                            last_rwin_decay = LastRWinDecay} = PCB) ->
     if (Now - LastRWinDecay) < ?MAX_WINDOW_DECAY -> PCB;
        true ->
-           MaxWindow0 = erlang:trunc(MaxWindow * 0.8),
-           MaxWindow1 =
-               if MaxWindow0 < ?MIN_WINDOW_SIZE -> ?MIN_WINDOW_SIZE;
-                  true -> MaxWindow0
-               end,
+           %% libutp: max_window = max_window * 0.5
+           MaxWindow0 = erlang:max(MaxWindow div 2, ?MIN_WINDOW_SIZE),
            PCB#aiutp_pcb{
                slow_start = false,
-               ssthresh = MaxWindow1,
-               max_window = MaxWindow1,
+               ssthresh = MaxWindow0,
+               max_window = MaxWindow0,
                last_rwin_decay = Now
            }
     end.

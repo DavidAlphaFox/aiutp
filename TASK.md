@@ -22,6 +22,24 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] LEDBAT 拥塞控制重构（对齐 RFC 6817 和 libutp）
+  - 重构 `aiutp_pcb_cc.erl`:
+    - 移除动态 target_delay 更新，使用固定 100ms（RFC 6817）
+    - 移除 clock_drift 惩罚（延迟补偿通过 delay_base 处理）
+    - 窗口饱和检测阈值: 3000ms → 1000ms（对齐 libutp）
+    - 窗口衰减率: 20% → 50%（对齐 libutp）
+    - 慢启动增长: MIN_WINDOW_SIZE → PACKET_SIZE（对齐 libutp）
+    - 添加 off_target 值范围限制，防止异常值
+  - 重构 `aiutp_pcb_timeout.erl`:
+    - 超时有包在途: max_window/2 → PACKET_SIZE, slow_start=true（对齐 RFC 6817 CTO）
+    - 超时无包在途: 保持 max_window * 2/3（与 libutp 一致）
+    - 设置 ssthresh = max(max_window/2, PACKET_SIZE)
+  - 更新 `aiutp.hrl`:
+    - 添加 WINDOW_SATURATION_TIMEOUT 常量（1000ms）
+    - 改进 LEDBAT 参数文档，引用 RFC 6817
+  - 更新测试用例:
+    - `maybe_decay_win_after_interval_test`: 期望 50% 衰减
+  - 147 个测试全部通过
 - [x] 常量优化（BEP-29 合规性）
   - `MIN_WINDOW_SIZE`: 2906 → 3*PACKET_SIZE (3888)，计算更直观
   - `RTT_VAR_INITIAL`: 800 → 250ms，符合 RFC 6298

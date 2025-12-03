@@ -162,7 +162,13 @@ check_timeouts_1(PCB) -> {true, PCB}.
 %% @private
 %% @doc 处理重传超时
 %%
-%% 增加 RTO，减小窗口，并标记需要重发的包。
+%% libutp 超时处理逻辑:
+%% - 无包在途: max_window = max(max_window * 2/3, PACKET_SIZE)
+%% - 有包在途: max_window = PACKET_SIZE, slow_start = true
+%%
+%% RFC 6817 CTO (Congestion Timeout):
+%% - cwnd = 1 * MSS
+%% - CTO 指数退避
 %%------------------------------------------------------------------------------
 check_timeouts_2({false, _} = W) -> W;
 check_timeouts_2({true, #aiutp_pcb{time = Now,
@@ -174,26 +180,28 @@ check_timeouts_2({true, #aiutp_pcb{time = Now,
                                    seq_nr = SeqNR,
                                    retransmit_count = RetransmitCount} = PCB}) ->
     %% 指数退避：RTO *= 1.5
-    %% 指数退避：timeout = timeout * 1.5，使用整数运算避免浮点数
+    %% 使用整数运算避免浮点数
     NewTimeout = (RetransmitTimeout * 3) div 2,
 
     PCB0 =
-        if (CurWindowPackets == 0) and (MaxWindow > ?PACKET_SIZE) ->
-            %% 没有未确认的包，只衰减窗口
+        if (CurWindowPackets == 0) andalso (MaxWindow > ?PACKET_SIZE) ->
+            %% libutp: 没有未确认的包，窗口衰减到 2/3
             PCB#aiutp_pcb{
                 retransmit_timeout = NewTimeout,
                 rto_timeout = Now + NewTimeout,
                 duplicate_ack = 0,
-                max_window = erlang:max((MaxWindow * 2 div 3), ?MIN_WINDOW_SIZE)
+                max_window = erlang:max((MaxWindow * 2 div 3), ?PACKET_SIZE)
             };
            true ->
-            %% 有未确认的包，减小窗口并启用慢启动
+            %% libutp: 有未确认的包，重置窗口到 1 个包大小并启用慢启动
+            %% 这比之前的 max_window/2 更激进，符合 RFC 6817 CTO 规定
             PCB#aiutp_pcb{
                 retransmit_timeout = NewTimeout,
                 rto_timeout = Now + NewTimeout,
                 duplicate_ack = 0,
-                max_window = erlang:max((MaxWindow div 2), ?MIN_WINDOW_SIZE),
-                slow_start = true
+                max_window = ?PACKET_SIZE,
+                slow_start = true,
+                ssthresh = erlang:max(MaxWindow div 2, ?PACKET_SIZE)
             }
         end,
 

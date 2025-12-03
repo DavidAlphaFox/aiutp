@@ -131,26 +131,38 @@
 %% LEDBAT（低额外延迟后台传输）目标:
 %% - 最小化对网络的延迟影响
 %% - 让步于其他流量
-%% 参考: RFC 6817
+%% 参考: RFC 6817, libutp (utp_internal.cpp)
+%%
+%% LEDBAT 公式:
+%%   cwnd += GAIN * off_target * bytes_acked * MSS / cwnd
+%%   其中 off_target = (TARGET - queuing_delay) / TARGET
 %%==============================================================================
 
-%% BEP-29: 目标延迟为 100ms (CCONTROL_TARGET)
+%% RFC 6817: 目标延迟必须 <= 100ms
+%% BEP-29: 默认 CCONTROL_TARGET = 100ms
 -define(TARGET_DELAY, 100000).  %% 微秒
 
-%% 每个 RTT 的最大窗口增长（字节）
-%% TCP 每个 RTT 增加 1 个 MSS（约 1500 字节）
+%% RFC 6817: GAIN 必须 <= 1
+%% libutp: 每个 RTT 最大增加 MAX_CWND_INCREASE_BYTES_PER_RTT 字节
+%% 对于标准 MSS (~1400 字节), 这意味着 GAIN ≈ 2
 -define(MAX_CWND_INCREASE_BYTES_PER_RTT, 3000).
 
-%% 无包发送时的窗口衰减时间（毫秒）
+%% libutp: 无包发送时的窗口衰减间隔（毫秒）
 -define(MAX_WINDOW_DECAY, 100).
 
-%% 保留的延迟样本数量
+%% libutp: 窗口未满载使用的检测阈值（毫秒）
+%% 如果窗口在此时间内未被充分利用，不增长窗口
+-define(WINDOW_SATURATION_TIMEOUT, 1000).
+
+%% libutp: 保留的延迟样本数量
 -define(CUR_DELAY_SIZE, 3).
 
-%% 延迟基准历史条目数（每 13 分钟重置）
+%% libutp: 延迟基准历史条目数
+%% 每分钟更新一次，保持 13 分钟的历史
 %% 原因: 每 325 秒可能有约 10ms 的时钟偏移
 -define(DELAY_BASE_HISTORY, 13).
 
+%% RFC 6817: INIT_CWND 和 MIN_CWND 应为 2
 %% 慢启动阈值初始值
 -define(SSTHRESH_INITIAL, (?OUTGOING_BUFFER_MAX_SIZE * ?PACKET_SIZE)).
 
