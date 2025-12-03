@@ -28,6 +28,7 @@
   - `DUPLICATE_ACKS_BEFORE_RESEND`: 4 → 3，符合 BEP-29 和 TCP 标准
   - `BURST_OUTGOING_BUFFER_SIZE` → `BURST_SEND_COUNT`: 255 → 256（2的幂次）
   - `max_window_user`: 255 → 256 个包（2的幂次）
+  - `UDP_BUFFER_SIZE`: 6.25MB → 324KB，避免 bufferbloat
   - 移除冗余常量：`REORDER_BUFFER_MAX_SIZE`、`DUPLICATE_ACKS_BEFORE_RESEND_BEP29`
   - 147 个测试全部通过
 - [x] 监督树重构（故障隔离）

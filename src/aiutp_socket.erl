@@ -58,9 +58,10 @@
 %% 默认最大连接数
 -define(DEFAULT_MAX_CONNS, 100).
 
-%% UDP 缓冲区大小（约 6MB）
--define(UDP_SNDBUF_SIZE, 6553600).
--define(UDP_RECBUF_SIZE, 6553500).
+%% UDP 缓冲区大小
+%% 设为 256 个包大小，平衡吞吐量和延迟
+%% 过大会导致 bufferbloat，与 LEDBAT 低延迟目标冲突
+-define(UDP_BUFFER_SIZE, (256 * 1296)).  %% 331776 字节 ≈ 324 KB
 
 %%==============================================================================
 %% 类型定义
@@ -451,8 +452,8 @@ get_sibling_channel_sup() ->
     {ok, gen_udp:socket()} | {error, term()}.
 open_udp_socket(Port, UDPOptions) ->
     FullOptions = [
-        {sndbuf, ?UDP_SNDBUF_SIZE},
-        {recbuf, ?UDP_RECBUF_SIZE}
+        {sndbuf, ?UDP_BUFFER_SIZE},
+        {recbuf, ?UDP_BUFFER_SIZE}
         | UDPOptions
     ],
     case gen_udp:open(Port, FullOptions) of
@@ -460,7 +461,7 @@ open_udp_socket(Port, UDPOptions) ->
             %% 配置套接字：单次激活模式，防止消息队列溢出
             ok = inet:setopts(Socket, [
                 {active, once},
-                {high_msgq_watermark, ?UDP_RECBUF_SIZE}
+                {high_msgq_watermark, ?UDP_BUFFER_SIZE}
             ]),
             {ok, Socket};
         {error, _} = Error ->
