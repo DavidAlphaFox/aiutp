@@ -514,19 +514,23 @@ send_data_chunk_small(Type, Bin, BinSize, ChunkSize, PCB) ->
 fill_from_queue(RequiredSize, Type, #aiutp_pcb{outque = OutQue} = PCB) ->
     case aiutp_queue:empty(OutQue) of
         true -> done;
-        false -> fill_from_queue_loop(RequiredSize, Type, <<>>, PCB)
+        %% 使用 iolist 累积，避免多次二进制拼接
+        false -> fill_from_queue_loop(RequiredSize, Type, [], 0, PCB)
     end.
 
--spec fill_from_queue_loop(non_neg_integer(), integer(), binary(), #aiutp_pcb{}) ->
+%% @doc 从队列填充数据（使用 iolist 累积优化）
+%% AccList: 累积的二进制块列表（逆序）
+%% AccSize: 累积的总大小
+-spec fill_from_queue_loop(non_neg_integer(), integer(), iolist(), non_neg_integer(), #aiutp_pcb{}) ->
     done |
     {done, binary(), #aiutp_pcb{}} |
     {next, #aiutp_pcb{}} |
     {next, binary(), #aiutp_pcb{}} |
     {binary(), binary(), #aiutp_pcb{}}.
-fill_from_queue_loop(RequiredSize, Type, Acc, #aiutp_pcb{outque = OutQue} = PCB) ->
-    case {aiutp_queue:empty(OutQue), byte_size(Acc)} of
+fill_from_queue_loop(RequiredSize, Type, AccList, AccSize, #aiutp_pcb{outque = OutQue} = PCB) ->
+    case {aiutp_queue:empty(OutQue), AccSize} of
         {true, 0} -> done;
-        {true, _} -> {done, Acc, PCB};
+        {true, _} -> {done, iolist_to_binary(lists:reverse(AccList)), PCB};
         _ ->
             case aiutp_queue:front(OutQue) of
                 {Type, Bin} ->
@@ -534,18 +538,20 @@ fill_from_queue_loop(RequiredSize, Type, Acc, #aiutp_pcb{outque = OutQue} = PCB)
                     case BinSize > RequiredSize of
                         true ->
                             <<More:RequiredSize/binary, Rest/binary>> = Bin,
-                            {<<Acc/binary, More/binary>>, Rest,
+                            %% 一次性合并所有累积的数据
+                            Result = iolist_to_binary(lists:reverse([More | AccList])),
+                            {Result, Rest,
                              PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)}};
                         false ->
                             fill_from_queue_loop(
                                 RequiredSize - BinSize, Type,
-                                <<Acc/binary, Bin/binary>>,
+                                [Bin | AccList], AccSize + BinSize,
                                 PCB#aiutp_pcb{outque = aiutp_queue:pop_front(OutQue)})
                     end;
                 _ ->
                     %% 不同类型
-                    case byte_size(Acc) > 0 of
-                        true -> {next, Acc, PCB};
+                    case AccSize > 0 of
+                        true -> {next, iolist_to_binary(lists:reverse(AccList)), PCB};
                         false -> {next, PCB}
                     end
             end

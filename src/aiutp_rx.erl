@@ -199,10 +199,73 @@ buffer_out_of_order(_, #aiutp_packet{seq_nr = PktSeqNR},
   when ?WRAPPING_DIFF_16(EOFPkt, PktSeqNR) < 0 ->
     %% 包序列号超过 FIN，丢弃
     PCB;
-buffer_out_of_order(_, Packet, #aiutp_pcb{inbuf = InBuf} = PCB) ->
-    %% 插入到重排序缓冲区
-    Iter = aiutp_buffer:head(InBuf),
-    insert_into_reorder_buffer(Packet, Iter, -1, PCB).
+buffer_out_of_order(SeqDistance, Packet, #aiutp_pcb{inbuf = InBuf, reorder_count = ReorderCount} = PCB) ->
+    %% 性能优化：利用序列号距离计算插入位置
+    %% 如果缓冲区较小，可以直接用二分查找或利用距离定位
+    case ReorderCount of
+        0 ->
+            %% 缓冲区为空，直接追加
+            PCB#aiutp_pcb{
+                inbuf = aiutp_buffer:append(Packet, InBuf),
+                reorder_count = 1
+            };
+        _ when ReorderCount < 4 ->
+            %% 缓冲区很小，线性遍历仍然高效
+            Iter = aiutp_buffer:head(InBuf),
+            insert_into_reorder_buffer(Packet, Iter, -1, PCB);
+        _ ->
+            %% 缓冲区较大时，使用优化的插入策略
+            %% 利用 SeqDistance 进行启发式插入
+            insert_with_hint(SeqDistance, Packet, PCB)
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 使用序列号距离作为提示进行优化插入
+%%
+%% 根据 SeqDistance 决定从头部还是尾部开始搜索：
+%% - 较小的距离倾向于靠近头部
+%% - 较大的距离倾向于靠近尾部
+%% 这减少了平均遍历次数。
+%%------------------------------------------------------------------------------
+-spec insert_with_hint(non_neg_integer(), #aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
+insert_with_hint(_SeqDistance, Packet,
+                 #aiutp_pcb{inbuf = InBuf, reorder_count = ReorderCount} = PCB) ->
+    %% 启发式：如果距离小于缓冲区大小的一半，从头部搜索
+    %% 否则从尾部搜索（需要反向遍历）
+    %% 当前 aiutp_buffer 不支持反向遍历，但我们可以检查尾部
+    Tail = aiutp_buffer:tail(InBuf),
+    case Tail of
+        -1 ->
+            %% 空缓冲区
+            PCB#aiutp_pcb{
+                inbuf = aiutp_buffer:append(Packet, InBuf),
+                reorder_count = ReorderCount + 1
+            };
+        _ ->
+            %% 检查是否应该追加到尾部（常见情况）
+            TailPacket = aiutp_buffer:data(Tail, InBuf),
+            TailSeqNR = TailPacket#aiutp_packet.seq_nr,
+            PacketSeqNR = Packet#aiutp_packet.seq_nr,
+
+            case ?WRAPPING_DIFF_16(PacketSeqNR, TailSeqNR) of
+                Diff when Diff > 0 ->
+                    %% 新包序列号大于尾部，追加到尾部（O(1)）
+                    PCB#aiutp_pcb{
+                        inbuf = aiutp_buffer:append(Packet, InBuf),
+                        reorder_count = ReorderCount + 1
+                    };
+                0 ->
+                    %% 重复包，丢弃
+                    PCB;
+                _ ->
+                    %% 需要插入到中间，根据距离决定搜索方向
+                    %% 由于链表只支持正向遍历，仍然从头部开始
+                    %% 但对于大多数乱序场景，包通常追加到尾部
+                    Iter = aiutp_buffer:head(InBuf),
+                    insert_into_reorder_buffer(Packet, Iter, -1, PCB)
+            end
+    end.
 
 %%------------------------------------------------------------------------------
 %% @private

@@ -180,6 +180,8 @@ map_sack_to_seq(Extensions, BaseSeqNR) ->
 %% 但该包没有被确认），增加其 skip_count。当 skip_count
 %% 达到 DUPLICATE_ACKS_BEFORE_RESEND (3) 时，标记为快速重传。
 %%
+%% 性能优化：将 SACK 序列号列表转换为 sets 以实现 O(1) 查找。
+%%
 %% @param SAckedSeqs 被选择性确认的序列号列表
 %% @param PCB 协议控制块
 %% @returns {SkippedCount, UpdatedPCB}
@@ -192,8 +194,10 @@ update_skip_counts([], PCB) ->
 update_skip_counts(SAckedSeqs, #aiutp_pcb{outbuf = OutBuf, cur_window = CurWindow} = PCB) ->
     MaxSAckedSeq = lists:max(SAckedSeqs),
     Iter = aiutp_buffer:head(OutBuf),
+    %% 转换为 sets 以实现 O(1) 查找
+    SAckSet = sets:from_list(SAckedSeqs),
     {SkippedCount, CurWindow1, OutBuf1} =
-        update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Iter, 0, CurWindow, OutBuf),
+        update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, 0, CurWindow, OutBuf),
     {SkippedCount, PCB#aiutp_pcb{outbuf = OutBuf1, cur_window = CurWindow1}}.
 
 %%==============================================================================
@@ -308,6 +312,9 @@ parse_sack_byte(Bits, BitIndex, Offset, BaseSeqNR, Acc) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc 从 outbuf 提取选择性确认的包
+%%
+%% 性能优化：将 SACK 序列号列表转换为 sets 以实现 O(1) 查找，
+%% 避免原来 lists:member/2 的 O(n) 复杂度。
 %%------------------------------------------------------------------------------
 -spec extract_sacked_packets([non_neg_integer()], aiutp_buffer:aiutp_buffer()) ->
     {[#aiutp_packet_wrap{}], aiutp_buffer:aiutp_buffer()}.
@@ -315,19 +322,23 @@ extract_sacked_packets([], OutBuf) ->
     {[], OutBuf};
 extract_sacked_packets([MaxSeq | _] = SAckSeqs, OutBuf) ->
     Iter = aiutp_buffer:head(OutBuf),
-    extract_sacked_packets_loop(SAckSeqs, MaxSeq, Iter, -1, [], OutBuf).
+    %% 转换为 sets 以实现 O(1) 查找
+    SAckSet = sets:from_list(SAckSeqs),
+    extract_sacked_packets_loop(SAckSet, MaxSeq, Iter, -1, [], OutBuf).
 
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc 遍历 outbuf 提取 SACK 确认的包
+%%
+%% 使用 sets:is_element/2 实现 O(1) 查找（替代 lists:member/2 的 O(n)）。
 %%------------------------------------------------------------------------------
--spec extract_sacked_packets_loop([non_neg_integer()], non_neg_integer(),
+-spec extract_sacked_packets_loop(sets:set(non_neg_integer()), non_neg_integer(),
                                   integer(), integer(),
                                   [#aiutp_packet_wrap{}], aiutp_buffer:aiutp_buffer()) ->
     {[#aiutp_packet_wrap{}], aiutp_buffer:aiutp_buffer()}.
-extract_sacked_packets_loop(_SAckSeqs, _MaxSeq, -1, _Prev, Acc, OutBuf) ->
+extract_sacked_packets_loop(_SAckSet, _MaxSeq, -1, _Prev, Acc, OutBuf) ->
     {Acc, OutBuf};
-extract_sacked_packets_loop(SAckSeqs, MaxSeq, Iter, Prev, Acc, OutBuf) ->
+extract_sacked_packets_loop(SAckSet, MaxSeq, Iter, Prev, Acc, OutBuf) ->
     Next = aiutp_buffer:next(Iter, OutBuf),
     WrapPacket = aiutp_buffer:data(Iter, OutBuf),
     Packet = WrapPacket#aiutp_packet_wrap.packet,
@@ -338,15 +349,15 @@ extract_sacked_packets_loop(SAckSeqs, MaxSeq, Iter, Prev, Acc, OutBuf) ->
             %% 超过 MaxSeq，停止
             {Acc, OutBuf};
         false ->
-            case lists:member(SeqNR, SAckSeqs) of
+            case sets:is_element(SeqNR, SAckSet) of
                 true ->
-                    %% 在 SACK 列表中，移除
+                    %% 在 SACK 集合中，移除
                     OutBuf1 = aiutp_buffer:delete(Iter, Prev, OutBuf),
-                    extract_sacked_packets_loop(SAckSeqs, MaxSeq, Next, Prev,
+                    extract_sacked_packets_loop(SAckSet, MaxSeq, Next, Prev,
                                                 [WrapPacket | Acc], OutBuf1);
                 false ->
-                    %% 不在 SACK 列表中，继续
-                    extract_sacked_packets_loop(SAckSeqs, MaxSeq, Next, Iter, Acc, OutBuf)
+                    %% 不在 SACK 集合中，继续
+                    extract_sacked_packets_loop(SAckSet, MaxSeq, Next, Iter, Acc, OutBuf)
             end
     end.
 
@@ -357,14 +368,16 @@ extract_sacked_packets_loop(SAckSeqs, MaxSeq, Iter, Prev, Acc, OutBuf) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc 遍历 outbuf 更新跳过计数
+%%
+%% 使用 sets:is_element/2 实现 O(1) 查找（替代 lists:member/2 的 O(n)）。
 %%------------------------------------------------------------------------------
--spec update_skip_counts_loop(non_neg_integer(), [non_neg_integer()],
+-spec update_skip_counts_loop(non_neg_integer(), sets:set(non_neg_integer()),
                               integer(), non_neg_integer(),
                               non_neg_integer(), aiutp_buffer:aiutp_buffer()) ->
     {non_neg_integer(), non_neg_integer(), aiutp_buffer:aiutp_buffer()}.
-update_skip_counts_loop(_MaxSAckedSeq, _SAckedSeqs, -1, SkippedCount, CurWindow, OutBuf) ->
+update_skip_counts_loop(_MaxSAckedSeq, _SAckSet, -1, SkippedCount, CurWindow, OutBuf) ->
     {SkippedCount, CurWindow, OutBuf};
-update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Iter, SkippedCount, CurWindow, OutBuf) ->
+update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, SkippedCount, CurWindow, OutBuf) ->
     WrapPacket = aiutp_buffer:data(Iter, OutBuf),
     Next = aiutp_buffer:next(Iter, OutBuf),
 
@@ -381,11 +394,11 @@ update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Iter, SkippedCount, CurWindow,
     %% 1. 已至少传输一次
     %% 2. 尚未标记为重发
     %% 3. seq_nr < 最大 SACK 序列号（表示被跳过）
-    %% 4. 不在 SACK 列表中（未被确认）
+    %% 4. 不在 SACK 集合中（未被确认）
     ShouldIncrement = (Transmissions > 0) andalso
                       (NeedResend == false) andalso
                       (?WRAPPING_DIFF_16(MaxSAckedSeq, SeqNR) > 0) andalso
-                      (not lists:member(SeqNR, SAckedSeqs)),
+                      (not sets:is_element(SeqNR, SAckSet)),
 
     case ShouldIncrement of
         true ->
@@ -399,16 +412,16 @@ update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Iter, SkippedCount, CurWindow,
                     },
                     OutBuf1 = aiutp_buffer:replace(Iter, WrapPacket1, OutBuf),
                     %% 从 cur_window 中减去载荷大小（因为将被重发）
-                    update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Next,
+                    update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
                                             SkippedCount + 1, CurWindow - Payload, OutBuf1);
                 false ->
                     %% 只增加计数
                     WrapPacket1 = WrapPacket#aiutp_packet_wrap{skip_count = NewSkipCount},
                     OutBuf1 = aiutp_buffer:replace(Iter, WrapPacket1, OutBuf),
-                    update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Next,
+                    update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
                                             SkippedCount, CurWindow, OutBuf1)
             end;
         false ->
-            update_skip_counts_loop(MaxSAckedSeq, SAckedSeqs, Next,
+            update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
                                     SkippedCount, CurWindow, OutBuf)
     end.

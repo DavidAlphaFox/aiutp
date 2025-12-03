@@ -565,10 +565,8 @@ read(#aiutp_pcb{inque = InQue, max_window = MaxWindow,
 
     QueSize = aiutp_queue:size(InQue),
     if QueSize > 0 ->
-        {lists:foldl(
-             fun(Bin, Acc) -> <<Acc/binary, Bin/binary>> end,
-             <<>>, L),
-         PCB0#aiutp_pcb{inque = aiutp_queue:new()}};
+        %% 使用 iolist_to_binary 一次性转换，避免多次二进制拼接
+        {iolist_to_binary(L), PCB0#aiutp_pcb{inque = aiutp_queue:new()}};
        true ->
         {undefined, PCB0}
     end.
