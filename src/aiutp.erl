@@ -18,15 +18,15 @@ listen({utp,UTPSocket},Options)->
 
 accept({utp,UTPSocket})->
   aiutp_socket:accept(UTPSocket).
-send({utp,_,Worker},Data)->
-  aiutp_worker:send(Worker,Data).
-recv({utp,_,Worker},Len)->
-  aiutp_worker:recv(Worker,Len).
-active({utp,_,Worker},V)->
-  aiutp_worker:active(Worker, V).
-controlling_process({utp,_,Worker},NewOwner)->
-  aiutp_worker:controlling_process(Worker, NewOwner).
+send({utp,_,Channel},Data)->
+  aiutp_channel:send(Channel,Data).
+recv({utp,_,Channel},Len)->
+  aiutp_channel:recv(Channel,Len).
+active({utp,_,Channel},V)->
+  aiutp_channel:active(Channel, V).
+controlling_process({utp,_,Channel},NewOwner)->
+  aiutp_channel:controlling_process(Channel, NewOwner).
 
-close({utp,_,Worker})->
+close({utp,_,Channel})->
   Caller = self(),
-  aiutp_worker:close(Worker, Caller).
+  aiutp_channel:close(Channel, Caller).

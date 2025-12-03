@@ -8,8 +8,7 @@
 
 | 任务 | 描述 | 开始日期 | 状态 |
 |------|------|----------|------|
-| Worker 重构 | 将 worker 重写为 channel 模式 (gen_statem) | 2025-12-03 | 进行中 |
-| 代码质量修复 | 修复代码分析报告中发现的严重问题 | 2025-12-03 | 待开始 |
+| (无) | - | - | - |
 
 ### 待处理
 
@@ -52,12 +51,54 @@
   - 改进 aiutp_socket.erl 数据包解码错误日志 (使用 logger:debug)
   - 改进 aiutp_net.erl UDP 发送错误处理 (不再崩溃进程)
   - 添加 aiutp_sup_tests 和 aiutp_net_tests 单元测试 (109 个测试用例)
+- [x] 文档完善 (v0.1.0 里程碑完成)
+  - 增强 README.md：添加徽章、详细 API 文档
+  - 添加服务端/客户端/Active 模式使用示例
+  - 添加安装和快速开始指南
+  - 添加协议参数说明表格
+  - 添加架构概览和模块职责说明
+  - 添加开发指南（构建、测试、类型检查）
+- [x] Worker 重构为 Channel (gen_statem)
+  - 创建 aiutp_channel.erl 使用 gen_statem 行为
+  - 实现 5 个状态：idle, connecting, accepting, connected, closing
+  - 创建 aiutp_channel_sup.erl 监督器
+  - 集成到 aiutp_sup 监督树
+  - 更新 aiutp_socket.erl 使用 channel
+  - 更新 aiutp_acceptor.erl 使用 channel
+  - 更新 aiutp.erl API 使用 channel
+  - 添加 aiutp_channel_tests.erl 单元测试 (6 个测试用例)
+  - 删除旧模块：aiutp_worker.erl, aiutp_worker_sup.erl
+  - 总计 115 个测试用例通过
+- [x] 代码质量修复
+  - 替换 aiutp_pcb.erl 中的 io:format 为 logger:warning (3 处)
+  - 改进 aiutp_sup.erl 监督策略 (one_for_all → rest_for_one)
+  - 为 aiutp_util.erl 中的 wrapping_compare_less 添加文档和类型规范
+  - 更新相关测试用例
+  - 总计 115 个测试用例通过
+- [x] aiutp_pcb.erl 模块拆分重构
+  - 创建 aiutp_pcb_cc.erl 拥塞控制模块 (LEDBAT 算法)
+    - cc_control/4: 主拥塞控制逻辑
+    - maybe_decay_win/1: 窗口衰减
+    - ack_packet/3: ACK 包 RTT 处理
+    - caculate_acked_bytes/4: 计算已确认字节数
+    - selective_ack_packet/3: SACK 处理
+  - 创建 aiutp_pcb_timeout.erl 超时处理模块
+    - check_timeouts/1: 超时检查入口
+    - mark_need_resend/4: 标记重传包
+  - 重构 aiutp_pcb.erl (669行 → 585行)
+    - 添加详细的 edoc 文档
+    - 改进函数命名 (process → process_by_type)
+    - 清理注释和格式
+  - 添加新模块测试 (20 个测试用例)
+    - aiutp_pcb_cc_tests.erl (11 个测试)
+    - aiutp_pcb_timeout_tests.erl (9 个测试)
+  - 总计 135 个测试用例通过
 
 ### 历史任务
 - [x] 实现 uTP 协议核心逻辑 (aiutp_pcb)
 - [x] 实现数据包编解码 (aiutp_packet)
 - [x] 实现 OTP supervisor 树结构
-- [x] 实现基本的连接管理 (aiutp_socket, aiutp_worker)
+- [x] 实现基本的连接管理 (aiutp_socket, aiutp_channel)
 - [x] 实现 LEDBAT 拥塞控制
 - [x] 实现选择性确认 (SACK)
 - [x] 添加 Micro Transport Protocol 注释
@@ -77,37 +118,39 @@
 - [x] ~~**aiutp_net.erl:349** - ⚠️ UDP 发送失败时直接崩溃进程，应优雅处理~~ (已改为返回错误并记录日志)
 
 ### 测试相关
-- [x] 添加 EUnit 单元测试套件 (基础版本完成)
+- [x] 添加 EUnit 单元测试套件 (115 个测试用例)
 - [ ] 添加 Common Test 集成测试
 - [ ] 添加 PropEr 属性测试
-- [ ] 为 gen_server 模块添加测试 (aiutp_socket, aiutp_worker)
+- [ ] 为 gen_server/gen_statem 模块添加测试 (aiutp_socket, aiutp_channel)
 - [ ] 为 aiutp_rtt:caculate_delay/4 添加测试 (需要 PCB 记录)
 - [ ] 测试覆盖率达到核心功能 100%
 
 ### 架构改进
-- [ ] `aiutp_pcb.erl` - 模块过于复杂（669行），需要拆分为多个子模块
-- [ ] `aiutp_channel.erl` - 模块框架已创建但功能未实现
-- [ ] 使用 logger 模块替代 io:format
+- [x] `aiutp_pcb.erl` - 模块拆分完成 (669行 → 585行 + 2个子模块)
+  - aiutp_pcb_cc.erl: 拥塞控制 (~200行)
+  - aiutp_pcb_timeout.erl: 超时处理 (~180行)
+- [x] `aiutp_channel.erl` - gen_statem 状态机实现完成
+- [x] 使用 logger 模块替代 io:format (aiutp_pcb.erl, aiutp_socket.erl)
+- [x] 改进监督策略 (one_for_all → rest_for_one)
 - [ ] 添加结构化日志和监控指标
 - [ ] 配置管理改用应用环境变量
 
 ### 改进建议
 - [ ] 添加 dialyzer 类型规范检查
 - [ ] 考虑使用 maps 替代部分 record，提高可读性
-- [ ] 添加日志记录替代 `io:format` 调用
 - [ ] 考虑支持 IPv6
 
 ## 里程碑
 
-### v0.1.0 (当前)
+### v0.1.0 (已完成 ✅)
 - [x] 基本协议实现
 - [x] OTP 结构
-- [x] 基础测试 (纯函数模块 100 个测试用例)
-- [ ] 文档完善
+- [x] 基础测试 (109 个测试用例)
+- [x] 文档完善 (README.md 增强)
 
-### v0.2.0 (计划中)
-- [ ] gen_statem 重构
-- [ ] 完整测试覆盖
+### v0.2.0 (进行中)
+- [x] gen_statem 重构 (aiutp_channel)
+- [ ] 完整测试覆盖 (当前 115 个测试)
 - [ ] 性能优化
 - [ ] API 稳定化
 

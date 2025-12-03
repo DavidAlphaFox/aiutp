@@ -2,6 +2,23 @@
 %%% @author David Gao <david.alpha.fox@gmail.com>
 %%% @copyright (C) 2025, David Gao
 %%% @doc
+%%% uTP Channel - Connection state machine using gen_statem
+%%%
+%%% This module manages a single uTP connection using gen_statem behavior.
+%%% It replaces the previous gen_server based aiutp_worker with clearer
+%%% state management.
+%%%
+%%% State Machine:
+%%%   idle -> connecting -> connected -> closing -> closed
+%%%        -> accepting  -> connected -> closing -> closed
+%%%
+%%% States:
+%%%   - idle: Initial state, waiting for connect or accept
+%%%   - connecting: Client initiated, SYN sent, waiting for SYN-ACK
+%%%   - accepting: Server received SYN, sent ACK, waiting for data
+%%%   - connected: Connection established, bidirectional data transfer
+%%%   - closing: FIN sent or received, graceful shutdown in progress
+%%%   - closed: Terminal state, process will stop
 %%%
 %%% @end
 %%% Created : 20 Jun 2025 by David Gao <david.alpha.fox@gmail.com>
@@ -10,155 +27,588 @@
 
 -behaviour(gen_statem).
 
+-include("aiutp.hrl").
+
 %% API
--export([start_link/0]).
+-export([start_link/2]).
+-export([connect/4, accept/4, incoming/2]).
+-export([send/2, recv/2, active/2, close/2]).
+-export([controlling_process/2]).
 
 %% gen_statem callbacks
 -export([callback_mode/0, init/1, terminate/3, code_change/4]).
--export([state_idle/3,state_syn_sent/3]).
+
+%% State functions
+-export([idle/3, connecting/3, accepting/3, connected/3, closing/3]).
 
 -define(SERVER, ?MODULE).
 
--record(pcb,{sender_id :: integer(),
-             %% 发送时候的id
-             receiver_id :: integer(),
-             %%接收时候对应的id
-             seq_nr :: integer(),
-             %% 下一个包将使用的序列号
-             ack_nr :: integer(),
-             %% 对对端的包进行确认的序列号
-             %% 一般收取连续包的时候，对端包的seq_nr - 自己的ack_nr为1
-             ibuffer :: array:array(),
-             %% 收到但尚未发送ack的包
-             send_window :: array:array(),
-             %% 发送了但是尚未确认的包
-             current_window :: integer(),
-             %% 传输中还没有ACK的字节数
-             remote_window :: integer(),
-             %% 对端的窗口大小，
-             duplicate_ack_count :: integer(),
-             %%收到了多少次重复的ack包
-             last_acked:: integer(),
-             %% 对端ack我们的最后序列值
-             last_dropped :: integer()
-             %% 最后一次从ibuffer中删除的序列号
+%%------------------------------------------------------------------------------
+%% Channel State Record
+%%------------------------------------------------------------------------------
+-record(data, {
+    %% Socket management
+    parent :: pid(),                      %% Parent socket process
+    parent_monitor :: reference(),        %% Monitor ref for parent
+    socket :: port(),                     %% UDP socket
+    remote :: tuple(),                    %% Remote {Address, Port}
+    conn_id :: integer() | undefined,     %% Connection ID
 
-            }). %utp内部状态
+    %% Controller (owner) management
+    controller :: pid() | undefined,      %% Controlling process
+    controller_monitor :: reference() | undefined, %% Monitor ref for controller
 
--record(data, {parent :: pid(),
-               %%和这个utp关联的业务进程
-               parent_monitor :: reference(), 
-               %%监控业务进程
-               socket :: port(), 
-               %%udp socket
-               remote :: tuple(),
-               %% 远程的地址和端口
-               pcb}).
+    %% Protocol Control Block
+    pcb :: #aiutp_pcb{} | undefined,
+
+    %% Timer
+    tick_timer :: reference() | undefined,
+
+    %% Pending operations
+    blocker :: gen_statem:from() | undefined,  %% Blocked caller
+
+    %% Active mode
+    active = false :: boolean()
+}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Creates a gen_statem process which calls Module:init/1 to
-%% initialize. To ensure a synchronized start-up procedure, this
-%% function does not return until Module:init/1 has returned.
-%%
+%% @doc Start a new channel process
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() ->
-        {ok, Pid :: pid()} |
-        ignore |
-        {error, Error :: term()}.
-start_link() ->
-  gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
+-spec start_link(pid(), port()) -> {ok, pid()} | {error, term()}.
+start_link(Parent, Socket) ->
+    gen_statem:start_link(?MODULE, [Parent, Socket], []).
+
+%%--------------------------------------------------------------------
+%% @doc Initiate outbound connection
+%% @end
+%%--------------------------------------------------------------------
+-spec connect(pid(), pid(), inet:ip_address() | string(), inet:port_number()) ->
+    ok | {error, term()}.
+connect(Pid, Caller, Address, Port) ->
+    gen_statem:call(Pid, {connect, Caller, {Address, Port}}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Accept inbound connection
+%% @end
+%%--------------------------------------------------------------------
+-spec accept(pid(), pid(), tuple(), term()) -> ok | {error, term()}.
+accept(Pid, Caller, Remote, Packet) ->
+    gen_statem:call(Pid, {accept, Caller, Remote, Packet}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Handle incoming packet
+%% @end
+%%--------------------------------------------------------------------
+-spec incoming(pid(), term()) -> ok.
+incoming(Pid, Packet) ->
+    gen_statem:cast(Pid, {packet, Packet}).
+
+%%--------------------------------------------------------------------
+%% @doc Send data
+%% @end
+%%--------------------------------------------------------------------
+-spec send(pid(), iodata()) -> ok | {error, term()}.
+send(Pid, Data) ->
+    gen_statem:call(Pid, {send, Data}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Receive data (placeholder - actual recv logic in connected state)
+%% @end
+%%--------------------------------------------------------------------
+-spec recv(pid(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
+recv(Pid, Len) ->
+    gen_statem:call(Pid, {recv, Len}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Set active mode
+%% @end
+%%--------------------------------------------------------------------
+-spec active(pid(), boolean()) -> ok.
+active(Pid, V) ->
+    gen_statem:call(Pid, {active, V}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Close connection
+%% @end
+%%--------------------------------------------------------------------
+-spec close(pid(), pid()) -> ok | {error, term()}.
+close(Pid, Caller) ->
+    gen_statem:call(Pid, {close, Caller}, infinity).
+
+%%--------------------------------------------------------------------
+%% @doc Transfer control to another process
+%% @end
+%%--------------------------------------------------------------------
+-spec controlling_process(pid(), pid()) -> ok | {error, term()}.
+controlling_process(Pid, NewOwner) ->
+    Caller = self(),
+    case gen_statem:call(Pid, controller) of
+        {ok, Control} when Control == NewOwner ->
+            ok;
+        {ok, Control} when Control /= Caller ->
+            {error, not_owner};
+        {ok, _Control} ->
+            {ok, Active} = gen_statem:call(Pid, active),
+            if Active == true -> active(Pid, false);
+               true -> ok
+            end,
+            Closed = sync_input(Pid, NewOwner, false),
+            if Closed == true -> ok;
+               true -> gen_statem:call(Pid, {controlling_process, Caller, NewOwner, Active}, infinity)
+            end
+    end.
 
 %%%===================================================================
 %%% gen_statem callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Define the callback_mode() for this callback module.
-%% @end
-%%--------------------------------------------------------------------
 -spec callback_mode() -> gen_statem:callback_mode_result().
-callback_mode() -> state_functions.
+callback_mode() -> [state_functions, state_enter].
+
+-spec init(Args :: term()) -> gen_statem:init_result(atom()).
+init([Parent, Socket]) ->
+    ParentMonitor = erlang:monitor(process, Parent),
+    Data = #data{
+        parent = Parent,
+        socket = Socket,
+        parent_monitor = ParentMonitor
+    },
+    {ok, idle, Data}.
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_statem is started using gen_statem:start/[3,4] or
-%% gen_statem:start_link/[3,4], this function is called by the new
-%% process to initialize.
-%% @end
+%% State: idle
+%% Initial state, waiting for connect or accept command
 %%--------------------------------------------------------------------
--spec init(Args :: term()) ->
-        gen_statem:init_result(atom()).
-init([]) ->
-  process_flag(trap_exit, true),
-  {ok, state_name, #data{}}.
+idle(enter, _OldState, Data) ->
+    {keep_state, Data};
+
+idle({call, From}, {connect, Controller, Remote},
+     #data{parent = Parent, socket = Socket} = Data) ->
+    case add_conn(Parent, Remote) of
+        {ok, ConnId} ->
+            PCB = aiutp_pcb:connect({Socket, Remote}, ConnId),
+            ControllerMonitor = erlang:monitor(process, Controller),
+            Timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL),
+            NewData = Data#data{
+                remote = Remote,
+                controller = Controller,
+                controller_monitor = ControllerMonitor,
+                blocker = From,
+                pcb = PCB,
+                conn_id = ConnId,
+                tick_timer = Timer
+            },
+            {next_state, connecting, NewData};
+        Error ->
+            {stop_and_reply, normal, [{reply, From, Error}]}
+    end;
+
+idle({call, From}, {accept, Controller, Remote, Packet},
+     #data{parent = Parent, socket = Socket} = Data) ->
+    {ConnId, PCB} = aiutp_pcb:accept({Socket, Remote}, Packet),
+    case aiutp_socket:add_conn(Parent, Remote, ConnId) of
+        ok ->
+            ControllerMonitor = erlang:monitor(process, Controller),
+            Timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL),
+            NewData = Data#data{
+                remote = Remote,
+                controller = Controller,
+                controller_monitor = ControllerMonitor,
+                pcb = PCB,
+                conn_id = ConnId,
+                tick_timer = Timer
+            },
+            {next_state, accepting, NewData, [{reply, From, ok}]};
+        Error ->
+            {stop_and_reply, normal, [{reply, From, Error}]}
+    end;
+
+idle({call, From}, _Msg, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
+idle(cast, _Msg, _Data) ->
+    keep_state_and_data;
+
+idle(info, {'DOWN', MRef, process, Parent, _Reason},
+     #data{parent = Parent, parent_monitor = MRef}) ->
+    {stop, normal};
+
+idle(info, _Msg, _Data) ->
+    keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one function like this for each state name.
-%% Whenever a gen_statem receives an event, the function 
-%% with the name of the current state (StateName) 
-%% is called to handle the event.
-%% @end
+%% State: connecting
+%% Client initiated connection, SYN sent, waiting for SYN-ACK
 %%--------------------------------------------------------------------
--spec state_idle('enter',
-                 OldState :: atom(),
-                 Data :: term()) ->
-        gen_statem:state_enter_result('state_idle');
-                (gen_statem:event_type(),
-                 Msg :: term(),
-                 Data :: term()) ->
-        gen_statem:event_handler_result(atom()).
-state_idle({call,Caller}, _Msg, Data) ->
-  {next_state, state_idle, Data, [{reply,Caller,ok}]}.
--spec state_syn_sent('enter',
-                 OldState :: atom(),
-                 Data :: term()) ->
-        gen_statem:state_enter_result('state_syn_sent');
-                (gen_statem:event_type(),
-                 Msg :: term(),
-                 Data :: term()) ->
-        gen_statem:event_handler_result(atom()).
-state_syn_sent({call,Caller}, _Msg, Data) ->
-  {next_state, state_syn_sent, Data, [{reply,Caller,ok}]}.
+connecting(enter, idle, _Data) ->
+    {keep_state_and_data, []};
+
+connecting(cast, {packet, Packet}, #data{pcb = PCB, blocker = Blocker} = Data) ->
+    PCB1 = aiutp_pcb:process(Packet, PCB),
+    case aiutp_pcb:state(PCB1) of
+        ?CS_CONNECTED ->
+            NewData = Data#data{pcb = PCB1, blocker = undefined},
+            {next_state, connected, NewData, [{reply, Blocker, ok}]};
+        ?CS_RESET ->
+            NewData = Data#data{pcb = PCB1, blocker = undefined},
+            {next_state, closing, NewData, [{reply, Blocker, {error, reset}}]};
+        _ ->
+            {keep_state, Data#data{pcb = PCB1}}
+    end;
+
+connecting(info, {timeout, TRef, tick}, #data{tick_timer = TRef, pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:check_timeouts(PCB),
+    case aiutp_pcb:closed(PCB1) of
+        {closed, Reason} ->
+            NewData = Data#data{pcb = PCB1, tick_timer = undefined},
+            case Data#data.blocker of
+                undefined ->
+                    {next_state, closing, NewData};
+                Blocker ->
+                    {next_state, closing, NewData#data{blocker = undefined},
+                     [{reply, Blocker, {error, Reason}}]}
+            end;
+        not_closed ->
+            Timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL),
+            {keep_state, Data#data{pcb = PCB1, tick_timer = Timer}}
+    end;
+
+connecting(info, {'DOWN', MRef, process, Parent, _Reason},
+           #data{parent = Parent, parent_monitor = MRef, blocker = Blocker} = Data) ->
+    cleanup_monitors(Data),
+    Actions = case Blocker of
+        undefined -> [];
+        _ -> [{reply, Blocker, {error, crash}}]
+    end,
+    {stop_and_reply, normal, Actions};
+
+connecting(info, {'DOWN', MRef, process, Controller, _Reason},
+           #data{controller = Controller, controller_monitor = MRef} = Data) ->
+    %% Controller crashed during connect, close the connection
+    {next_state, closing, Data#data{controller = undefined,
+                                     controller_monitor = undefined,
+                                     blocker = undefined}};
+
+connecting({call, From}, _Msg, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, connecting}}]};
+
+connecting(info, _Msg, _Data) ->
+    keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_statem when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_statem terminates with
-%% Reason. The return value is ignored.
-%% @end
+%% State: accepting
+%% Server received SYN, sent ACK, transitioning to connected
 %%--------------------------------------------------------------------
--spec terminate(Reason :: term(), State :: term(), Data :: term()) ->
-        any().
-terminate(_Reason, _State, _Data) ->
-  void.
+accepting(enter, idle, #data{pcb = PCB} = Data) ->
+    %% Check if already connected (SYN-ACK exchange complete)
+    case aiutp_pcb:state(PCB) of
+        ?CS_CONNECTED ->
+            {next_state, connected, Data};
+        ?CS_SYN_RECV ->
+            {keep_state_and_data, []};
+        _ ->
+            {keep_state_and_data, []}
+    end;
+
+accepting(cast, {packet, Packet}, #data{pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:process(Packet, PCB),
+    case aiutp_pcb:state(PCB1) of
+        ?CS_CONNECTED ->
+            {next_state, connected, Data#data{pcb = PCB1}};
+        ?CS_RESET ->
+            {next_state, closing, Data#data{pcb = PCB1}};
+        _ ->
+            {keep_state, Data#data{pcb = PCB1}}
+    end;
+
+accepting(info, {timeout, TRef, tick}, #data{tick_timer = TRef, pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:check_timeouts(PCB),
+    case aiutp_pcb:closed(PCB1) of
+        {closed, _Reason} ->
+            {next_state, closing, Data#data{pcb = PCB1, tick_timer = undefined}};
+        not_closed ->
+            Timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL),
+            {keep_state, Data#data{pcb = PCB1, tick_timer = Timer}}
+    end;
+
+accepting(info, {'DOWN', MRef, process, Parent, _Reason},
+          #data{parent = Parent, parent_monitor = MRef} = Data) ->
+    cleanup_monitors(Data),
+    {stop, normal};
+
+accepting(info, {'DOWN', MRef, process, Controller, _Reason},
+          #data{controller = Controller, controller_monitor = MRef} = Data) ->
+    {next_state, closing, Data#data{controller = undefined,
+                                     controller_monitor = undefined}};
+
+accepting({call, From}, _Msg, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, accepting}}]};
+
+accepting(info, _Msg, _Data) ->
+    keep_state_and_data.
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Convert process state when code is changed
-%% @end
+%% State: connected
+%% Connection established, bidirectional data transfer
+%%--------------------------------------------------------------------
+connected(enter, _OldState, Data) ->
+    {keep_state, active_read(Data)};
+
+connected({call, From}, {send, SendData}, #data{pcb = PCB} = Data) ->
+    case aiutp_pcb:write(SendData, PCB) of
+        {Error, PCB1} ->
+            {keep_state, Data#data{pcb = PCB1}, [{reply, From, Error}]};
+        PCB1 ->
+            {keep_state, Data#data{pcb = PCB1}, [{reply, From, ok}]}
+    end;
+
+connected({call, From}, {active, Active}, Data) ->
+    NewData = active_read(Data#data{active = Active}),
+    {keep_state, NewData, [{reply, From, ok}]};
+
+connected({call, From}, controller, #data{controller = Controller}) ->
+    {keep_state_and_data, [{reply, From, {ok, Controller}}]};
+
+connected({call, From}, active, #data{active = Active}) ->
+    {keep_state_and_data, [{reply, From, {ok, Active}}]};
+
+connected({call, From}, {controlling_process, OldController, NewController, Active},
+          #data{controller = OldController, controller_monitor = OldMon} = Data) ->
+    erlang:demonitor(OldMon, [flush]),
+    NewMon = erlang:monitor(process, NewController),
+    NewData = active_read(Data#data{
+        controller = NewController,
+        controller_monitor = NewMon,
+        active = Active
+    }),
+    {keep_state, NewData, [{reply, From, ok}]};
+
+connected({call, From}, {close, Controller},
+          #data{pcb = PCB, controller = Controller,
+                controller_monitor = ControllerMonitor} = Data) ->
+    PCB1 = aiutp_pcb:close(PCB),
+    case aiutp_pcb:state(PCB1) of
+        State when State == ?CS_DESTROY; State == ?CS_RESET ->
+            if ControllerMonitor /= undefined ->
+                    erlang:demonitor(ControllerMonitor, [flush]);
+               true -> ok
+            end,
+            NewData = Data#data{
+                pcb = PCB1,
+                controller = undefined,
+                controller_monitor = undefined,
+                active = false
+            },
+            {next_state, closing, NewData, [{reply, From, ok}]};
+        _ ->
+            NewData = Data#data{
+                pcb = PCB1,
+                blocker = From
+            },
+            {next_state, closing, NewData}
+    end;
+
+connected({call, From}, {close, _NotOwner}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_owner}}]};
+
+connected({call, From}, {recv, _Len}, _Data) ->
+    %% TODO: Implement blocking recv
+    {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
+
+connected(cast, {packet, Packet}, #data{pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:process(Packet, PCB),
+    case aiutp_pcb:state(PCB1) of
+        State when State == ?CS_DESTROY; State == ?CS_RESET ->
+            {next_state, closing, Data#data{pcb = PCB1}};
+        _ ->
+            NewData = active_read(Data#data{pcb = PCB1}),
+            {keep_state, NewData}
+    end;
+
+connected(info, {timeout, TRef, tick}, #data{tick_timer = TRef, pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:check_timeouts(PCB),
+    case aiutp_pcb:closed(PCB1) of
+        {closed, _Reason} ->
+            {next_state, closing, Data#data{pcb = PCB1, tick_timer = undefined}};
+        not_closed ->
+            Timer = start_tick_timer(?TIMEOUT_CHECK_INTERVAL),
+            {keep_state, Data#data{pcb = PCB1, tick_timer = Timer}}
+    end;
+
+connected(info, {'DOWN', MRef, process, Parent, _Reason},
+          #data{parent = Parent, parent_monitor = MRef,
+                controller = Controller, active = Active} = Data) ->
+    cleanup_monitors(Data),
+    if Controller /= undefined andalso Active == true ->
+            Controller ! {utp_closed, make_utp_socket(Data), crash};
+       true -> ok
+    end,
+    {stop, normal};
+
+connected(info, {'DOWN', MRef, process, Controller, _Reason},
+          #data{controller = Controller, controller_monitor = MRef,
+                pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:close(PCB),
+    NewData = Data#data{
+        pcb = PCB1,
+        controller = undefined,
+        controller_monitor = undefined,
+        blocker = undefined
+    },
+    {next_state, closing, NewData};
+
+connected(info, _Msg, _Data) ->
+    keep_state_and_data.
+
+%%--------------------------------------------------------------------
+%% State: closing
+%% FIN sent or received, graceful shutdown in progress
+%%--------------------------------------------------------------------
+closing(enter, _OldState, #data{parent = Parent, remote = Remote,
+                                 conn_id = ConnId, blocker = Blocker,
+                                 controller = Controller, active = Active} = Data) ->
+    cancel_tick_timer(Data#data.tick_timer),
+    %% Notify blocker if any
+    Actions = case Blocker of
+        undefined -> [];
+        _ -> [{reply, Blocker, ok}]
+    end,
+    %% Notify controller if in active mode
+    if Controller /= undefined andalso Active == true ->
+            Controller ! {utp_closed, make_utp_socket(Data), normal};
+       true -> ok
+    end,
+    %% Free connection from socket
+    if ConnId /= undefined ->
+            aiutp_socket:free_conn(Parent, Remote, ConnId);
+       true -> ok
+    end,
+    {stop, normal, Data, Actions};
+
+closing({call, From}, _Msg, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, closed}}]};
+
+closing(cast, _Msg, _Data) ->
+    keep_state_and_data;
+
+closing(info, _Msg, _Data) ->
+    keep_state_and_data.
+
+%%--------------------------------------------------------------------
+%% terminate callback
+%%--------------------------------------------------------------------
+-spec terminate(Reason :: term(), State :: term(), Data :: term()) -> any().
+terminate(_Reason, _State, Data) ->
+    cleanup_monitors(Data),
+    ok.
+
+%%--------------------------------------------------------------------
+%% code_change callback
 %%--------------------------------------------------------------------
 -spec code_change(
-        OldVsn :: term() | {down,term()},
+        OldVsn :: term() | {down, term()},
         State :: term(), Data :: term(), Extra :: term()) ->
-        {ok, NewState :: term(), NewData :: term()} |
-        (Reason :: term()).
+        {ok, NewState :: term(), NewData :: term()} | (Reason :: term()).
 code_change(_OldVsn, State, Data, _Extra) ->
-  {ok, State, Data}.
+    {ok, State, Data}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc Try to add connection ID, retry up to 3 times
+%% @end
+%%--------------------------------------------------------------------
+add_conn(Parent, Remote) ->
+    add_conn(Parent, Remote, 3).
+
+add_conn(_, _, 0) ->
+    {error, eagain};
+add_conn(Parent, Remote, N) ->
+    ConnID = aiutp_util:bit16_random(),
+    case aiutp_socket:add_conn(Parent, Remote, ConnID) of
+        ok -> {ok, ConnID};
+        _ -> add_conn(Parent, Remote, N - 1)
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc Start tick timer for periodic timeout checks
+%% @end
+%%--------------------------------------------------------------------
+start_tick_timer(Interval) ->
+    erlang:start_timer(Interval, self(), tick).
+
+%%--------------------------------------------------------------------
+%% @doc Cancel tick timer
+%% @end
+%%--------------------------------------------------------------------
+cancel_tick_timer(undefined) ->
+    ok;
+cancel_tick_timer(TRef) ->
+    erlang:cancel_timer(TRef),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc Cleanup all monitors
+%% @end
+%%--------------------------------------------------------------------
+cleanup_monitors(#data{parent_monitor = ParentMon,
+                       controller_monitor = ControllerMon,
+                       tick_timer = Timer}) ->
+    if ParentMon /= undefined -> erlang:demonitor(ParentMon, [flush]);
+       true -> ok
+    end,
+    if ControllerMon /= undefined -> erlang:demonitor(ControllerMon, [flush]);
+       true -> ok
+    end,
+    cancel_tick_timer(Timer),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc Handle active mode - read and deliver data
+%% @end
+%%--------------------------------------------------------------------
+active_read(#data{controller = undefined} = Data) ->
+    Data;
+active_read(#data{pcb = PCB, controller = Controller, active = true} = Data) ->
+    case aiutp_pcb:read(PCB) of
+        {undefined, PCB1} ->
+            Data#data{pcb = PCB1};
+        {Payload, PCB1} ->
+            UTPSocket = make_utp_socket(Data),
+            Controller ! {utp_data, UTPSocket, Payload},
+            %% After sending data, set active to false (once mode behavior)
+            Data#data{pcb = PCB1, active = false}
+    end;
+active_read(#data{pcb = PCB} = Data) ->
+    PCB1 = aiutp_pcb:flush(PCB),
+    Data#data{pcb = PCB1}.
+
+%%--------------------------------------------------------------------
+%% @doc Create UTP socket tuple for messages
+%% @end
+%%--------------------------------------------------------------------
+make_utp_socket(#data{parent = Parent}) ->
+    {utp, Parent, self()}.
+
+%%--------------------------------------------------------------------
+%% @doc Sync input messages to new owner during controlling_process
+%% @end
+%%--------------------------------------------------------------------
+sync_input(Socket, NewOwner, Flag) ->
+    receive
+        {utp_data, Socket, _} = M ->
+            NewOwner ! M,
+            sync_input(Socket, NewOwner, Flag);
+        {utp_closed, Socket, _} = M ->
+            NewOwner ! M,
+            sync_input(Socket, NewOwner, true)
+    after 0 ->
+        Flag
+    end.

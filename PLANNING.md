@@ -60,12 +60,14 @@ aiutp/
 ### OTP 监督树结构
 
 ```
-aiutp_sup (one_for_all)
+aiutp_sup (rest_for_one)
 ├── aiutp_socket_sup (simple_one_for_one)
 │   └── aiutp_socket (gen_server) - 管理 UDP socket 和连接
-└── aiutp_worker_sup (simple_one_for_one)
-    └── aiutp_worker (gen_server) - 处理单个 uTP 连接
+└── aiutp_channel_sup (simple_one_for_one)
+    └── aiutp_channel (gen_statem) - 连接状态机
 ```
+
+**监督策略说明**: 使用 `rest_for_one` 是因为 channel 依赖于 socket。如果 socket_sup 崩溃，channel_sup 也需要重启；但如果 channel_sup 崩溃，socket_sup 可以继续工作。
 
 ### 核心模块职责
 
@@ -73,10 +75,11 @@ aiutp_sup (one_for_all)
 |------|------|------|
 | `aiutp` | 公共 API 入口 | 接口模块 |
 | `aiutp_socket` | UDP socket 管理，连接分发 | gen_server |
-| `aiutp_worker` | 单个 uTP 连接的生命周期管理 | gen_server |
-| `aiutp_acceptor` | 处理入站连接请求 | 工作进程 |
-| `aiutp_channel` | 连接状态机（重构中） | gen_statem |
+| `aiutp_channel` | 连接状态机 (idle→connecting/accepting→connected→closing) | gen_statem |
+| `aiutp_acceptor` | 处理入站连接请求 | gen_server |
 | `aiutp_pcb` | 协议控制块，核心协议逻辑 | 纯函数模块 |
+| `aiutp_pcb_cc` | LEDBAT 拥塞控制算法 | 纯函数模块 |
+| `aiutp_pcb_timeout` | 超时检测和重传处理 | 纯函数模块 |
 | `aiutp_packet` | 数据包编解码 | 纯函数模块 |
 | `aiutp_net` | 网络 I/O，数据包发送 | 纯函数模块 |
 | `aiutp_tx` | 发送队列，ACK 处理 | 纯函数模块 |

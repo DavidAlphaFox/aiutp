@@ -33,11 +33,11 @@
 %%%===================================================================
 connect(UTPSocket,Address,Port)->
   {ok,{Socket,_}} = gen_server:call(UTPSocket,socket),
-  {ok,Worker} = aiutp_worker_sup:new(UTPSocket, Socket),
+  {ok,Channel} = aiutp_channel_sup:new(UTPSocket, Socket),
   Address0 = aiutp_util:getaddr(Address),
   Caller = self(),
-  case aiutp_worker:connect(Worker,Caller,Address0, Port) of
-    ok -> {ok,{utp,UTPSocket,Worker}};
+  case aiutp_channel:connect(Channel,Caller,Address0, Port) of
+    ok -> {ok,{utp,UTPSocket,Channel}};
     Error -> Error
   end.
 
@@ -282,5 +282,5 @@ dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= P
          (PktType == ?ST_RESET) -> ok;
          true -> reset_conn(Socket, Remote, ConnId, AckNR)
       end;
-    {Worker,_}-> aiutp_worker:incoming(Worker, {Packet,RecvTime})
+    {Channel,_}-> aiutp_channel:incoming(Channel, {Packet,RecvTime})
   end.

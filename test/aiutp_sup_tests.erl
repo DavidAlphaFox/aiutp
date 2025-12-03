@@ -14,7 +14,6 @@
 
 child_ids_spelling_test() ->
     %% This test ensures the supervisor child IDs match the actual module names
-    %% Regression test for: aiutp_woker_sup -> aiutp_worker_sup typo
     {ok, {_SupFlags, ChildSpecs}} = aiutp_sup:init([]),
 
     %% Extract child IDs
@@ -22,10 +21,10 @@ child_ids_spelling_test() ->
 
     %% Verify expected child IDs exist
     ?assert(lists:member(aiutp_socket_sup, ChildIds)),
-    ?assert(lists:member(aiutp_worker_sup, ChildIds)),
+    ?assert(lists:member(aiutp_channel_sup, ChildIds)),
 
-    %% Verify no typo versions exist
-    ?assertNot(lists:member(aiutp_woker_sup, ChildIds)).
+    %% Verify old worker_sup is removed
+    ?assertNot(lists:member(aiutp_worker_sup, ChildIds)).
 
 child_specs_modules_match_test() ->
     %% Verify that the 'id' and 'modules' fields are consistent
@@ -53,6 +52,8 @@ supervisor_flags_test() ->
     %% Verify supervisor flags are reasonable
     {ok, {SupFlags, _ChildSpecs}} = aiutp_sup:init([]),
 
-    ?assertEqual(one_for_all, maps:get(strategy, SupFlags)),
+    %% rest_for_one: if socket_sup crashes, channel_sup restarts too
+    %% but if channel_sup crashes, socket_sup continues working
+    ?assertEqual(rest_for_one, maps:get(strategy, SupFlags)),
     ?assert(maps:get(intensity, SupFlags) >= 1),
     ?assert(maps:get(period, SupFlags) >= 1).

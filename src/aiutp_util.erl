@@ -33,7 +33,14 @@ bit32_random()->
 clamp(Val, Min, _Max) when Val < Min -> Min;
 clamp(Val, _Min, Max) when Val > Max -> Max;
 clamp(Val, _Min, _Max) -> Val.
-wrapping_compare_less(L,R,Mask)->
+
+%% @doc Compare two sequence numbers with wrapping semantics.
+%% Returns true if L < R considering wrapping around Mask.
+%% Mask should be 16#FFFF for 16-bit sequence numbers.
+%% Example: wrapping_compare_less(65534, 1, 16#FFFF) -> true
+%% because 65534 is "before" 1 when the sequence wraps at 65535.
+-spec wrapping_compare_less(integer(), integer(), integer()) -> boolean().
+wrapping_compare_less(L, R, Mask) ->
   Down = (L - R) band Mask,
   Up = (R - L) band Mask,
   Up < Down.
