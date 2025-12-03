@@ -196,7 +196,8 @@
 
     %% Connection ID (16-bit)
     %% Receiver uses conn_id, sender uses conn_id + 1
-    conn_id :: non_neg_integer(),
+    %% May be undefined when packet is being constructed incrementally
+    conn_id :: non_neg_integer() | undefined,
 
     %% Advertised receive window size (32-bit, bytes)
     wnd = 0 :: non_neg_integer(),
@@ -244,7 +245,11 @@
     transmissions = 0 :: non_neg_integer(),
 
     %% Flag indicating packet needs retransmission
-    need_resend = false :: boolean()
+    need_resend = false :: boolean(),
+
+    %% BEP-29: Number of times this packet was skipped by SACK
+    %% When skip_count >= 3, packet should be marked for fast retransmit
+    skip_count = 0 :: non_neg_integer()
 }).
 
 %%==============================================================================
@@ -265,8 +270,9 @@
     %% Connection ID for packets we send (= conn_id_recv + 1 for initiator)
     conn_id_send :: non_neg_integer() | undefined,
 
-    %% Reference to the UDP socket process
-    socket :: pid() | undefined,
+    %% Reference to the UDP socket and remote address
+    %% Format: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}} | undefined
+    socket :: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}} | undefined,
 
     %%--------------------------------------------------------------------------
     %% Connection State

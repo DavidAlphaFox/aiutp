@@ -31,6 +31,10 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Connect to a remote uTP endpoint
+-spec connect(pid(), inet:ip_address() | string(), inet:port_number()) ->
+    {ok, {utp, pid(), pid()}} | {error, term()}.
 connect(UTPSocket,Address,Port)->
   {ok,{Socket,_}} = gen_server:call(UTPSocket,socket),
   {ok,Channel} = aiutp_channel_sup:new(UTPSocket, Socket),
@@ -41,11 +45,23 @@ connect(UTPSocket,Address,Port)->
     Error -> Error
   end.
 
+%% @doc Start listening for incoming connections
+-spec listen(pid(), list()) -> ok | {error, term()}.
 listen(UTPSocket,Options)-> gen_server:call(UTPSocket,{listen,Options}).
+
+%% @doc Accept an incoming connection
+-spec accept(pid()) -> {ok, {utp, pid(), pid()}} | {error, term()}.
 accept(UTPSocket)-> gen_server:call(UTPSocket,accept,infinity).
+
+%% @doc Register a connection ID for a worker process
+-spec add_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) ->
+    ok | exists | overflow.
 add_conn(UTPSocket,Remote,ConnId) ->
   Worker = self(),
   gen_server:call(UTPSocket,{add_conn,Remote,ConnId,Worker},infinity).
+
+%% @doc Free a connection ID
+-spec free_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) -> ok.
 free_conn(UTPSocket,Remote,ConnId) -> gen_server:call(UTPSocket,{free_conn,Remote,ConnId},infinity).
 %%--------------------------------------------------------------------
 %% @doc
@@ -235,11 +251,18 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% @private Send a reset packet to the remote peer
+-spec reset_conn(gen_udp:socket(), {inet:ip_address(), inet:port_number()},
+                 non_neg_integer(), non_neg_integer()) -> ok | {error, term()}.
 reset_conn(Socket,Remote,ConnID,AckNR)->
   Packet = aiutp_packet:reset(ConnID, AckNR),
   Bin = aiutp_packet:encode(Packet),
   gen_udp:send(Socket,Remote,Bin).
 
+%% @private Add a connection to the internal state
+-spec add_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
+                     pid(), #state{}) -> {ok | exists | overflow, #state{}}.
 add_conn_inner(Remote,ConnId,Worker,
          #state{conns = Conns,monitors = Monitors,max_conns = MaxConns} = State)->
   Key = {Remote,ConnId},
@@ -255,6 +278,10 @@ add_conn_inner(Remote,ConnId,Worker,
           {ok,State#state{conns = Conns0,monitors = Monitors0}}
       end
   end.
+
+%% @private Free a connection from the internal state
+-spec free_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
+                      #state{}) -> #state{}.
 free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)->
   Key = {Remote,ConnId},
   case maps:is_key(Key,Conns) of
@@ -267,6 +294,8 @@ free_conn_inner(Remote,ConnId,#state{conns = Conns,monitors = Monitors} = State)
         conns = maps:remove(Key,Conns)}
   end.
 
+%% @private Dispatch incoming packet to appropriate handler
+-spec dispatch({inet:ip_address(), inet:port_number()}, #aiutp_packet{}, #state{}) -> ok.
 dispatch(Remote,#aiutp_packet{conn_id = ConnId,type = PktType,seq_nr = AckNR}= Packet,
          #state{socket = Socket,conns = Conns,acceptor = Acceptor,max_conns = MaxConns})->
   Key = {Remote,ConnId},

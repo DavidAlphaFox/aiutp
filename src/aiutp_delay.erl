@@ -8,24 +8,26 @@
          delay_base/1,
          value/1]).
 
--record(aiutp_delay, {delay_base,
-                      cur_delay_hist,
-                      % this is the history of delay samples,
-                      % normalized by using the delay_base. These
-                      % values are always greater than 0 and measures
-                      % the queuing delay in microseconds
-                      cur_delay_idx,
-                      delay_base_hist,
-                      % this is the history of delay_base. It's
-                      % a number that doesn't have an absolute meaning
-                      % only relative. It doesn't make sense to initialize
-                      % it to anything other than values relative to
-                      % what's been seen in the real world.
-                      delay_base_idx,
-                      delay_base_time,
-                      % the time when we last stepped the delay_base_idx
-                      delay_base_initialized}).
+-export_type([aiutp_delay/0]).
+
+-record(aiutp_delay, {delay_base :: non_neg_integer(),
+                      cur_delay_hist :: array:array(),
+                      %% 延迟样本历史，使用 delay_base 归一化
+                      %% 这些值始终大于 0，以微秒为单位测量排队延迟
+                      cur_delay_idx :: non_neg_integer(),
+                      delay_base_hist :: array:array() | undefined,
+                      %% delay_base 的历史记录。
+                      %% 这是一个没有绝对意义的数字，只有相对意义。
+                      delay_base_idx :: non_neg_integer(),
+                      delay_base_time :: integer(),
+                      %% 上次步进 delay_base_idx 的时间
+                      delay_base_initialized :: boolean()}).
+
+-opaque aiutp_delay() :: #aiutp_delay{}.
+
+-spec new() -> aiutp_delay().
 new() -> new(0).
+-spec new(integer()) -> aiutp_delay().
 new(CurMilli)->
   #aiutp_delay{
      delay_base = 0,
@@ -36,16 +38,16 @@ new(CurMilli)->
      delay_base_initialized = false
     }.
 
-
+-spec shift(non_neg_integer(), aiutp_delay()) -> aiutp_delay().
 shift(Offset,#aiutp_delay{delay_base_hist = Hist} = Delay)->
   Hist0 = array:map(fun(_,El) -> El + Offset end, Hist),
   Delay#aiutp_delay{delay_base_hist = Hist0}.
-% the offset should never be "negative"
-% assert(offset < 0x10000000);
-% increase all of our base delays by this amount
-% this is used to take clock skew into account
-% by observing the other side's changes in its base_delay
+%% offset 不应为负值
+%% assert(offset < 0x10000000);
+%% 将所有基准延迟增加此值
+%% 用于通过观察对端 base_delay 的变化来考虑时钟偏移
 
+-spec add_sample(non_neg_integer(), integer(), aiutp_delay()) -> aiutp_delay().
 add_sample(Sample,CurMilli,#aiutp_delay{delay_base_initialized = false} = Delay)->
     % delay_base being 0 suggests that we haven't initialized
     % it or its history with any real measurements yet. Initialize
@@ -97,39 +99,27 @@ add_sample(Sample,CurMilli,
        }
   end.
 
-% The two clocks (in the two peers) are assumed not to
-% progress at the exact same rate. They are assumed to be
-% drifting, which causes the delay samples to contain
-% a systematic error, either they are under-estimated
-% or over-estimated. This is why we update the
-% delay_base every two minutes, to adjust for this.
-% This means the values will keep drifting and eventually wrap.
-% We can cross the wrapping boundry in two directions, either
-% going up, crossing the highest value, or going down, crossing 0.
-% if the delay_base is close to the max value and sample actually
-% wrapped on the other end we would see something like this:
-% delay_base = 0xffffff00, sample = 0x00000400
-% sample - delay_base = 0x500 which is the correct difference
-% if the delay_base is instead close to 0, and we got an even lower
-% sample (that will eventually update the delay_base), we may see
-% something like this:
-% delay_base = 0x00000400, sample = 0xffffff00
-%  sample - delay_base = 0xfffffb00
-% this needs to be interpreted as a negative number and the actual
-% recorded delay should be 0.
-% It is important that all arithmetic that assume wrapping
-% is done with unsigned intergers. Signed integers are not guaranteed
-% to wrap the way unsigned integers do. At least GCC takes advantage
-% of this relaxed rule and won't necessarily wrap signed ints.
-% remove the clock offset and propagation delay.
-% delay base is min of the sample and the current
-% delay base. This min-operation is subject to wrapping
-% and care needs to be taken to correctly choose the
-%  true minimum.
-% specifically the problem case is when delay_base is very small
-% and sample is very large (because it wrapped past zero), sample
-%  needs to be considered the smaller
+%% 假设两端的时钟不会以完全相同的速率前进。
+%% 它们被假设为漂移的，这导致延迟样本包含系统误差，
+%% 要么被低估，要么被高估。这就是为什么我们每两分钟
+%% 更新一次 delay_base 来调整这个问题。
+%% 这意味着值会持续漂移并最终回绕。
+%% 我们可以从两个方向跨越回绕边界：
+%% 向上跨越最高值，或向下跨越 0。
+%% 如果 delay_base 接近最大值，而 sample 实际上在另一端回绕了，
+%% 我们会看到类似这样的情况：
+%% delay_base = 0xffffff00, sample = 0x00000400
+%% sample - delay_base = 0x500 这是正确的差值
+%% 如果 delay_base 接近 0，我们得到一个更低的 sample
+%% （最终会更新 delay_base），我们可能会看到：
+%% delay_base = 0x00000400, sample = 0xffffff00
+%% sample - delay_base = 0xfffffb00
+%% 这需要被解释为负数，实际记录的延迟应该是 0。
+%% 重要的是所有假设回绕的算术都使用无符号整数完成。
 
+-spec delay_base(aiutp_delay()) -> non_neg_integer().
 delay_base(#aiutp_delay{delay_base = DelayBase}) -> DelayBase.
+
+-spec value(aiutp_delay()) -> non_neg_integer().
 value(#aiutp_delay{cur_delay_hist = Hist})->
   array:foldl(fun(_,El,Acc) -> erlang:min(El,Acc) end, 16#FFFFFFFF, Hist).

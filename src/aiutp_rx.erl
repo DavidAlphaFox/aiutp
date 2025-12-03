@@ -2,6 +2,12 @@
 -include("aiutp.hrl").
 -export([in/2]).
 
+%% @doc 处理接收到的数据包
+%% 将数据包按序列号排序后放入接收队列或重排序缓冲区
+%% @param Packet 接收到的数据包
+%% @param PCB 协议控制块
+%% @returns 更新后的 PCB
+-spec in(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
 in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
    #aiutp_pcb{ack_nr = AckNR} = PCB)->
   NextAckNR  = aiutp_util:bit16(AckNR + 1),
@@ -11,6 +17,8 @@ in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
     end,
   PCB1#aiutp_pcb{ida = true}.
 
+%% @private 处理按序到达的数据包
+-spec recv(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
 recv(Packet,#aiutp_pcb{time=Now,inque = InQ,
                        got_fin_reached = GotFinReached,
                        got_fin = GotFin,
@@ -46,6 +54,8 @@ recv(Packet,#aiutp_pcb{time=Now,inque = InQ,
       end
   end.
 
+%% @private 处理乱序到达的数据包（放入重排序缓冲区）
+-spec recv_reorder(non_neg_integer(), #aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
 recv_reorder(DiffSeq,#aiutp_packet{seq_nr = PktSeqNR} = Packet,
              #aiutp_pcb{got_fin = GotFin,eof_pkt = EOFPkt,inbuf = InBuf} = PCB)->
   if (GotFin == true) and
@@ -56,6 +66,8 @@ recv_reorder(DiffSeq,#aiutp_packet{seq_nr = PktSeqNR} = Packet,
       recv_reorder(Packet,Iter,-1,PCB)
   end.
 
+%% @private 在重排序缓冲区中插入数据包（保持有序）
+-spec recv_reorder(#aiutp_packet{}, integer(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 recv_reorder(Packet,-1,_,
              #aiutp_pcb{inbuf = InBuf,reorder_count = ReorderCount} = PCB)->
   PCB#aiutp_pcb{inbuf = aiutp_buffer:append(Packet, InBuf),

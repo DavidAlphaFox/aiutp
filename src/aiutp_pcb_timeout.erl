@@ -1,11 +1,11 @@
 %%------------------------------------------------------------------------------
-%% @doc Timeout Handling for uTP Protocol Control Block
+%% @doc uTP 协议控制块的超时处理
 %%
-%% This module handles various timeout conditions in the uTP protocol:
-%% - Keepalive timeout detection
-%% - RTT-based connection timeout
-%% - Retransmission timeout and counting
-%% - Packet resend marking
+%% 本模块处理 uTP 协议中的各种超时条件：
+%% - Keepalive 超时检测
+%% - 基于 RTT 的连接超时
+%% - 重传超时和计数
+%% - 数据包重发标记
 %%
 %% @end
 %%------------------------------------------------------------------------------
@@ -16,13 +16,13 @@
          mark_need_resend/4]).
 
 %%------------------------------------------------------------------------------
-%% @doc Main timeout check entry point
+%% @doc 超时检查的主入口点
 %%
-%% Flushes pending packets and checks for various timeout conditions.
-%% Should be called periodically to handle retransmission and keepalive.
+%% 刷新待发送的包并检查各种超时条件。
+%% 应定期调用以处理重传和 keepalive。
 %%
-%% @param PCB Protocol control block
-%% @returns Updated PCB after timeout processing
+%% @param PCB 协议控制块
+%% @returns 超时处理后的更新 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec check_timeouts(#aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -36,7 +36,7 @@ check_timeouts(PCB) -> PCB.
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc Filter out states that don't need timeout checking
+%% @doc 过滤不需要超时检查的状态
 %%------------------------------------------------------------------------------
 check_timeouts_0(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_UNINITIALIZED;
@@ -52,7 +52,7 @@ check_timeouts_0(#aiutp_pcb{time = Now,
                             cur_window = CurWindow,
                             outbuf = OutBuf,
                             burst = Burst} = PCB) ->
-    %% Handle zero window probe
+    %% 处理零窗口探测
     PCB0 =
         if (MaxWindowUser == 0) and
            (Now - ZeroWindowTime >= 0) ->
@@ -60,7 +60,7 @@ check_timeouts_0(#aiutp_pcb{time = Now,
            true -> PCB
         end,
 
-    %% Check RTO timeout or burst mode timeout
+    %% 检查 RTO 超时或突发模式超时
     {Continue, PCB1} =
         if (Burst == false) and
            (RTOTimeout > 0) and
@@ -80,7 +80,7 @@ check_timeouts_0(#aiutp_pcb{time = Now,
         end,
 
     if Continue == true ->
-        %% Handle keepalive
+        %% 处理 keepalive
         PCBKeepAlive =
             if (FinSent == false) and
                ((State == ?CS_CONNECTED) or (State == ?CS_CONNECTED_FULL)) and
@@ -93,14 +93,14 @@ check_timeouts_0(#aiutp_pcb{time = Now,
                true -> PCB1
             end,
 
-        %% Flush queue if no outstanding packets
+        %% 如果没有未确认的包，刷新队列
         PCBFlush =
             if PCBKeepAlive#aiutp_pcb.cur_window_packets == 0 ->
                 aiutp_net:flush_queue(PCBKeepAlive);
                true -> PCBKeepAlive
             end,
 
-        %% Check if we can transition from CONNECTED_FULL to CONNECTED
+        %% 检查是否可以从 CONNECTED_FULL 转换到 CONNECTED
         {ISFull, PCB2} = aiutp_net:is_full(-1, PCBFlush),
         if (State == ?CS_CONNECTED_FULL) and
            (ISFull == false) ->
@@ -112,10 +112,10 @@ check_timeouts_0(#aiutp_pcb{time = Now,
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc Check for fatal timeout conditions
+%% @doc 检查致命超时条件
 %%
-%% Returns {false, PCB} if connection should be destroyed/reset,
-%% {true, PCB} if connection is still valid.
+%% 如果连接应被销毁/重置返回 {false, PCB}，
+%% 如果连接仍然有效返回 {true, PCB}。
 %%------------------------------------------------------------------------------
 check_timeouts_1(#aiutp_pcb{state = State} = PCB)
   when State == ?CS_SYN_RECV ->
@@ -126,15 +126,19 @@ check_timeouts_1(#aiutp_pcb{time = Now,
                             close_requested = CloseRequested} = PCB)
   when (LastGotPacket > 0), (Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 2) ->
     logger:warning("Connection closed due to keepalive timeout: last_packet=~p", [LastGotPacket]),
-    if CloseRequested == true -> {false, PCB#aiutp_pcb{state = ?CS_DESTROY}};
-       true -> {false, PCB#aiutp_pcb{state = ?CS_RESET}}
+    %% BEP-29：在状态转换前发送 RESET 通知对端
+    PCB0 = aiutp_net:send_reset(PCB),
+    if CloseRequested == true -> {false, PCB0#aiutp_pcb{state = ?CS_DESTROY}};
+       true -> {false, PCB0#aiutp_pcb{state = ?CS_RESET}}
     end;
 
 check_timeouts_1(#aiutp_pcb{rtt = RTT, close_requested = CloseRequested} = PCB)
   when (RTT > 6000) ->
     logger:warning("Connection closed due to excessive RTT: rtt=~p", [RTT]),
-    if CloseRequested == true -> {false, PCB#aiutp_pcb{state = ?CS_DESTROY}};
-       true -> {false, PCB#aiutp_pcb{state = ?CS_RESET}}
+    %% BEP-29：在状态转换前发送 RESET 通知对端
+    PCB0 = aiutp_net:send_reset(PCB),
+    if CloseRequested == true -> {false, PCB0#aiutp_pcb{state = ?CS_DESTROY}};
+       true -> {false, PCB0#aiutp_pcb{state = ?CS_RESET}}
     end;
 
 check_timeouts_1(#aiutp_pcb{state = State,
@@ -144,17 +148,19 @@ check_timeouts_1(#aiutp_pcb{state = State,
   when (RetransmitCount >= 4);
        ((State == ?CS_SYN_SENT) and RetransmitCount > 2) ->
     logger:warning("Connection closed due to max retransmit count: count=~p", [RetransmitCount]),
-    if CloseRequested == true -> {false, PCB#aiutp_pcb{state = ?CS_DESTROY}};
-       true -> {false, PCB#aiutp_pcb{state = ?CS_RESET}}
+    %% BEP-29：在状态转换前发送 RESET 通知对端
+    PCB0 = aiutp_net:send_reset(PCB),
+    if CloseRequested == true -> {false, PCB0#aiutp_pcb{state = ?CS_DESTROY}};
+       true -> {false, PCB0#aiutp_pcb{state = ?CS_RESET}}
     end;
 
 check_timeouts_1(PCB) -> {true, PCB}.
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc Handle retransmission timeout
+%% @doc 处理重传超时
 %%
-%% Increases RTO, reduces window, and marks packets for resend.
+%% 增加 RTO，减小窗口，并标记需要重发的包。
 %%------------------------------------------------------------------------------
 check_timeouts_2({false, _} = W) -> W;
 check_timeouts_2({true, #aiutp_pcb{time = Now,
@@ -165,12 +171,13 @@ check_timeouts_2({true, #aiutp_pcb{time = Now,
                                    outbuf = OutBuf,
                                    seq_nr = SeqNR,
                                    retransmit_count = RetransmitCount} = PCB}) ->
-    %% Exponential backoff: RTO *= 1.5
-    NewTimeout = RetransmitTimeout * 1.5,
+    %% 指数退避：RTO *= 1.5
+    %% 指数退避：timeout = timeout * 1.5，使用整数运算避免浮点数
+    NewTimeout = (RetransmitTimeout * 3) div 2,
 
     PCB0 =
         if (CurWindowPackets == 0) and (MaxWindow > ?PACKET_SIZE) ->
-            %% No outstanding packets, just decay window
+            %% 没有未确认的包，只衰减窗口
             PCB#aiutp_pcb{
                 retransmit_timeout = NewTimeout,
                 rto_timeout = Now + NewTimeout,
@@ -178,7 +185,7 @@ check_timeouts_2({true, #aiutp_pcb{time = Now,
                 max_window = erlang:max((MaxWindow * 2 div 3), ?MIN_WINDOW_SIZE)
             };
            true ->
-            %% Outstanding packets, reduce window and enable slow start
+            %% 有未确认的包，减小窗口并启用慢启动
             PCB#aiutp_pcb{
                 retransmit_timeout = NewTimeout,
                 rto_timeout = Now + NewTimeout,
@@ -189,7 +196,7 @@ check_timeouts_2({true, #aiutp_pcb{time = Now,
         end,
 
     if CurWindowPackets > 0 ->
-        %% Mark packets for resend and send first packet
+        %% 标记需要重发的包并发送第一个包
         Iter = aiutp_buffer:head(OutBuf),
         {CurWindow0, OutBuf0} = mark_need_resend(CurWindowPackets, CurWindow, Iter, OutBuf),
         PCB1 = PCB0#aiutp_pcb{
@@ -204,15 +211,15 @@ check_timeouts_2({true, #aiutp_pcb{time = Now,
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc Mark packets in the outgoing buffer as needing resend
+%% @doc 标记发送缓冲区中需要重发的包
 %%
-%% Iterates through the buffer and marks unacked packets for retransmission.
-%% Adjusts current window to account for resent data.
+%% 遍历缓冲区并标记未确认的包进行重传。
+%% 调整当前窗口以计入重发的数据。
 %%
-%% @param CurWindowPackets Number of packets in flight
-%% @param CurWindow Current window size in bytes
-%% @param Iter Current buffer iterator (-1 means end)
-%% @param OutBuf Output buffer
+%% @param CurWindowPackets 传输中的包数量
+%% @param CurWindow 当前窗口大小（字节）
+%% @param Iter 当前缓冲区迭代器（-1 表示结束）
+%% @param OutBuf 发送缓冲区
 %% @returns {NewCurWindow, NewOutBuf}
 %% @end
 %%------------------------------------------------------------------------------
@@ -229,10 +236,10 @@ mark_need_resend(CurWindowPackets, CurWindow, Iter, OutBuf) ->
     } = WrapPacket,
 
     if (NeedResend == true) or (Transmissions == 0) ->
-        %% Already marked or never sent
+        %% 已标记或从未发送
         mark_need_resend(CurWindowPackets - 1, CurWindow, Next, OutBuf);
        true ->
-        %% Mark for resend and adjust window
+        %% 标记重发并调整窗口
         WrapPacket0 = WrapPacket#aiutp_packet_wrap{need_resend = true},
         OutBuf0 = aiutp_buffer:replace(Iter, WrapPacket0, OutBuf),
         mark_need_resend(CurWindowPackets - 1, CurWindow - Payload, Next, OutBuf0)

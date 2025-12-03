@@ -4,9 +4,13 @@
 -export([start_link/0]).
 -export([init/1]).
 
+%% @doc Start the top-level supervisor
+-spec start_link() -> {ok, pid()} | {error, term()} | ignore.
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+%% @doc Initialize the supervisor with child specifications
+-spec init(term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
   %% Use rest_for_one strategy:
   %% - Channels depend on sockets (need UDP to send/receive)

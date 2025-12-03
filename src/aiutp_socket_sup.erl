@@ -22,7 +22,13 @@
 %%%===================================================================
 %%% API functions
 %%%===================================================================
+
+%% @doc Open a uTP socket on the specified port
+-spec open(inet:port_number()) -> {ok, {utp, pid()}} | {error, term()}.
 open(Port)-> open(Port,[]).
+
+%% @doc Open a uTP socket on the specified port with options
+-spec open(inet:port_number(), list()) -> {ok, {utp, pid()}} | {error, term()}.
 open(Port,Options)->
   case supervisor:start_child(?SERVER, [Port,Options]) of
     {ok,UTPSocket} -> {ok,{utp,UTPSocket}};

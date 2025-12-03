@@ -7,12 +7,16 @@
          schedule_ack/1,
          send_ack/1,
          send_fin/1,
+         send_reset/1,
          send_keep_alive/1,
          send_packet/2,
          send_n_packets/4]).
 
+%% @doc 计算接收窗口大小（字节）
+-spec window_size(integer(), aiutp_buffer:aiutp_buffer()) -> non_neg_integer().
 window_size(_MaxWindow,InBuf) -> aiutp_buffer:unused(InBuf) * ?PACKET_SIZE.
 
+-spec max_send(#aiutp_pcb{}) -> non_neg_integer().
 max_send(#aiutp_pcb{max_window = MaxWindow,
                     max_window_user = MaxWindowUser,
                     cur_window = CurWindow,
@@ -36,6 +40,7 @@ max_send(#aiutp_pcb{max_window = MaxWindow,
       end
   end.
 
+-spec is_full(integer(), #aiutp_pcb{}) -> {boolean(), #aiutp_pcb{}}.
 is_full(Bytes,#aiutp_pcb{time= Now,
                          max_window = MaxWindow,
                          max_window_user = MaxWindowUser,
@@ -64,6 +69,7 @@ is_full(Bytes,#aiutp_pcb{time= Now,
   end.
 
 
+-spec build_sack(non_neg_integer(), map(), integer(), integer(), aiutp_buffer:aiutp_buffer()) -> binary().
 build_sack(Size,Acc,_,Iter,_)
   when Size == 0 ;
        Iter == -1 ->
@@ -87,6 +93,7 @@ build_sack(Size,Acc,Base,Iter,InBuf) ->
       build_sack(Size - 1,maps:put(Pos,Bits0,Acc),Base,Iter0,InBuf)
   end.
 
+-spec build_sack(#aiutp_pcb{}) -> binary() | undefined.
 build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
   Size = aiutp_buffer:size(InBuf),
   Size0 = erlang:min(30,Size),
@@ -96,9 +103,27 @@ build_sack(#aiutp_pcb{ack_nr = AckNR,inbuf = InBuf})->
       Head = aiutp_buffer:head(InBuf),
       build_sack(Size0,Acc,AckNR + 2,Head,InBuf)
   end.
+-spec send_fin(#aiutp_pcb{}) -> #aiutp_pcb{}.
 send_fin(#aiutp_pcb{outque = OutQue} = PCB)->
   OutQue0 = aiutp_queue:push_back({?ST_FIN,<<>>}, OutQue),
   flush_queue(PCB#aiutp_pcb{outque = OutQue0}).
+
+%% @doc 发送 RESET 包通知对端连接正在终止
+%% BEP-29：当连接超时或遇到不可恢复的错误时应发送 RESET 包，
+%% 允许对端立即清理其状态，而不是等待自己的超时。
+-spec send_reset(#aiutp_pcb{}) -> #aiutp_pcb{}.
+send_reset(#aiutp_pcb{time = Now,
+                      socket = Socket,
+                      conn_id_send = ConnIdSend,
+                      ack_nr = AckNR,
+                      reply_micro = ReplyMicro} = PCB) ->
+  MicroNow = aiutp_util:microsecond(),
+  Packet = aiutp_packet:reset(ConnIdSend, AckNR),
+  Packet0 = Packet#aiutp_packet{tv_usec = MicroNow, reply_micro = ReplyMicro},
+  do_send(Socket, aiutp_packet:encode(Packet0)),
+  PCB#aiutp_pcb{last_sent_packet = Now}.
+
+-spec send_ack(#aiutp_pcb{}) -> #aiutp_pcb{}.
 send_ack(#aiutp_pcb{time = Now,
                     socket = Socket,
                     conn_id_send = ConnIdSend,
@@ -126,10 +151,13 @@ send_ack(#aiutp_pcb{time = Now,
   PCB#aiutp_pcb{last_sent_packet = Now,last_rcv_win = WindowSize}.
 
 
+-spec send_keep_alive(#aiutp_pcb{}) -> #aiutp_pcb{}.
 send_keep_alive(#aiutp_pcb{ack_nr = AckNR} = PCB)->
   PCB0 = send_ack(PCB#aiutp_pcb{ack_nr = aiutp_util:bit16(AckNR -1)}),
   PCB0#aiutp_pcb{ack_nr = AckNR}.
 
+-spec update_wrap_packet(integer(), integer(), non_neg_integer(), non_neg_integer(), #aiutp_packet_wrap{}) ->
+    {non_neg_integer(), #aiutp_packet_wrap{}, binary()}.
 update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
   #aiutp_packet_wrap{
      transmissions = Transmission,
@@ -151,6 +179,7 @@ update_wrap_packet(MicroNow,ReplyMicro,WindowSize,AckNR,WrapPacket)->
    Content0}.
 
 
+-spec send_packet(integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 send_packet(-1,PCB)->PCB;
 send_packet(Pos,#aiutp_pcb{time = Now,
                            socket = Socket,
@@ -169,6 +198,8 @@ send_packet(Pos,#aiutp_pcb{time = Now,
 
 
 
+-spec send_n_packets(non_neg_integer(), non_neg_integer(), non_neg_integer(), integer(), #aiutp_pcb{}) ->
+    {non_neg_integer(), non_neg_integer(), #aiutp_pcb{}}.
 send_n_packets(MinSeq,_,Limit,Iter,PCB)
   when Limit == 0;
        Iter == -1 -> {Limit,MinSeq,PCB};
@@ -198,15 +229,19 @@ send_n_packets(MinSeq,MaxSeq,Limit,
   end.
 
 
+-spec send_n_packets(non_neg_integer(), non_neg_integer(), non_neg_integer(), #aiutp_pcb{}) ->
+    {non_neg_integer(), non_neg_integer(), #aiutp_pcb{}}.
 send_n_packets(MinSeq,MaxSeq,Limit,#aiutp_pcb{outbuf = OutBuf}  = PCB)->
   Iter = aiutp_buffer:head(OutBuf),
   {Remain,LastSeq,PCB0} = send_n_packets(MinSeq,MaxSeq,Limit,Iter,PCB),
   {Limit - Remain,LastSeq,PCB0}.
 
 
+-spec flush_packets(#aiutp_pcb{}) -> #aiutp_pcb{}.
 flush_packets(#aiutp_pcb{outbuf = OutBuf} = PCB)->
   Iter = aiutp_buffer:head(OutBuf),
   flush_packets(Iter,PCB).
+-spec flush_packets(integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 flush_packets(-1, PCB)-> PCB;
 flush_packets(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB)->
   {ISFull,PCB0} = is_full(-1,PCB),
@@ -225,6 +260,7 @@ flush_packets(Iter, #aiutp_pcb{outbuf = OutBuf} = PCB)->
 
 
 
+-spec send_new_packet(integer(), binary(), non_neg_integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 send_new_packet(Type,Data,Payload,
                 #aiutp_pcb{outbuf = OutBuf,socket = Socket,cur_window = CurWindow,
                            conn_id_send = ConnId,ack_nr = AckNR,seq_nr = SeqNR,
@@ -248,11 +284,15 @@ send_new_packet(Type,Data,Payload,
                 last_rcv_win = LastRcvWin,last_sent_packet = Now}.
 
 
+-spec fill_with_next(non_neg_integer(), integer(), #aiutp_pcb{}) ->
+    done | {done, binary(), #aiutp_pcb{}} | {next, #aiutp_pcb{}} | {next, binary(), #aiutp_pcb{}} | {binary(), binary(), #aiutp_pcb{}}.
 fill_with_next(RequiredSize,Type,#aiutp_pcb{outque = OutQue} = PCB)->
   case aiutp_queue:empty(OutQue) of
     true -> done;
     false ->  fill_with_next(RequiredSize,Type,<<>>, PCB)
   end.
+-spec fill_with_next(non_neg_integer(), integer(), binary(), #aiutp_pcb{}) ->
+    done | {done, binary(), #aiutp_pcb{}} | {next, #aiutp_pcb{}} | {next, binary(), #aiutp_pcb{}} | {binary(), binary(), #aiutp_pcb{}}.
 fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
   case {aiutp_queue:empty(OutQue),erlang:byte_size(Acc)} of
     {true,0} -> done;
@@ -275,6 +315,7 @@ fill_with_next(RequiredSize,Type,Acc,#aiutp_pcb{outque = OutQue} = PCB)->
       end
   end.
 
+-spec send_data_in_queue(integer(), binary(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
 send_data_in_queue(_,<<>>,_,PCB) -> send_data_in_queue(PCB);
 send_data_in_queue(Type,Bin,Size,#aiutp_pcb{outque = OutQue} = PCB)
   when Size =< 0 ->
@@ -312,6 +353,7 @@ send_data_in_queue(Type,Bin,Size,PCB)->
       PCB0 = send_new_packet(Type, Data, Size0, PCB),
       send_data_in_queue(Type,Rest,Size - Size0, PCB0)
   end.
+-spec send_data_in_queue(#aiutp_pcb{}) -> #aiutp_pcb{}.
 send_data_in_queue(#aiutp_pcb{outque = OutQue} = PCB)->
   case aiutp_queue:empty(OutQue) of
     true -> PCB;
@@ -321,6 +363,7 @@ send_data_in_queue(#aiutp_pcb{outque = OutQue} = PCB)->
       MaxSend = max_send(PCB),
       send_data_in_queue(Type,Bin,MaxSend,PCB#aiutp_pcb{outque = OutQue0})
   end.
+-spec flush_queue(#aiutp_pcb{}) -> #aiutp_pcb{}.
 flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
                        cur_window_packets = CurWindowPackets,
                        rto = RTO} = PCB)->
@@ -339,13 +382,16 @@ flush_queue(#aiutp_pcb{time = Now,outque = OutQue,
       end
   end.
 
+-spec schedule_ack(#aiutp_pcb{}) -> #aiutp_pcb{}.
 schedule_ack(#aiutp_pcb{ida = false} = PCB) -> PCB;
 schedule_ack(PCB) -> send_ack(PCB#aiutp_pcb{ida = false}).
 
-%% @doc Send UDP packet with retry logic
-%% BEP-29: Network send failures should be handled gracefully.
-%% The protocol's timeout and retransmission mechanisms will handle packet loss.
-%% We log errors but don't crash - let the PCB timeout logic decide when to give up.
+%% @doc 带重试逻辑的 UDP 包发送
+%% BEP-29：网络发送失败应优雅处理。
+%% 协议的超时和重传机制会处理丢包情况。
+%% 我们记录错误但不崩溃 - 让 PCB 超时逻辑决定何时放弃。
+-spec do_send(gen_udp:socket(), {inet:ip_address(), inet:port_number()}, non_neg_integer(), binary()) ->
+    ok | {error, term()}.
 do_send(Socket,Remote,Count,Content)->
   case gen_udp:send(Socket,Remote,Content) of
     ok -> ok;
@@ -361,5 +407,7 @@ do_send(Socket,Remote,Count,Content)->
           do_send(Socket,Remote,Count -1,Content)
       end
   end.
+-spec do_send({gen_udp:socket(), {inet:ip_address(), inet:port_number()}}, binary()) ->
+    ok | {error, term()}.
 do_send({Socket,Remote},Content) ->
   do_send(Socket,Remote,3,Content).

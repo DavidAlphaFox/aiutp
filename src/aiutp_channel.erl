@@ -50,9 +50,9 @@
     %% Socket management
     parent :: pid(),                      %% Parent socket process
     parent_monitor :: reference(),        %% Monitor ref for parent
-    socket :: port(),                     %% UDP socket
-    remote :: tuple(),                    %% Remote {Address, Port}
-    conn_id :: integer() | undefined,     %% Connection ID
+    socket :: gen_udp:socket(),           %% UDP socket
+    remote :: {inet:ip_address(), inet:port_number()} | undefined, %% Remote address
+    conn_id :: non_neg_integer() | undefined,     %% Connection ID
 
     %% Controller (owner) management
     controller :: pid() | undefined,      %% Controlling process
@@ -249,7 +249,7 @@ connecting(enter, idle, _Data) ->
     {keep_state_and_data, []};
 
 connecting(cast, {packet, Packet}, #data{pcb = PCB, blocker = Blocker} = Data) ->
-    PCB1 = aiutp_pcb:process(Packet, PCB),
+    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
     case aiutp_pcb:state(PCB1) of
         ?CS_CONNECTED ->
             NewData = Data#data{pcb = PCB1, blocker = undefined},
@@ -316,7 +316,7 @@ accepting(enter, idle, #data{pcb = PCB} = Data) ->
     end;
 
 accepting(cast, {packet, Packet}, #data{pcb = PCB} = Data) ->
-    PCB1 = aiutp_pcb:process(Packet, PCB),
+    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
     case aiutp_pcb:state(PCB1) of
         ?CS_CONNECTED ->
             {next_state, connected, Data#data{pcb = PCB1}};
@@ -421,7 +421,7 @@ connected({call, From}, {recv, _Len}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
 
 connected(cast, {packet, Packet}, #data{pcb = PCB} = Data) ->
-    PCB1 = aiutp_pcb:process(Packet, PCB),
+    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
     case aiutp_pcb:state(PCB1) of
         State when State == ?CS_DESTROY; State == ?CS_RESET ->
             {next_state, closing, Data#data{pcb = PCB1}};
@@ -525,9 +525,13 @@ code_change(_OldVsn, State, Data, _Extra) ->
 %% @doc Try to add connection ID, retry up to 3 times
 %% @end
 %%--------------------------------------------------------------------
+-spec add_conn(pid(), {inet:ip_address(), inet:port_number()}) ->
+    {ok, non_neg_integer()} | {error, eagain}.
 add_conn(Parent, Remote) ->
     add_conn(Parent, Remote, 3).
 
+-spec add_conn(pid(), {inet:ip_address(), inet:port_number()}, non_neg_integer()) ->
+    {ok, non_neg_integer()} | {error, eagain}.
 add_conn(_, _, 0) ->
     {error, eagain};
 add_conn(Parent, Remote, N) ->
@@ -541,6 +545,7 @@ add_conn(Parent, Remote, N) ->
 %% @doc Start tick timer for periodic timeout checks
 %% @end
 %%--------------------------------------------------------------------
+-spec start_tick_timer(pos_integer()) -> reference().
 start_tick_timer(Interval) ->
     erlang:start_timer(Interval, self(), tick).
 
@@ -548,6 +553,7 @@ start_tick_timer(Interval) ->
 %% @doc Cancel tick timer
 %% @end
 %%--------------------------------------------------------------------
+-spec cancel_tick_timer(reference() | undefined) -> ok.
 cancel_tick_timer(undefined) ->
     ok;
 cancel_tick_timer(TRef) ->
@@ -558,6 +564,7 @@ cancel_tick_timer(TRef) ->
 %% @doc Cleanup all monitors
 %% @end
 %%--------------------------------------------------------------------
+-spec cleanup_monitors(#data{}) -> ok.
 cleanup_monitors(#data{parent_monitor = ParentMon,
                        controller_monitor = ControllerMon,
                        tick_timer = Timer}) ->
@@ -574,6 +581,7 @@ cleanup_monitors(#data{parent_monitor = ParentMon,
 %% @doc Handle active mode - read and deliver data
 %% @end
 %%--------------------------------------------------------------------
+-spec active_read(#data{}) -> #data{}.
 active_read(#data{controller = undefined} = Data) ->
     Data;
 active_read(#data{pcb = PCB, controller = Controller, active = true} = Data) ->
@@ -594,6 +602,7 @@ active_read(#data{pcb = PCB} = Data) ->
 %% @doc Create UTP socket tuple for messages
 %% @end
 %%--------------------------------------------------------------------
+-spec make_utp_socket(#data{}) -> {utp, pid(), pid()}.
 make_utp_socket(#data{parent = Parent}) ->
     {utp, Parent, self()}.
 
@@ -601,6 +610,7 @@ make_utp_socket(#data{parent = Parent}) ->
 %% @doc Sync input messages to new owner during controlling_process
 %% @end
 %%--------------------------------------------------------------------
+-spec sync_input(term(), pid(), boolean()) -> boolean().
 sync_input(Socket, NewOwner, Flag) ->
     receive
         {utp_data, Socket, _} = M ->

@@ -1,19 +1,18 @@
 %%------------------------------------------------------------------------------
-%% @doc Protocol Control Block for uTP connections
+%% @doc uTP 连接的协议控制块
 %%
-%% This module manages the core state and operations of a uTP connection,
-%% including connection establishment, data transfer, and teardown.
+%% 本模块管理 uTP 连接的核心状态和操作，包括连接建立、数据传输和连接关闭。
 %%
-%% The PCB maintains all connection state including:
-%% - Connection identifiers (recv/send IDs)
-%% - Sequence and acknowledgment numbers
-%% - Send/receive buffers
-%% - RTT/RTO estimates
-%% - Congestion window parameters
+%% PCB 维护所有连接状态，包括：
+%% - 连接标识符（接收/发送 ID）
+%% - 序列号和确认号
+%% - 发送/接收缓冲区
+%% - RTT/RTO 估算值
+%% - 拥塞窗口参数
 %%
-%% Related modules:
-%% - aiutp_pcb_cc: Congestion control (LEDBAT)
-%% - aiutp_pcb_timeout: Timeout handling and retransmission
+%% 相关模块：
+%% - aiutp_pcb_cc: 拥塞控制（LEDBAT 算法）
+%% - aiutp_pcb_timeout: 超时处理和重传
 %% @end
 %%------------------------------------------------------------------------------
 -module(aiutp_pcb).
@@ -21,7 +20,7 @@
 
 -export([new/3,
          state/1,
-         process/2,
+         process_incoming/2,
          check_timeouts/1,
          write/2,
          close/1,
@@ -31,18 +30,24 @@
          closed/1,
          flush/1]).
 
+%% 向后兼容别名
+-export([process/2]).
+
+%% Type definition for socket reference
+-type socket_ref() :: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}}.
+
 %%------------------------------------------------------------------------------
-%% @doc Create a new Protocol Control Block
+%% @doc 创建新的协议控制块
 %%
-%% Initializes a new PCB with default values for a uTP connection.
+%% 使用默认值初始化新的 uTP 连接 PCB。
 %%
-%% @param ConnIdRecv Connection ID for receiving
-%% @param ConnIdSend Connection ID for sending
-%% @param Socket The UDP socket reference
-%% @returns New #aiutp_pcb{} record
+%% @param ConnIdRecv 接收连接 ID
+%% @param ConnIdSend 发送连接 ID
+%% @param Socket UDP socket 引用
+%% @returns 新的 #aiutp_pcb{} 记录
 %% @end
 %%------------------------------------------------------------------------------
--spec new(integer(), integer(), term()) -> #aiutp_pcb{}.
+-spec new(integer(), integer(), socket_ref()) -> #aiutp_pcb{}.
 new(ConnIdRecv, ConnIdSend, Socket) ->
     CurMilli = aiutp_util:millisecond(),
     #aiutp_pcb{
@@ -67,17 +72,17 @@ new(ConnIdRecv, ConnIdSend, Socket) ->
     }.
 
 %%------------------------------------------------------------------------------
-%% @doc Get the current connection state
+%% @doc 获取当前连接状态
 %% @end
 %%------------------------------------------------------------------------------
--spec state(#aiutp_pcb{}) -> integer().
+-spec state(#aiutp_pcb{}) -> atom().
 state(#aiutp_pcb{state = State}) -> State.
 
 %%------------------------------------------------------------------------------
-%% @doc Check if connection is closed and return reason
+%% @doc 检查连接是否已关闭并返回原因
 %%
 %% @returns {closed, Reason} | not_closed
-%% where Reason is: normal | reset | timeout | crash
+%% 其中 Reason 可能是: normal | reset | timeout | crash
 %% @end
 %%------------------------------------------------------------------------------
 -spec closed(#aiutp_pcb{}) -> {closed, atom()} | not_closed.
@@ -103,33 +108,54 @@ closed(#aiutp_pcb{got_fin = GotFin, got_fin_reached = GotFinReached}) ->
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc Process an incoming packet
+%% @doc 处理入站数据包
 %%
-%% Entry point for packet processing. Schedules ACK after processing.
+%% 数据包处理的入口点。处理完成后调度 ACK 发送。
+%% 这是 aiutp_channel 收到数据包时调用的主入口。
 %%
-%% @param {Packet, Timestamp} Incoming packet with receive timestamp
-%% @param PCB Protocol control block
-%% @returns Updated PCB
+%% 处理流程：
+%% 1. dispatch_by_type - 按包类型路由（RESET、SYN 或其他）
+%% 2. validate_and_init - 检查序列号范围
+%% 3. handle_duplicate_acks - 检测重复 ACK 触发快速重传
+%% 4. process_ack_and_sack - 处理 ACK/SACK，拥塞控制
+%% 5. update_connection_state - 状态机转换
+%% 6. handle_data_and_fin - 处理数据载荷和 FIN
+%%
+%% @param {Packet, Timestamp} 入站包及接收时间戳
+%% @param PCB 协议控制块
+%% @returns 更新后的 PCB
 %% @end
 %%------------------------------------------------------------------------------
--spec process({#aiutp_packet{}, integer()}, #aiutp_pcb{}) -> #aiutp_pcb{}.
-process({Packet, TS}, PCB) ->
+-spec process_incoming({#aiutp_packet{}, integer()}, #aiutp_pcb{}) -> #aiutp_pcb{}.
+process_incoming({Packet, TS}, PCB) ->
     aiutp_net:schedule_ack(
-        process_by_type(Packet#aiutp_packet.type, Packet,
-                        PCB#aiutp_pcb{recv_time = TS})).
+        dispatch_by_type(Packet#aiutp_packet.type, Packet,
+                         PCB#aiutp_pcb{recv_time = TS})).
 
-%% @private Process packet by type - filter destroyed/reset states
-process_by_type(_, _, #aiutp_pcb{state = State} = PCB)
+%% @doc process_incoming/2 的向后兼容别名
+%% @deprecated 请使用 process_incoming/2
+-spec process({#aiutp_packet{}, integer()}, #aiutp_pcb{}) -> #aiutp_pcb{}.
+process(PacketWithTS, PCB) ->
+    process_incoming(PacketWithTS, PCB).
+
+%%==============================================================================
+%% 按类型分发数据包
+%%==============================================================================
+
+%% @private 按类型分发数据包 - 首先过滤已销毁/重置状态
+%% 在 DESTROY 或 RESET 状态下收到的包将被静默丢弃
+dispatch_by_type(_, _, #aiutp_pcb{state = State} = PCB)
   when (State == ?CS_DESTROY);
        (State == ?CS_RESET) ->
     PCB;
 
-%% @private Handle RESET packet
-process_by_type(?ST_RESET,
-                #aiutp_packet{conn_id = ConnId},
-                #aiutp_pcb{conn_id_send = ConnIdSend,
-                           conn_id_recv = ConnIdRecv,
-                           close_requested = CloseRequested} = PCB) ->
+%% @private 处理 ST_RESET 包 - 立即终止连接
+%% 根据 BEP-29：RESET 导致连接立即断开，无需响应
+dispatch_by_type(?ST_RESET,
+                 #aiutp_packet{conn_id = ConnId},
+                 #aiutp_pcb{conn_id_send = ConnIdSend,
+                            conn_id_recv = ConnIdRecv,
+                            close_requested = CloseRequested} = PCB) ->
     if (ConnIdSend == ConnId) or (ConnIdRecv == ConnId) ->
         if CloseRequested == true -> PCB#aiutp_pcb{state = ?CS_DESTROY};
            true -> PCB#aiutp_pcb{state = ?CS_RESET}
@@ -137,10 +163,11 @@ process_by_type(?ST_RESET,
        true -> PCB
     end;
 
-%% @private Handle SYN packet (new connection)
-process_by_type(?ST_SYN,
-                #aiutp_packet{seq_nr = AckNR},
-                #aiutp_pcb{state = ?CS_IDLE} = PCB) ->
+%% @private 处理 ST_SYN 包 - 新的入站连接
+%% 状态转换：IDLE -> SYN_RECV，并发送 SYN-ACK
+dispatch_by_type(?ST_SYN,
+                 #aiutp_packet{seq_nr = AckNR},
+                 #aiutp_pcb{state = ?CS_IDLE} = PCB) ->
     SeqNR = aiutp_util:bit16_random(),
     PCB0 = PCB#aiutp_pcb{
         state = ?CS_SYN_RECV,
@@ -151,51 +178,57 @@ process_by_type(?ST_SYN,
     },
     aiutp_net:send_ack(PCB0);
 
-%% @private Handle duplicate SYN (retransmit ACK)
-process_by_type(?ST_SYN,
-                #aiutp_packet{seq_nr = AckNR},
-                #aiutp_pcb{state = ?CS_SYN_RECV, ack_nr = AckNR} = PCB) ->
+%% @private 处理重复的 SYN - 重传我们的 SYN-ACK
+dispatch_by_type(?ST_SYN,
+                 #aiutp_packet{seq_nr = AckNR},
+                 #aiutp_pcb{state = ?CS_SYN_RECV, ack_nr = AckNR} = PCB) ->
     PCB0 = PCB#aiutp_pcb{last_got_packet = aiutp_util:millisecond()},
     aiutp_net:send_ack(PCB0);
 
-%% @private Handle all other packet types (non-RESET, non-SYN)
-process_by_type(_,
-                #aiutp_packet{type = PktType, ack_nr = PktAckNR} = Packet,
-                #aiutp_pcb{state = State, seq_nr = SeqNR,
-                           cur_window_packets = CurWindowPackets} = PCB) ->
-    %% Calculate permissible ACK range for validation
+%% @private 处理其他所有包类型（ST_DATA、ST_STATE、ST_FIN）
+%% 在进入完整处理流程前验证 ACK 号
+dispatch_by_type(_,
+                 #aiutp_packet{type = PktType, ack_nr = PktAckNR} = Packet,
+                 #aiutp_pcb{state = State, seq_nr = SeqNR,
+                            cur_window_packets = CurWindowPackets} = PCB) ->
+    %% 计算允许的 ACK 范围用于验证
     CurrWindow = erlang:max(CurWindowPackets + ?ACK_NR_ALLOWED_WINDOW, ?ACK_NR_ALLOWED_WINDOW),
     MaxSeqNR = aiutp_util:bit16(SeqNR - 1),
     MinSeqNR = aiutp_util:bit16(SeqNR - 1 - CurrWindow),
 
-    %% Validate ACK number to detect spoofed/malicious packets
+    %% 验证 ACK 号以检测伪造/恶意数据包
     if ((PktType /= ?ST_SYN) or (State /= ?CS_SYN_RECV)) and
        (?WRAPPING_DIFF_16(MaxSeqNR, PktAckNR) < 0) or
        (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) < 0) ->
-        %% Invalid ACK - ignore packet (possible spoofed address or attack)
+        %% 无效 ACK - 忽略数据包（可能是地址伪造或攻击）
         PCB;
        true ->
-        process_packet(Packet, PCB)
+        validate_and_init(Packet, PCB)
     end.
 
-%%------------------------------------------------------------------------------
-%% Packet Processing Pipeline
+%%==============================================================================
+%% 数据包处理流程
 %%
-%% The packet processing is split into stages for clarity:
-%% 1. process_packet - Initialize, check reorder distance
-%% 2. process_packet_1 - Handle duplicate ACKs
-%% 3. process_packet_2 - Flow control, ACK processing, SACK
-%% 4. process_packet_3 - State transitions
-%% 5. process_packet_4 - FIN handling, data reception
-%%------------------------------------------------------------------------------
+%% 分发后，数据包经过以下阶段：
+%% 1. validate_and_init     - 初始化计时，检查序列号范围
+%% 2. handle_duplicate_acks - 检测重复 ACK 触发快速重传
+%% 3. process_ack_and_sack  - 处理 ACK/SACK，拥塞控制
+%% 4. update_connection_state - 处理状态机转换
+%% 5. handle_data_and_fin   - 处理数据载荷和 FIN
+%%==============================================================================
 
-%% @private Initialize processing and check reorder buffer range
-process_packet(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
-               #aiutp_pcb{state = State} = PCB) ->
+%% @private 阶段 1：验证序列号并初始化包处理
+%%
+%% - 对于 SYN_SENT 状态：从入站包初始化 ack_nr
+%% - 检查包序列号是否在可接受的重排序范围内
+%% - 丢弃序列号偏差过大的包
+%% - 为很旧的包调度立即 ACK（可能是重传）
+validate_and_init(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
+                  #aiutp_pcb{state = State} = PCB) ->
     Now = aiutp_util:millisecond(),
     PCB0 =
         if State == ?CS_SYN_SENT ->
-            %% SYN-ACK received: initialize ack_nr
+            %% 收到 SYN-ACK：初始化 ack_nr
             PCB#aiutp_pcb{
                 ack_nr = aiutp_util:bit16(PktSeqNR - 1),
                 last_got_packet = Now,
@@ -205,69 +238,90 @@ process_packet(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
             PCB#aiutp_pcb{last_got_packet = Now, time = Now}
         end,
 
-    %% Check if packet is within reorder buffer range
+    %% 检查包是否在重排序缓冲区范围内
     NextPktAckNR = aiutp_util:bit16(PCB0#aiutp_pcb.ack_nr + 1),
     SeqDistance = aiutp_util:bit16(PktSeqNR - NextPktAckNR),
 
     if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
-        %% Packet too far out of sequence
+        %% 包序列号偏差过大
         if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
            (PktType /= ?ST_STATE) ->
-            %% Old packet, schedule immediate ACK
+            %% 旧包，调度立即 ACK
             PCB0#aiutp_pcb{ida = true};
            true -> PCB0
         end;
        true ->
-        process_packet_1(Packet, PCB0)
+        handle_duplicate_acks(Packet, PCB0)
     end.
 
-%% @private Handle duplicate ACK detection for fast retransmit
-process_packet_1(#aiutp_packet{type = PktType, ack_nr = PktAckNR} = Packet,
-                 #aiutp_pcb{cur_window_packets = CurWindowPackets,
-                            duplicate_ack = DuplicateAck,
-                            seq_nr = SeqNR} = PCB)
+%% @private 阶段 2：处理重复 ACK 检测以触发快速重传
+%%
+%% 根据 BEP-29：当收到 DUPLICATE_ACKS_BEFORE_RESEND (4) 个相同序列号的
+%% 重复 ACK 时，触发最旧未确认包的快速重传。
+%%
+%% 重复 ACK 是指与之前具有相同 ack_nr 的 ST_STATE 包，
+%% 表明接收方仍在等待某个特定包。
+handle_duplicate_acks(#aiutp_packet{type = PktType, ack_nr = PktAckNR} = Packet,
+                      #aiutp_pcb{cur_window_packets = CurWindowPackets,
+                                 duplicate_ack = DuplicateAck,
+                                 seq_nr = SeqNR} = PCB)
   when CurWindowPackets > 0 ->
     Seq = aiutp_util:bit16(SeqNR - CurWindowPackets - 1),
     if (PktAckNR == Seq) and (PktType == ?ST_STATE) ->
-        %% Duplicate ACK received
+        %% 收到重复 ACK
         if DuplicateAck + 1 == ?DUPLICATE_ACKS_BEFORE_RESEND ->
-            %% Trigger fast retransmit
+            %% 触发最旧未确认包的快速重传
             PCB0 = aiutp_net:send_packet(
                        aiutp_buffer:head(PCB#aiutp_pcb.outbuf),
                        PCB#aiutp_pcb{duplicate_ack = 0}),
-            process_packet_2(Packet, PCB0);
+            process_ack_and_sack(Packet, PCB0);
            true ->
-            process_packet_2(Packet, PCB#aiutp_pcb{duplicate_ack = DuplicateAck + 1})
+            process_ack_and_sack(Packet, PCB#aiutp_pcb{duplicate_ack = DuplicateAck + 1})
         end;
        true ->
-        process_packet_2(Packet, PCB#aiutp_pcb{duplicate_ack = 0})
+        %% 不是重复 ACK，重置计数器
+        process_ack_and_sack(Packet, PCB#aiutp_pcb{duplicate_ack = 0})
     end;
-process_packet_1(Packet, PCB) ->
-    process_packet_2(Packet, PCB).
+handle_duplicate_acks(Packet, PCB) ->
+    process_ack_and_sack(Packet, PCB).
 
-%% @private Flow control, ACK processing, congestion control, SACK
-process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
-                               wnd = PktMaxWindowUser} = Packet,
-                 #aiutp_pcb{state = State,
-                            time = Now,
-                            fast_resend_seq_nr = FastResendSeqNR,
-                            fast_timeout = FastTimeout,
-                            zerowindow_time = ZeroWindowTime,
-                            fin_sent = FinSent,
-                            close_requested = CloseRequested,
-                            fin_sent_acked = FinSentAcked,
-                            recv_time = RecvTime} = PCB) ->
-    %% Pick acknowledged packets
+%% @private 阶段 3：处理 ACK、SACK 并应用拥塞控制
+%%
+%% 这是核心 ACK 处理阶段，负责：
+%% - 从发送缓冲区提取已确认的包
+%% - 根据已确认的包计算 RTT
+%% - LEDBAT 拥塞控制更新
+%% - 零窗口处理
+%% - 选择性确认（SACK）处理
+%% - 连接建立的状态转换
+process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
+                                   wnd = PktMaxWindowUser,
+                                   extension = Exts} = Packet,
+                     #aiutp_pcb{state = State,
+                                time = Now,
+                                fast_resend_seq_nr = FastResendSeqNR,
+                                fast_timeout = FastTimeout,
+                                zerowindow_time = ZeroWindowTime,
+                                fin_sent = FinSent,
+                                close_requested = CloseRequested,
+                                fin_sent_acked = FinSentAcked,
+                                recv_time = RecvTime} = PCB) ->
+    %% 从发送缓冲区提取已确认的包
     {AckedPackets, SAckedPackets, PCB0} = aiutp_tx:pick_acked(Packet, PCB),
 
-    %% Calculate acked bytes and minimum RTT
+    %% BEP-29：更新被 SACK 跳过的包的跳过计数
+    %% 从扩展中提取 SACK 序列号
+    SAckedSeqs = aiutp_tx:map_sack_to_seq(Exts, aiutp_util:bit16(PktAckNR + 2)),
+    {_SkippedCount, PCB0a} = aiutp_tx:update_skip_counts(SAckedSeqs, PCB0),
+
+    %% 计算已确认字节总数和最小 RTT
     {AckedBytes, MinRTT} = aiutp_pcb_cc:caculate_acked_bytes(
                                {0, ?RTT_MAX}, RecvTime, AckedPackets, SAckedPackets),
 
-    %% Calculate actual delay
-    {ActualDelay, PCB1} = aiutp_rtt:caculate_delay(Now, RecvTime, Packet, PCB0),
+    %% 根据时间戳差计算实际单向延迟
+    {ActualDelay, PCB1} = aiutp_rtt:caculate_delay(Now, RecvTime, Packet, PCB0a),
 
-    %% Update delay history
+    %% 更新延迟历史记录用于 LEDBAT
     OurHist = PCB1#aiutp_pcb.our_hist,
     OurHistValue = aiutp_delay:value(OurHist),
     OurHist0 =
@@ -276,7 +330,7 @@ process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
            true -> OurHist
         end,
 
-    %% Apply congestion control if we got ACKs
+    %% 如果收到 ACK 则应用 LEDBAT 拥塞控制
     PCB2 =
         if (ActualDelay /= 0) and (AckedBytes > 0) ->
             aiutp_pcb_cc:cc_control(Now, AckedBytes, MinRTT,
@@ -285,13 +339,13 @@ process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
             PCB1#aiutp_pcb{our_hist = OurHist0}
         end,
 
-    %% Handle zero window
+    %% 处理零窗口 - 设置探测定时器
     ZeroWindowTime0 =
         if PktMaxWindowUser == 0 -> Now + 15000;
            true -> ZeroWindowTime
         end,
 
-    %% State transitions
+    %% 连接建立的状态转换
     State0 =
         if (PktType == ?ST_DATA) and (State == ?CS_SYN_RECV) -> ?CS_CONNECTED;
            true -> State
@@ -299,22 +353,24 @@ process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
 
     {State1, FinSentAcked0} =
         if (PktType == ?ST_STATE) and (State0 == ?CS_SYN_SENT) ->
+            %% 收到 SYN-ACK，连接已建立
             {?CS_CONNECTED, false};
            (FinSent == true) and (PCB2#aiutp_pcb.cur_window_packets == 0) ->
+            %% 包括 FIN 在内的所有包都已被确认
             if CloseRequested -> {?CS_DESTROY, true};
                true -> {State0, true}
             end;
            true -> {State0, FinSentAcked}
         end,
 
-    %% Update fast resend sequence number
+    %% 更新快速重发序列号
     PktAckNR0 = aiutp_util:bit16(PktAckNR + 1),
     FastResendSeqNR0 =
         if ?WRAPPING_DIFF_16(FastResendSeqNR, PktAckNR0) < 0 -> PktAckNR0;
            true -> FastResendSeqNR
         end,
 
-    %% Process ACKed packets for RTT
+    %% 处理已确认的包用于 RTT 计算（Karn 算法）
     {_, CurWindow0, RTT0, RTO0, RTTVar0, RTTHist0} =
         lists:foldr(
             fun(I, AccPCB) -> aiutp_pcb_cc:ack_packet(RecvTime, I, AccPCB) end,
@@ -339,14 +395,14 @@ process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
         rto_timeout = RTO0 + Now0
     },
 
-    %% Send next packet if only one in flight
+    %% 如果只有一个包在传输中，发送下一个包（流水线）
     PCB4 =
         if PCB3#aiutp_pcb.cur_window_packets == 1 ->
             aiutp_net:send_packet(aiutp_buffer:head(PCB3#aiutp_pcb.outbuf), PCB3);
            true -> PCB3
         end,
 
-    %% Handle fast timeout
+    %% 处理快速超时恢复
     PCB5 =
         if FastTimeout ->
             if ?WRAPPING_DIFF_16(PCB4#aiutp_pcb.seq_nr,
@@ -360,14 +416,19 @@ process_packet_2(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
            true -> PCB4
         end,
 
-    %% Process selective ACKs
+    %% 处理选择性确认用于拥塞控制
     PCB6 = aiutp_pcb_cc:selective_ack_packet(SAckedPackets, RecvTime, PCB5),
-    process_packet_3(Packet, PCB6).
+    update_connection_state(Packet, PCB6).
 
-%% @private Handle state transitions and ST_STATE packets
-process_packet_3(#aiutp_packet{type = PktType} = Packet,
-                 #aiutp_pcb{state = State} = PCB) ->
-    %% Check if connection is full
+%% @private 阶段 4：更新连接状态机
+%%
+%% 处理：
+%% - 当缓冲区空间释放时从 CONNECTED_FULL 转回 CONNECTED
+%% - 过滤 ST_STATE 包（不携带数据）
+%% - 将数据包路由到最终处理阶段
+update_connection_state(#aiutp_packet{type = PktType} = Packet,
+                        #aiutp_pcb{state = State} = PCB) ->
+    %% 检查发送缓冲区是否不再满
     {ISFull, PCB0} = aiutp_net:is_full(-1, PCB),
     PCB1 =
         if (ISFull == false) and (State == ?CS_CONNECTED_FULL) ->
@@ -375,26 +436,37 @@ process_packet_3(#aiutp_packet{type = PktType} = Packet,
            true -> PCB0
         end,
 
-    %% ST_STATE packets don't carry data
+    %% ST_STATE 包（纯 ACK）不携带数据，在此停止处理
     if PktType == ?ST_STATE -> PCB1;
        (State /= ?CS_CONNECTED) and (State /= ?CS_CONNECTED_FULL) -> PCB1;
-       true -> process_packet_4(Packet, PCB1)
+       true -> handle_data_and_fin(Packet, PCB1)
     end.
 
-%% @private Handle FIN and data reception
-process_packet_4(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
-                 #aiutp_pcb{got_fin = GotFin} = PCB) ->
+%% @private 阶段 5：处理数据载荷和 FIN 包
+%%
+%% 对于 ST_FIN 包：
+%% - 记录 got_fin = true 和 eof_pkt = seq_nr
+%% - 继续接收直到 ack_nr 达到 eof_pkt
+%% - 这确保 FIN 之前的所有数据都被接收
+%%
+%% 对于 ST_DATA 包：
+%% - 传递给 aiutp_rx 进行重组和交付
+handle_data_and_fin(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
+                    #aiutp_pcb{got_fin = GotFin} = PCB) ->
     PCB0 =
         if (PktType == ?ST_FIN) and (GotFin == false) ->
+            %% 记录已收到 FIN - 但还不关闭
+            %% 必须等待直到 eof_pkt 之前的所有包都到达
             PCB#aiutp_pcb{got_fin = true, eof_pkt = PktSeqNR};
            true -> PCB
         end,
+    %% 处理数据（或 FIN 的空载荷）
     aiutp_rx:in(Packet, PCB0).
 
 %%------------------------------------------------------------------------------
-%% @doc Check and handle timeouts
+%% @doc 检查和处理超时
 %%
-%% Delegates to aiutp_pcb_timeout module.
+%% 委托给 aiutp_pcb_timeout 模块。
 %% @end
 %%------------------------------------------------------------------------------
 -spec check_timeouts(#aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -402,10 +474,10 @@ check_timeouts(PCB) ->
     aiutp_pcb_timeout:check_timeouts(PCB).
 
 %%------------------------------------------------------------------------------
-%% @doc Write data to the connection
+%% @doc 向连接写入数据
 %%
-%% @param Data Binary data to send
-%% @param PCB Protocol control block
+%% @param Data 要发送的二进制数据
+%% @param PCB 协议控制块
 %% @returns {ok, PCB} | {{error, Reason}, PCB}
 %% @end
 %%------------------------------------------------------------------------------
@@ -421,12 +493,12 @@ write(Data, PCB) ->
     aiutp_tx:in(Data, PCB#aiutp_pcb{time = aiutp_util:millisecond()}).
 
 %%------------------------------------------------------------------------------
-%% @doc Close the connection
+%% @doc 关闭连接
 %%
-%% Initiates graceful shutdown by sending FIN packet.
+%% 通过发送 FIN 包启动优雅关闭。
 %%
-%% @param PCB Protocol control block
-%% @returns Updated PCB
+%% @param PCB 协议控制块
+%% @returns 更新后的 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec close(#aiutp_pcb{}) -> #aiutp_pcb{}.
@@ -454,11 +526,11 @@ close(#aiutp_pcb{fin_sent_acked = FinSentAcked, fin_sent = FinSent} = PCB) ->
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc Read data from the connection
+%% @doc 从连接读取数据
 %%
-%% Returns accumulated data from the receive queue.
+%% 返回接收队列中累积的数据。
 %%
-%% @param PCB Protocol control block
+%% @param PCB 协议控制块
 %% @returns {Data | undefined, UpdatedPCB}
 %% @end
 %%------------------------------------------------------------------------------
@@ -469,7 +541,7 @@ read(#aiutp_pcb{inque = InQue, max_window = MaxWindow,
     WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
     Now = aiutp_util:millisecond(),
 
-    %% Send ACK if window opens up
+    %% 如果窗口打开则发送 ACK
     PCB0 =
         if WindowSize > LastRcvWin ->
             if LastRcvWin == 0 ->
@@ -491,16 +563,16 @@ read(#aiutp_pcb{inque = InQue, max_window = MaxWindow,
     end.
 
 %%------------------------------------------------------------------------------
-%% @doc Initiate outbound connection
+%% @doc 发起出站连接
 %%
-%% Creates a new PCB and sends SYN packet to establish connection.
+%% 创建新的 PCB 并发送 SYN 包以建立连接。
 %%
-%% @param Socket The UDP socket reference
-%% @param ConnIdRecv Connection ID for receiving
-%% @returns Initialized PCB with SYN sent
+%% @param Socket UDP socket 引用
+%% @param ConnIdRecv 接收连接 ID
+%% @returns 已发送 SYN 的初始化 PCB
 %% @end
 %%------------------------------------------------------------------------------
--spec connect(term(), integer()) -> #aiutp_pcb{}.
+-spec connect(socket_ref(), non_neg_integer()) -> #aiutp_pcb{}.
 connect(Socket, ConnIdRecv) ->
     ConnIdSend = aiutp_util:bit16(ConnIdRecv + 1),
     PCB = new(ConnIdRecv, ConnIdSend, Socket),
@@ -511,12 +583,12 @@ connect(Socket, ConnIdRecv) ->
     SeqNR = aiutp_util:bit16_random(),
     WindowSize = aiutp_net:window_size(MaxWindow, InBuf),
 
-    %% Build SYN packet
+    %% 构建 SYN 包
     Packet = aiutp_packet:syn(SeqNR),
     Packet0 = Packet#aiutp_packet{conn_id = ConnId, wnd = WindowSize, seq_nr = SeqNR},
     WrapPacket = #aiutp_packet_wrap{packet = Packet0},
 
-    %% Add to outgoing buffer
+    %% 添加到发送缓冲区
     OutBuf0 = aiutp_buffer:append(WrapPacket, OutBuf),
     Iter = aiutp_buffer:head(OutBuf0),
 
@@ -533,34 +605,34 @@ connect(Socket, ConnIdRecv) ->
     aiutp_net:send_packet(Iter, PCB0).
 
 %%------------------------------------------------------------------------------
-%% @doc Accept inbound connection
+%% @doc 接受入站连接
 %%
-%% Creates a new PCB for an incoming SYN packet and processes it.
+%% 为入站 SYN 包创建新的 PCB 并处理。
 %%
-%% @param Socket The UDP socket reference
-%% @param {Packet, Timestamp} Incoming SYN packet with timestamp
-%% @returns {ConnIdRecv, InitializedPCB}
+%% @param Socket UDP socket 引用
+%% @param {Packet, Timestamp} 带时间戳的入站 SYN 包
+%% @returns {ConnIdRecv, 初始化后的PCB}
 %% @end
 %%------------------------------------------------------------------------------
--spec accept(term(), {#aiutp_packet{}, integer()}) -> {integer(), #aiutp_pcb{}}.
+-spec accept(socket_ref(), {#aiutp_packet{}, non_neg_integer()}) -> {non_neg_integer(), #aiutp_pcb{}}.
 accept(Socket, {#aiutp_packet{conn_id = ConnIdSend}, _} = Packet) ->
     ConnIdRecv = aiutp_util:bit16(ConnIdSend + 1),
     PCB = new(ConnIdRecv, ConnIdSend, Socket),
-    PCB1 = process(Packet, PCB),
+    PCB1 = process_incoming(Packet, PCB),
     {ConnIdRecv, PCB1}.
 
 %%------------------------------------------------------------------------------
-%% @doc Flush pending outgoing data
+%% @doc 刷新待发送的出站数据
 %%
-%% @param PCB Protocol control block
-%% @returns Updated PCB after flushing queue
+%% @param PCB 协议控制块
+%% @returns 刷新队列后的更新 PCB
 %% @end
 %%------------------------------------------------------------------------------
 -spec flush(#aiutp_pcb{}) -> #aiutp_pcb{}.
 flush(PCB) ->
     aiutp_net:flush_queue(PCB).
 
-%% Protocol packet format reference:
+%% 协议包格式参考：
 %%
 %% 0       4       8               16              24              32
 %% +-------+-------+---------------+---------------+---------------+
@@ -575,10 +647,10 @@ flush(PCB) ->
 %% | seq_nr                        | ack_nr                        |
 %% +---------------+---------------+---------------+---------------+
 %%
-%% - timestamp_microseconds: Send timestamp
-%% - timestamp_difference_microseconds: One-way delay (recv - send time)
-%% - wnd_size: Receiver's available buffer space in bytes
+%% - timestamp_microseconds: 发送时间戳
+%% - timestamp_difference_microseconds: 单向延迟（接收时间 - 发送时间）
+%% - wnd_size: 接收方可用缓冲区空间（字节）
 %%
-%% SELECTIVE ACK: Max 4 bytes = 32 packets * 512 bytes = 16KB
-%% Covers range [ack_nr + 2, ack_nr + 2 + 31]
-%% Bit order within each byte is reversed (LSB = lowest seq_nr)
+%% 选择性确认（SACK）：最大 4 字节 = 32 个包 * 512 字节 = 16KB
+%% 覆盖范围 [ack_nr + 2, ack_nr + 2 + 31]
+%% 每字节内的位顺序是反转的（LSB = 最小序列号）

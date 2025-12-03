@@ -36,8 +36,14 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% @doc Register an acceptor waiting for incoming connections
+-spec accept(pid(), {pid(), term()}) -> ok.
 accept(Pid,Acceptor)->
   gen_server:cast(Pid,{accept,Acceptor}).
+
+%% @doc Handle incoming SYN request
+-spec incoming(pid(), term()) -> ok.
 incoming(Pid,Req)->
   gen_server:cast(Pid,Req).
 %%--------------------------------------------------------------------
@@ -183,6 +189,10 @@ format_status(_Opt, Status) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%% @private Accept an incoming connection from pending SYN requests
+-spec accept_incoming({pid(), term()}, #state{}) ->
+    {noreply, #state{}} | {noreply, #state{}, timeout()}.
 accept_incoming(Acceptor,#state{acceptors = Acceptors, syn_len = 0 } = State)->
   {noreply,State#state{acceptors = queue:in(Acceptor,Acceptors) }};
 accept_incoming({Caller,_} = Acceptor,
@@ -201,6 +211,11 @@ accept_incoming({Caller,_} = Acceptor,
       gen_udp:send(Socket,Remote,Bin),
       accept_incoming(Acceptor,State#state{syns = Syns0,syn_len = SynLen -1 })
   end.
+
+%% @private Pair incoming SYN with pending acceptor or queue it
+-spec pair_incoming({inet:ip_address(), inet:port_number()},
+                    {#aiutp_packet{}, integer()}, #state{}) ->
+    {noreply, #state{}} | {noreply, #state{}, timeout()}.
 pair_incoming(Remote,{SYN,_},
               #state{socket = Socket,
                      syn_len = SynLen,

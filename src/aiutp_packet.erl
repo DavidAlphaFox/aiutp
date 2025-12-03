@@ -4,9 +4,15 @@
 -export([decode/1,encode/1]).
 -export([reset/2,syn/1,fin/2,ack/3,ack/2,data/2]).
 
+%% 类型定义
+-type packet_type() :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN.
+-type extension() :: {sack, binary()} | {ext_bits, binary() | undefined}.
+-type extension_list() :: [extension()].
+
 %% Extension types are now defined in aiutp.hrl
 %% EXT_SACK = 1, EXT_EXT_BITS = 2
 
+-spec reset(non_neg_integer(), non_neg_integer()) -> #aiutp_packet{}.
 reset(ConnId,AckNR)->
   #aiutp_packet{type = ?ST_RESET,
                 ack_nr = AckNR,
@@ -14,32 +20,43 @@ reset(ConnId,AckNR)->
                 wnd = 0,
                 extension = [],
                 conn_id = ConnId}.
+
+-spec syn(non_neg_integer()) -> #aiutp_packet{}.
 syn(SeqNR) ->
   #aiutp_packet {type = ?ST_SYN,
                  seq_nr = SeqNR,
                  ack_nr = 0,
                  extension = []}.
+
+-spec fin(non_neg_integer(), non_neg_integer()) -> #aiutp_packet{}.
 fin(SeqNR,AckNR)->
   #aiutp_packet{type = ?ST_FIN,
                 seq_nr = SeqNR,
                 ack_nr = AckNR,
                 extension = []}.
+
+-spec ack(non_neg_integer(), non_neg_integer(), extension_list()) -> #aiutp_packet{}.
 ack(SeqNR,AckNR,Ext)->
   #aiutp_packet {type = ?ST_STATE,
                  seq_nr = SeqNR,
                  ack_nr = AckNR,
                  extension = Ext}.
+
+-spec ack(non_neg_integer(), non_neg_integer()) -> #aiutp_packet{}.
 ack(SeqNR, AckNR) ->
   #aiutp_packet {type = ?ST_STATE,
                  seq_nr = SeqNR,
                  ack_nr = AckNR,
                  extension = []}.
+
+-spec data(non_neg_integer(), non_neg_integer()) -> #aiutp_packet{}.
 data(SeqNR,AckNR)->
   #aiutp_packet{type = ?ST_DATA,
                 seq_nr = SeqNR,
                 ack_nr = AckNR,
                 extension = []}.
 
+-spec decode(binary()) -> {ok, #aiutp_packet{}} | {error, drop}.
 decode(Packet) ->
   try
     case decode_packet(Packet) of
@@ -50,6 +67,7 @@ decode(Packet) ->
     _:_ -> {error,drop}
   end.
 
+-spec decode_packet(binary()) -> #aiutp_packet{} | {error, drop}.
 decode_packet(Packet) ->
   <<Ty:4/big-integer,1:4/big-integer,
     Extension:8/big-integer, ConnectionId:16/big-integer,
@@ -71,6 +89,7 @@ decode_packet(Packet) ->
                            payload = Payload}
   end.
 
+-spec decode_extensions(non_neg_integer(), binary(), extension_list()) -> {extension_list(), binary()}.
 decode_extensions(?EXT_NONE, Payload, Exts) -> {lists:reverse(Exts), Payload};
 decode_extensions(?EXT_SACK, <<Next:8/big-integer,Len:8/big-integer, R/binary>>, Acc) ->
   <<Bits:Len/binary, Rest/binary>> = R,
@@ -80,7 +99,7 @@ decode_extensions(?EXT_EXT_BITS, <<Next:8/big-integer,
   <<ExtBits:Len/binary, Rest/binary>> = R,
   decode_extensions(Next, Rest, [{ext_bits, ExtBits} | Acc]).
 
-
+-spec validate_packet_type(packet_type(), binary()) -> ok.
 validate_packet_type(Ty, Payload) ->
   case Ty of
     ?ST_STATE when Payload == <<>> -> ok;
@@ -91,6 +110,7 @@ validate_packet_type(Ty, Payload) ->
   end.
 
 
+-spec encode(#aiutp_packet{}) -> binary().
 encode(#aiutp_packet{type = Type,
                       conn_id = ConnId,
                       tv_usec = TS,
@@ -110,6 +130,7 @@ encode(#aiutp_packet{type = Type,
     ExtBin/binary,Payload/binary>>.
 
 
+-spec encode_extensions(extension_list()) -> {non_neg_integer(), binary()}.
 encode_extensions([]) -> {?EXT_NONE, <<>>};
 encode_extensions([{sack, Bits} | R]) ->
   {Next, Bin} = encode_extensions(R),

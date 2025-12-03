@@ -3,6 +3,14 @@
 -export([caculate_delay/4,
          caculate_rtt/4]).
 
+%% @doc 计算单向延迟并更新延迟历史
+%% @param Now 当前毫秒时间戳
+%% @param MicroNow 当前微秒时间戳
+%% @param Packet 接收到的数据包
+%% @param PCB 协议控制块
+%% @returns {ActualDelay, UpdatedPCB}
+-spec caculate_delay(integer(), integer(), #aiutp_packet{}, #aiutp_pcb{}) ->
+    {non_neg_integer(), #aiutp_pcb{}}.
 caculate_delay(Now,MicroNow,
                #aiutp_packet{tv_usec = TS, reply_micro = TSDiff},
                #aiutp_pcb{their_hist = TheirHist,our_hist = OurHist,
@@ -83,15 +91,15 @@ caculate_delay(Now,MicroNow,
     end,
   {ActualDelay,PCB0}.
 
-%% caculate_rtt(RTT,RTTVar,TimeSent,MicroNow)->
-%%   ERTT = aiutp_util:bit32(MicroNow - TimeSent) div 1000,
-%%   if RTT == 0 -> {ERTT,ERTT div 2,ERTT};
-%%      true ->
-%%       Delta = RTT - ERTT,
-%%       RTTVar0 = RTTVar + (erlang:abs(Delta) - RTTVar) div 4,
-%%       RTT0 = RTT - RTT div 8 + ERTT div 8,
-%%       {RTT0,RTTVar0,ERTT}
-%%   end.
+%% @doc 计算 RTT 并更新 RTT 变化估计
+%% 使用指数加权移动平均 (EWMA) 算法
+%% @param RTT 当前 RTT 估计值
+%% @param RTTVar 当前 RTT 变化估计值
+%% @param TimeSent 包发送时间（微秒）
+%% @param MicroNow 当前微秒时间戳
+%% @returns {NewRTT, NewRTTVar, MeasuredRTT}
+-spec caculate_rtt(non_neg_integer(), non_neg_integer(), integer(), integer()) ->
+    {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 caculate_rtt(RTT,RTTVar,TimeSent,MicroNow)->
   ERTT = aiutp_util:bit32(MicroNow - TimeSent) div 1000,
   if RTT == 0 -> {ERTT,ERTT div 2,ERTT};
