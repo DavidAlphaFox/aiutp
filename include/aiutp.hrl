@@ -63,19 +63,20 @@
 -define(CS_DESTROY,       'CS_DESTROY').
 
 %%==============================================================================
-%% 第 5 节: 超时参数 (BEP-29)
+%% 第 5 节: 超时参数 (BEP-29 / libutp)
 %%
 %% RTO 计算: timeout = max(rtt + rtt_var * 4, RTO_MIN)
-%% 连续超时时: timeout *= 2（指数退避）
+%% 连续超时时: timeout *= 2（libutp 指数退避）
 %%==============================================================================
 
-%% BEP-29: 最小包超时为 500ms
--define(RTO_MIN, 500).
+%% libutp: 最小 RTO 为 1000ms
+%% 注意: BEP-29 建议 500ms，但 libutp 使用 1000ms
+-define(RTO_MIN, 1000).
 
 %% BEP-29: 最大 RTO（实现相关）
 -define(RTO_MAX, 6000).
 
-%% BEP-29: 任何 RTT 样本之前的初始超时
+%% libutp: 任何 RTT 样本之前的初始超时
 -define(RTO_INITIAL, 1000).
 
 %% 初始 RTT 方差估计（毫秒）
@@ -83,12 +84,12 @@
 %% RTT_VAR 初始值 = (RTO_INITIAL - RTT) / 4 ≈ 250ms
 -define(RTT_VAR_INITIAL, 250).
 
-%% Keep-alive 间隔: 29 秒
-%% 原因: 根据多数家用 NAT 设备测量，用于防止 NAT 超时
+%% libutp: Keep-alive 间隔 29 秒
+%% 用于保持 NAT 映射和检测死连接
 -define(KEEPALIVE_INTERVAL, 29000).
 
 %% 超时检查间隔（毫秒）
--define(TIMEOUT_CHECK_INTERVAL, 150).
+-define(TIMEOUT_CHECK_INTERVAL, 500).
 
 %% RST 信息缓存超时（毫秒）
 -define(RST_INFO_TIMEOUT, 10000).

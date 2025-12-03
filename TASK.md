@@ -22,6 +22,16 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_pcb_timeout 超时处理模块重构（对齐 libutp）
+  - RTO 退避因子: 1.5x → 2x（对齐 libutp/RFC 6298）
+  - SYN_SENT 重试阈值: > 2 → >= 2（对齐 libutp MAX_SYN_RETRIES）
+  - 零窗口探测窗口: MIN_WINDOW_SIZE → PACKET_SIZE（对齐 libutp）
+  - 更新常量 RTO_MIN: 500ms → 1000ms（对齐 libutp）
+  - 更新常量 TIMEOUT_CHECK_INTERVAL: 150ms → 500ms（减少检查频率）
+  - 添加 MAX_SYN_RETRIES (2) 和 MAX_RETRANSMIT_COUNT (4) 常量
+  - 重构为更小的聚焦函数: handle_zero_window_probe, handle_rto_timeout, check_fatal_timeout 等
+  - 添加详细的中文模块文档
+  - 153 个测试全部通过
 - [x] aiutp_delay 延迟估计模块重构
   - 重写模块文档，详细说明 LEDBAT 延迟估计算法
   - 说明核心概念：Base Delay、Current Delay、Queuing Delay
