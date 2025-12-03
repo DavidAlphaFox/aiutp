@@ -24,6 +24,33 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_buffer/aiutp_queue 模块重构
+  - **aiutp_buffer.erl**: 固定大小环形缓冲区重构
+    - 添加详细模块文档（数据结构图、设计原理、主要用途）
+    - 常量重命名：`LAST_INDEX` → `END_INDEX`
+    - 函数重命名：`init_index` → `init_free_list`
+    - 提取辅助函数：
+      - `do_insert/4`: 执行插入操作分发
+      - `insert_at_head/3`: 插入到链表头部
+      - `insert_after/4`: 在指定位置后插入
+      - `delete_head/2`: 删除头部元素
+      - `delete_after/3`: 删除中间或尾部元素
+    - 代码按功能区域组织：创建、查询、修改、内部函数
+    - 所有函数添加 edoc 文档
+  - **aiutp_queue.erl**: 双端队列重构
+    - 添加详细模块文档（主要用途、队列操作图、性能特性）
+    - 代码按功能区域组织：创建、查询、插入、删除
+    - 所有函数添加 edoc 文档和注释
+  - 158 个测试全部通过
+- [x] aiutp_channel closing 状态修复
+  - 修复: closing 状态现在正确等待 FIN 确认
+  - 添加 closing 状态的 packet/timeout 处理
+  - 添加 `handle_packet_closing/2`: 处理 closing 状态数据包
+  - 添加 `handle_timeout_closing/1`: 处理 closing 状态超时
+  - 添加 `do_closing_cleanup/2`: 统一清理逻辑
+  - 修复: blocker 赋值使用 `:=` 而非 `=>`
+  - 添加 closing 状态下的 parent DOWN 处理
+  - 158 个测试全部通过
 - [x] aiutp_rx/aiutp_tx/aiutp_net 模块重构
   - **aiutp_rx.erl**: 接收处理模块重构
     - 添加详细模块文档（接收流程、重排序机制、FIN 处理）

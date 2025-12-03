@@ -1,59 +1,216 @@
+%%------------------------------------------------------------------------------
+%% @doc 双端队列（Deque）封装
+%%
+%% 本模块封装 Erlang 标准库的 queue 模块，提供带大小跟踪的双端队列。
+%% 用于 uTP 协议中的数据缓冲，支持 FIFO 和 LIFO 操作。
+%%
+%% == 主要用途 ==
+%% - inque: 接收队列，存储按序到达的数据载荷
+%% - outque: 发送队列，存储待发送的用户数据
+%%
+%% == 队列操作 ==
+%% ```
+%% FIFO (先进先出):  push_back + pop_front
+%%   [1] -> [1,2] -> [1,2,3] -> pop -> [2,3]
+%%
+%% LIFO (后进先出):  push_back + pop_back
+%%   [1] -> [1,2] -> [1,2,3] -> pop -> [1,2]
+%%
+%% Deque (双端):     push_front/push_back + pop_front/pop_back
+%%   任意端插入和删除
+%% '''
+%%
+%% == 性能特性 ==
+%% - 所有操作均为 O(1) 摊销时间复杂度
+%% - 内部使用 Erlang 的 queue 模块（双列表实现）
+%% - size 字段提供 O(1) 的大小查询（queue:len/1 是 O(n)）
+%%
+%% @author David Gao <david.alpha.fox@gmail.com>
+%% @end
+%%------------------------------------------------------------------------------
 -module(aiutp_queue).
 
--export([new/0,
-         size/1,
-         pop_front/1,
-         pop_back/1,
-         push_front/2,
-         push_back/2,
-         front/1,
-         back/1,
-         empty/1,
-         to_list/1]).
+%%==============================================================================
+%% API 导出
+%%==============================================================================
+-export([
+    new/0,          %% 创建空队列
+    size/1,         %% 获取队列大小
+    empty/1,        %% 检查是否为空
+    push_front/2,   %% 从头部插入
+    push_back/2,    %% 从尾部插入
+    pop_front/1,    %% 从头部弹出
+    pop_back/1,     %% 从尾部弹出
+    front/1,        %% 查看头部元素
+    back/1,         %% 查看尾部元素
+    to_list/1       %% 转换为列表
+]).
 
 -export_type([aiutp_queue/0, aiutp_queue/1]).
 
--record(aiutp_queue, {queue = queue:new() :: queue:queue(),
-                      size = 0 :: non_neg_integer()}).
+%%==============================================================================
+%% 类型定义
+%%==============================================================================
 
+%% 队列记录
+-record(aiutp_queue, {
+    queue = queue:new() :: queue:queue(),   %% 底层 queue
+    size = 0 :: non_neg_integer()           %% 元素数量
+}).
+
+%% 无类型参数的队列
 -opaque aiutp_queue() :: #aiutp_queue{}.
+
+%% 带类型参数的队列
 -opaque aiutp_queue(T) :: #aiutp_queue{queue :: queue:queue(T)}.
 
+%%==============================================================================
+%% API 函数 - 创建
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @doc 创建空队列
+%%
+%% @returns 新的空队列
+%% @end
+%%------------------------------------------------------------------------------
 -spec new() -> aiutp_queue().
-new() -> #aiutp_queue{}.
+new() ->
+    #aiutp_queue{}.
 
+%%==============================================================================
+%% API 函数 - 查询
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @doc 获取队列大小
+%%
+%% O(1) 时间复杂度，比 queue:len/1 的 O(n) 更高效。
+%%
+%% @param Queue 队列
+%% @returns 元素数量
+%% @end
+%%------------------------------------------------------------------------------
 -spec size(aiutp_queue()) -> non_neg_integer().
-size(Queue) -> Queue#aiutp_queue.size.
+size(#aiutp_queue{size = Size}) ->
+    Size.
 
+%%------------------------------------------------------------------------------
+%% @doc 检查队列是否为空
+%%
+%% @param Queue 队列
+%% @returns true 如果为空，否则 false
+%% @end
+%%------------------------------------------------------------------------------
+-spec empty(aiutp_queue()) -> boolean().
+empty(#aiutp_queue{size = 0}) ->
+    true;
+empty(_) ->
+    false.
+
+%%------------------------------------------------------------------------------
+%% @doc 查看头部元素（不移除）
+%%
+%% 注意：对空队列调用会抛出异常。
+%%
+%% @param Queue 队列
+%% @returns 头部元素
+%% @end
+%%------------------------------------------------------------------------------
+-spec front(aiutp_queue()) -> term().
+front(#aiutp_queue{queue = Q}) ->
+    queue:get(Q).
+
+%%------------------------------------------------------------------------------
+%% @doc 查看尾部元素（不移除）
+%%
+%% 注意：对空队列调用会抛出异常。
+%%
+%% @param Queue 队列
+%% @returns 尾部元素
+%% @end
+%%------------------------------------------------------------------------------
+-spec back(aiutp_queue()) -> term().
+back(#aiutp_queue{queue = Q}) ->
+    queue:get_r(Q).
+
+%%------------------------------------------------------------------------------
+%% @doc 将队列转换为列表
+%%
+%% 保持元素顺序：头部在前，尾部在后。
+%%
+%% @param Queue 队列
+%% @returns 元素列表
+%% @end
+%%------------------------------------------------------------------------------
+-spec to_list(aiutp_queue()) -> [term()].
+to_list(#aiutp_queue{queue = Q}) ->
+    queue:to_list(Q).
+
+%%==============================================================================
+%% API 函数 - 插入
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @doc 在队列尾部插入元素
+%%
+%% 用于 FIFO 模式的入队操作。
+%%
+%% @param Val 要插入的值
+%% @param Queue 队列
+%% @returns 更新后的队列
+%% @end
+%%------------------------------------------------------------------------------
+-spec push_back(term(), aiutp_queue()) -> aiutp_queue().
+push_back(Val, #aiutp_queue{queue = Q, size = Size} = Queue) ->
+    Q2 = queue:in(Val, Q),
+    Queue#aiutp_queue{queue = Q2, size = Size + 1}.
+
+%%------------------------------------------------------------------------------
+%% @doc 在队列头部插入元素
+%%
+%% 用于需要优先处理的元素。
+%%
+%% @param Val 要插入的值
+%% @param Queue 队列
+%% @returns 更新后的队列
+%% @end
+%%------------------------------------------------------------------------------
+-spec push_front(term(), aiutp_queue()) -> aiutp_queue().
+push_front(Val, #aiutp_queue{queue = Q, size = Size} = Queue) ->
+    Q2 = queue:in_r(Val, Q),
+    Queue#aiutp_queue{queue = Q2, size = Size + 1}.
+
+%%==============================================================================
+%% API 函数 - 删除
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @doc 从队列头部弹出元素
+%%
+%% 用于 FIFO 模式的出队操作。
+%% 注意：对空队列调用会抛出异常。
+%%
+%% @param Queue 队列
+%% @returns 更新后的队列（不包含被弹出的元素）
+%% @end
+%%------------------------------------------------------------------------------
 -spec pop_front(aiutp_queue()) -> aiutp_queue().
 pop_front(#aiutp_queue{queue = Q, size = Size} = Queue) ->
-  Q2 = queue:drop(Q),
-  Queue#aiutp_queue{queue = Q2, size = Size - 1}.
+    Q2 = queue:drop(Q),
+    Queue#aiutp_queue{queue = Q2, size = Size - 1}.
 
+%%------------------------------------------------------------------------------
+%% @doc 从队列尾部弹出元素
+%%
+%% 用于 LIFO 模式的出栈操作。
+%% 注意：对空队列调用会抛出异常。
+%%
+%% @param Queue 队列
+%% @returns 更新后的队列（不包含被弹出的元素）
+%% @end
+%%------------------------------------------------------------------------------
 -spec pop_back(aiutp_queue()) -> aiutp_queue().
 pop_back(#aiutp_queue{queue = Q, size = Size} = Queue) ->
-  Q2 = queue:drop_r(Q),
-  Queue#aiutp_queue{queue = Q2, size = Size - 1}.
-
--spec push_back(term(), aiutp_queue()) -> aiutp_queue().
-push_back(Val,#aiutp_queue{queue = Q, size = Size}= Queue) ->
-  Q2 = queue:in(Val, Q),
-  Queue#aiutp_queue{queue = Q2, size = Size + 1}.
-
--spec push_front(term(), aiutp_queue()) -> aiutp_queue().
-push_front(Val,#aiutp_queue{queue = Q, size = Size}= Queue) ->
-  Q2 = queue:in_r(Val, Q),
-  Queue#aiutp_queue{queue = Q2, size = Size + 1}.
-
--spec empty(aiutp_queue()) -> boolean().
-empty(#aiutp_queue{size = Size}) when Size =:= 0 -> true;
-empty(_) -> false.
-
--spec front(aiutp_queue()) -> term().
-front(#aiutp_queue{queue = Q}) -> queue:get(Q).
-
--spec back(aiutp_queue()) -> term().
-back(#aiutp_queue{queue = Q})-> queue:get_r(Q).
-
--spec to_list(aiutp_queue()) -> [term()].
-to_list(#aiutp_queue{queue  = Q}) -> queue:to_list(Q).
+    Q2 = queue:drop_r(Q),
+    Queue#aiutp_queue{queue = Q2, size = Size - 1}.
