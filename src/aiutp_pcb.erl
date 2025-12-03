@@ -316,11 +316,11 @@ process_ack_and_sack(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
                                 fin_sent_acked = FinSentAcked,
                                 recv_time = RecvTime} = PCB) ->
     %% 从发送缓冲区提取已确认的包
-    {AckedPackets, SAckedPackets, PCB0} = aiutp_tx:pick_acked(Packet, PCB),
+    {AckedPackets, SAckedPackets, PCB0} = aiutp_tx:extract_acked(Packet, PCB),
 
     %% BEP-29：更新被 SACK 跳过的包的跳过计数
     %% 从扩展中提取 SACK 序列号
-    SAckedSeqs = aiutp_tx:map_sack_to_seq(Exts, aiutp_util:bit16(PktAckNR + 2)),
+    SAckedSeqs = aiutp_tx:parse_sack_extension(Exts, aiutp_util:bit16(PktAckNR + 2)),
     {_SkippedCount, PCB0a} = aiutp_tx:update_skip_counts(SAckedSeqs, PCB0),
 
     %% 计算已确认字节总数和最小 RTT

@@ -24,6 +24,63 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_rx/aiutp_tx/aiutp_net 模块重构
+  - **aiutp_rx.erl**: 接收处理模块重构
+    - 添加详细模块文档（接收流程、重排序机制、FIN 处理）
+    - 函数重命名：`recv` → `deliver_in_order`, `recv_reorder` → `buffer_out_of_order`
+    - 提取辅助函数：
+      - `maybe_handle_fin_reached/1`: FIN 状态检查
+      - `maybe_deliver_buffered/1`: 缓冲区后续包交付
+      - `insert_into_reorder_buffer/4`: 有序插入缓冲区
+    - 添加常量：`MAX_REORDER_DISTANCE` (0x3FFF)
+  - **aiutp_tx.erl**: 发送处理模块重构
+    - 添加详细模块文档（ACK 处理、SACK 解析、快速重传）
+    - 函数重命名：
+      - `pick_acked` → `extract_acked`（保留兼容别名）
+      - `map_sack_to_seq` → `parse_sack_extension`（保留兼容别名）
+    - 提取辅助函数：
+      - `count_acked_packets/2`: 统计 ACK 包数量
+      - `calculate_cur_window_packets/1`: 计算当前窗口包数
+      - `extract_acked_packets/4`: 提取已确认包
+      - `parse_sack_bitmap/3`: 解析 SACK 位图
+      - `parse_sack_byte/3`: 解析单字节 SACK
+      - `extract_sacked_packets/3`: 提取 SACK 确认的包
+      - `update_skip_counts_loop/3`: 循环更新跳过计数
+  - **aiutp_net.erl**: 网络 I/O 模块重构
+    - 添加详细模块文档（发送流程、窗口管理、SACK 构建）
+    - 代码按功能区域组织：ACK 发送、数据发送、窗口管理、队列刷新、UDP 发送
+    - 添加常量：`UDP_SEND_RETRIES` (3), `UDP_SEND_RETRY_DELAY` (150ms)
+    - 提取辅助函数：
+      - `flush_packets_loop/1`: 刷新包循环
+      - `do_flush_queue/1`: 实际刷新队列
+      - `send_queued_data/1`: 发送队列数据
+      - `send_data_chunk/3`, `send_data_chunk_small/3`: 发送数据块
+      - `fill_from_queue/3`, `fill_from_queue_loop/5`: 填充发送数据
+      - `send_new_packet/2`, `send_n_packets_loop/5`: 发送新包
+      - `prepare_packet_for_send/5`: 准备发送包
+      - `build_sack/1`, `build_sack_bitmap/5`, `finalize_sack_bitmap/1`: SACK 构建
+      - `do_send_with_retry/4`: 带重试的 UDP 发送
+  - **aiutp_pcb.erl**: 更新函数调用
+    - `aiutp_tx:pick_acked` → `aiutp_tx:extract_acked`
+    - `aiutp_tx:map_sack_to_seq` → `aiutp_tx:parse_sack_extension`
+  - 158 个测试全部通过
+- [x] aiutp_rtt 模块重构
+  - 添加详细的模块文档（RTT 估计、延迟估计、时钟漂移检测）
+  - 修正函数命名：`caculate_delay` → `calculate_delay`, `caculate_rtt` → `calculate_rtt`
+  - 保留旧名称作为向后兼容别名
+  - 拆分 `calculate_delay/4` 为多个小函数：
+    - `compute_their_delay/2`: 计算对端延迟
+    - `extract_our_delay/1`: 提取我方延迟
+    - `update_delay_histories/4`: 更新延迟历史
+    - `maybe_sync_our_hist/3`: 同步 our_hist
+    - `update_delay_statistics/6`: 更新延迟统计
+    - `update_average_delay_stats/6`: 更新 average_delay
+    - `compute_delay_sample/2`: 计算延迟样本偏差
+    - `compute_average_delay/5`: 计算 average_delay 和 clock_drift
+    - `compute_base_adjust/2`: 计算基准调整值
+  - 添加常量定义：`AVERAGE_DELAY_SAMPLE_INTERVAL`, `DELAY_BASE_SHIFT_THRESHOLD`
+  - 所有函数添加 edoc 文档和类型规范
+  - 158 个测试全部通过
 - [x] 删除 aiutp_socket 向后兼容别名
   - 移除 `add_conn/3` 和 `free_conn/3` 导出
   - 移除 `handle_call` 中对 `{add_conn, ...}` 和 `{free_conn, ...}` 的处理

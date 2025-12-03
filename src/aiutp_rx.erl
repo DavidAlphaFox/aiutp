@@ -1,84 +1,245 @@
+%%------------------------------------------------------------------------------
+%% @doc uTP 接收处理模块
+%%
+%% 本模块负责处理入站数据包的接收和重排序，确保数据按序交付给上层。
+%%
+%% == 接收流程 ==
+%% ```
+%% 入站数据包 → process_incoming/2 (aiutp_pcb)
+%%            → handle_data_and_fin/2 (aiutp_pcb)
+%%            → in/2 (本模块)
+%%            → 按序到达? ─Yes→ deliver_in_order/2 → inque
+%%                        └No─→ buffer_out_of_order/3 → inbuf (重排序缓冲区)
+%% '''
+%%
+%% == 重排序机制 ==
+%% uTP 使用 16 位序列号，接收方维护：
+%% - ack_nr: 已确认的最后序列号（所有 <= ack_nr 的包都已收到）
+%% - inbuf: 乱序包缓冲区（按序列号排序）
+%% - reorder_count: 缓冲区中的包数量
+%%
+%% 当乱序包到达时：
+%% 1. 检查序列号是否在可接受范围内
+%% 2. 插入到 inbuf 中的正确位置（保持有序）
+%% 3. 当缺失的包到达时，递归处理缓冲区中的后续包
+%%
+%% == FIN 处理 ==
+%% 当收到 FIN 包（got_fin = true）时：
+%% - 记录 eof_pkt = FIN 的序列号
+%% - 继续接收直到 ack_nr == eof_pkt
+%% - 此时设置 got_fin_reached = true，表示所有数据已收到
+%%
+%% @author David Gao <david.alpha.fox@gmail.com>
+%% @copyright (C) 2020, David Gao
+%% @end
+%%------------------------------------------------------------------------------
 -module(aiutp_rx).
 -include("aiutp.hrl").
+
+%%==============================================================================
+%% API 导出
+%%==============================================================================
 -export([in/2]).
 
+%%==============================================================================
+%% 常量定义
+%%==============================================================================
+
+%% 最大重排序距离（序列号差值）
+%% 超过此距离的包被认为无效或过期
+-define(MAX_REORDER_DISTANCE, 16#3FFF).
+
+%%==============================================================================
+%% API 函数
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
 %% @doc 处理接收到的数据包
-%% 将数据包按序列号排序后放入接收队列或重排序缓冲区
+%%
+%% 根据包的序列号决定处理方式：
+%% - 如果是期望的下一个包（seq_nr == ack_nr + 1），直接交付
+%% - 如果是乱序包，放入重排序缓冲区
+%%
+%% 处理完成后设置 ida = true，表示需要发送 ACK。
+%%
 %% @param Packet 接收到的数据包
 %% @param PCB 协议控制块
-%% @returns 更新后的 PCB
+%% @returns 更新后的 PCB（ida = true）
+%% @end
+%%------------------------------------------------------------------------------
 -spec in(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
 in(#aiutp_packet{seq_nr = PktSeqNR} = Packet,
-   #aiutp_pcb{ack_nr = AckNR} = PCB)->
-  NextAckNR  = aiutp_util:bit16(AckNR + 1),
-  PCB1 =
-    if PktSeqNR == NextAckNR  -> recv(Packet,PCB#aiutp_pcb{ack_nr = PktSeqNR});
-       true->  recv_reorder(aiutp_util:bit16(PktSeqNR - NextAckNR),Packet,PCB)
+   #aiutp_pcb{ack_nr = AckNR} = PCB) ->
+    ExpectedSeqNR = aiutp_util:bit16(AckNR + 1),
+    PCB1 = case PktSeqNR == ExpectedSeqNR of
+        true ->
+            %% 按序到达，直接交付
+            deliver_in_order(Packet, PCB#aiutp_pcb{ack_nr = PktSeqNR});
+        false ->
+            %% 乱序到达，放入重排序缓冲区
+            SeqDistance = aiutp_util:bit16(PktSeqNR - ExpectedSeqNR),
+            buffer_out_of_order(SeqDistance, Packet, PCB)
     end,
-  PCB1#aiutp_pcb{ida = true}.
+    %% 设置立即 ACK 标志
+    PCB1#aiutp_pcb{ida = true}.
 
-%% @private 处理按序到达的数据包
--spec recv(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
-recv(Packet,#aiutp_pcb{time=Now,inque = InQ,
-                       got_fin_reached = GotFinReached,
-                       got_fin = GotFin,
-                       eof_pkt = EOFPkt,
-                       ack_nr = AckNR,
-                       rto  = RTO} = PCB)->
+%%==============================================================================
+%% 内部函数 - 按序交付
+%%==============================================================================
 
-  InQ0 = aiutp_queue:push_back(Packet#aiutp_packet.payload, InQ),
-  PCB1 =
-    if (GotFinReached == false) and
-       (GotFin == true) and
-       (EOFPkt == AckNR) ->
-        PCB0 = PCB#aiutp_pcb{inque = InQ0,
-                             got_fin_reached = true,
-                             rto_timeout = Now + erlang:min((RTO * 3),60),
-                             reorder_count = 0,
-                             inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)},
-        aiutp_net:send_ack(PCB0);
-       true -> PCB#aiutp_pcb{inque = InQ0}
-    end,
-  if PCB1#aiutp_pcb.reorder_count == 0 -> PCB1;
-     true ->
-      #aiutp_pcb{inbuf = InBuf,reorder_count = ReorderCount} = PCB1,
-      Iter = aiutp_buffer:head(InBuf),
-      Packet0 = aiutp_buffer:data(Iter, InBuf),
-      NextAckNR = aiutp_util:bit16(AckNR + 1),
-      if Packet0#aiutp_packet.seq_nr == NextAckNR ->
-          recv(Packet0,PCB1#aiutp_pcb{
-                         inbuf = aiutp_buffer:pop(InBuf),
-                         reorder_count = ReorderCount -1 ,
-                         ack_nr  = NextAckNR});
-         true -> PCB1
-      end
-  end.
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理按序到达的数据包
+%%
+%% 1. 将数据推入接收队列 (inque)
+%% 2. 检查是否达到 FIN（所有数据已收到）
+%% 3. 检查重排序缓冲区中是否有后续包可以交付
+%%------------------------------------------------------------------------------
+-spec deliver_in_order(#aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
+deliver_in_order(Packet, #aiutp_pcb{inque = InQue} = PCB) ->
+    %% 将载荷推入接收队列
+    InQue1 = aiutp_queue:push_back(Packet#aiutp_packet.payload, InQue),
+    PCB1 = PCB#aiutp_pcb{inque = InQue1},
 
-%% @private 处理乱序到达的数据包（放入重排序缓冲区）
--spec recv_reorder(non_neg_integer(), #aiutp_packet{}, #aiutp_pcb{}) -> #aiutp_pcb{}.
-recv_reorder(DiffSeq,#aiutp_packet{seq_nr = PktSeqNR} = Packet,
-             #aiutp_pcb{got_fin = GotFin,eof_pkt = EOFPkt,inbuf = InBuf} = PCB)->
-  if (GotFin == true) and
-     (?WRAPPING_DIFF_16(EOFPkt, PktSeqNR) < 0) -> PCB;
-     DiffSeq > 16#3FFF -> PCB;
-     true ->
-      Iter = aiutp_buffer:head(InBuf),
-      recv_reorder(Packet,Iter,-1,PCB)
-  end.
+    %% 检查是否达到 FIN
+    PCB2 = maybe_handle_fin_reached(PCB1),
 
-%% @private 在重排序缓冲区中插入数据包（保持有序）
--spec recv_reorder(#aiutp_packet{}, integer(), integer(), #aiutp_pcb{}) -> #aiutp_pcb{}.
-recv_reorder(Packet,-1,_,
-             #aiutp_pcb{inbuf = InBuf,reorder_count = ReorderCount} = PCB)->
-  PCB#aiutp_pcb{inbuf = aiutp_buffer:append(Packet, InBuf),
-                reorder_count = ReorderCount + 1};
-recv_reorder(Packet,Iter,Prev,
-             #aiutp_pcb{inbuf = InBuf,reorder_count = ReorderCount} = PCB)->
-  Packet0 = aiutp_buffer:data(Iter,InBuf),
-  if Packet0#aiutp_packet.seq_nr == Packet#aiutp_packet.seq_nr -> PCB;
-     ?WRAPPING_DIFF_16(Packet0#aiutp_packet.seq_nr, Packet#aiutp_packet.seq_nr) > 0 ->
-      PCB#aiutp_pcb{inbuf = aiutp_buffer:insert(Prev,Packet, InBuf),reorder_count = ReorderCount + 1};
-     true->
-      Next = aiutp_buffer:next(Iter, InBuf),
-      recv_reorder(Packet,Next,Iter,PCB)
-  end.
+    %% 尝试交付重排序缓冲区中的后续包
+    maybe_deliver_buffered(PCB2).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查是否达到 FIN 状态
+%%
+%% 当以下条件同时满足时，设置 got_fin_reached = true：
+%% - got_fin = true（已收到 FIN 包）
+%% - ack_nr == eof_pkt（FIN 之前的所有包都已收到）
+%%------------------------------------------------------------------------------
+-spec maybe_handle_fin_reached(#aiutp_pcb{}) -> #aiutp_pcb{}.
+maybe_handle_fin_reached(#aiutp_pcb{got_fin_reached = true} = PCB) ->
+    %% 已经处理过 FIN
+    PCB;
+maybe_handle_fin_reached(#aiutp_pcb{got_fin = false} = PCB) ->
+    %% 还没收到 FIN
+    PCB;
+maybe_handle_fin_reached(#aiutp_pcb{got_fin = true,
+                                     eof_pkt = EOFPkt,
+                                     ack_nr = AckNR,
+                                     time = Now,
+                                     rto = RTO} = PCB) ->
+    case EOFPkt == AckNR of
+        true ->
+            %% FIN 之前的所有包都已收到
+            %% 设置一个短超时，然后发送最终 ACK
+            PCB1 = PCB#aiutp_pcb{
+                got_fin_reached = true,
+                rto_timeout = Now + erlang:min(RTO * 3, 60),
+                reorder_count = 0,
+                inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)
+            },
+            aiutp_net:send_ack(PCB1);
+        false ->
+            PCB
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 尝试从重排序缓冲区交付后续包
+%%
+%% 检查缓冲区头部的包是否是期望的下一个包，
+%% 如果是则递归交付，直到遇到缺口或缓冲区为空。
+%%------------------------------------------------------------------------------
+-spec maybe_deliver_buffered(#aiutp_pcb{}) -> #aiutp_pcb{}.
+maybe_deliver_buffered(#aiutp_pcb{reorder_count = 0} = PCB) ->
+    %% 缓冲区为空
+    PCB;
+maybe_deliver_buffered(#aiutp_pcb{inbuf = InBuf,
+                                   reorder_count = ReorderCount,
+                                   ack_nr = AckNR} = PCB) ->
+    Iter = aiutp_buffer:head(InBuf),
+    BufferedPacket = aiutp_buffer:data(Iter, InBuf),
+    ExpectedSeqNR = aiutp_util:bit16(AckNR + 1),
+
+    case BufferedPacket#aiutp_packet.seq_nr == ExpectedSeqNR of
+        true ->
+            %% 缓冲区头部就是下一个期望的包
+            PCB1 = PCB#aiutp_pcb{
+                inbuf = aiutp_buffer:pop(InBuf),
+                reorder_count = ReorderCount - 1,
+                ack_nr = ExpectedSeqNR
+            },
+            %% 递归交付
+            deliver_in_order(BufferedPacket, PCB1);
+        false ->
+            %% 还有缺口，停止交付
+            PCB
+    end.
+
+%%==============================================================================
+%% 内部函数 - 乱序缓冲
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理乱序到达的数据包
+%%
+%% 验证包是否有效，然后插入到重排序缓冲区。
+%%
+%% 无效情况：
+%% - 已收到 FIN 且包序列号超过 FIN
+%% - 序列号距离超过最大重排序距离
+%%------------------------------------------------------------------------------
+-spec buffer_out_of_order(non_neg_integer(), #aiutp_packet{}, #aiutp_pcb{}) ->
+    #aiutp_pcb{}.
+buffer_out_of_order(SeqDistance, _, PCB) when SeqDistance > ?MAX_REORDER_DISTANCE ->
+    %% 序列号距离过大，丢弃
+    PCB;
+buffer_out_of_order(_, #aiutp_packet{seq_nr = PktSeqNR},
+                    #aiutp_pcb{got_fin = true, eof_pkt = EOFPkt} = PCB)
+  when ?WRAPPING_DIFF_16(EOFPkt, PktSeqNR) < 0 ->
+    %% 包序列号超过 FIN，丢弃
+    PCB;
+buffer_out_of_order(_, Packet, #aiutp_pcb{inbuf = InBuf} = PCB) ->
+    %% 插入到重排序缓冲区
+    Iter = aiutp_buffer:head(InBuf),
+    insert_into_reorder_buffer(Packet, Iter, -1, PCB).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 将包插入到重排序缓冲区（保持有序）
+%%
+%% 遍历缓冲区找到正确的插入位置：
+%% - 如果找到相同序列号的包，丢弃（重复）
+%% - 如果找到更大序列号的包，在其前面插入
+%% - 如果遍历到末尾，追加到末尾
+%%------------------------------------------------------------------------------
+-spec insert_into_reorder_buffer(#aiutp_packet{}, integer(), integer(), #aiutp_pcb{}) ->
+    #aiutp_pcb{}.
+insert_into_reorder_buffer(Packet, -1, _Prev,
+                           #aiutp_pcb{inbuf = InBuf, reorder_count = ReorderCount} = PCB) ->
+    %% 遍历到末尾，追加
+    PCB#aiutp_pcb{
+        inbuf = aiutp_buffer:append(Packet, InBuf),
+        reorder_count = ReorderCount + 1
+    };
+insert_into_reorder_buffer(Packet, Iter, Prev,
+                           #aiutp_pcb{inbuf = InBuf, reorder_count = ReorderCount} = PCB) ->
+    BufferedPacket = aiutp_buffer:data(Iter, InBuf),
+    BufferedSeqNR = BufferedPacket#aiutp_packet.seq_nr,
+    PacketSeqNR = Packet#aiutp_packet.seq_nr,
+
+    if
+        BufferedSeqNR == PacketSeqNR ->
+            %% 重复包，丢弃
+            PCB;
+        ?WRAPPING_DIFF_16(BufferedSeqNR, PacketSeqNR) > 0 ->
+            %% 找到更大序列号的包，在其前面插入
+            PCB#aiutp_pcb{
+                inbuf = aiutp_buffer:insert(Prev, Packet, InBuf),
+                reorder_count = ReorderCount + 1
+            };
+        true ->
+            %% 继续遍历
+            Next = aiutp_buffer:next(Iter, InBuf),
+            insert_into_reorder_buffer(Packet, Next, Iter, PCB)
+    end.

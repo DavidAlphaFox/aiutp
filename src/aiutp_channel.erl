@@ -558,22 +558,44 @@ connected(info, _Msg, _Data) ->
 %%==============================================================================
 %% 状态: closing
 %%
-%% 连接正在关闭，清理资源后停止进程。
+%% 连接正在关闭。两种情况：
+%% - PCB 已是 CS_DESTROY/CS_RESET: 立即清理并停止
+%% - 否则: 继续处理数据包和超时，等待 FIN 被确认
 %%==============================================================================
 
-closing(enter, _OldState, Data) ->
-    handle_closing_enter(Data);
+closing(enter, _OldState, #{pcb := PCB} = Data) ->
+    case aiutp_pcb:state(PCB) of
+        State when State =:= ?CS_DESTROY; State =:= ?CS_RESET ->
+            %% PCB 已关闭，立即清理
+            handle_closing_enter(Data);
+        _ ->
+            %% 等待 FIN 确认，保持定时器运行
+            keep_state_and_data
+    end;
+
+%% 处理收到的数据包 (等待 FIN ACK)
+closing(cast, {packet, PacketInfo}, Data) ->
+    handle_packet_closing(PacketInfo, Data);
+
+%% 超时检查 (等待 FIN 重传)
+closing(info, {timeout, TRef, tick}, #{tick_timer := TRef} = Data) ->
+    handle_timeout_closing(Data);
 
 %% 所有调用返回 closed 错误
 closing({call, From}, _Request, _Data) ->
     {keep_state_and_data, [{reply, From, {error, closed}}]};
 
-%% 忽略所有 cast 消息
-closing(cast, _Msg, _Data) ->
+%% 父进程崩溃
+closing(info, {'DOWN', MRef, process, Parent, _Reason},
+        #{parent := Parent, parent_monitor := MRef} = Data) ->
+    do_closing_cleanup(Data, crash);
+
+%% 忽略其他 info 消息 (包括过期的定时器消息)
+closing(info, _Msg, _Data) ->
     keep_state_and_data;
 
-%% 忽略所有 info 消息
-closing(info, _Msg, _Data) ->
+%% 忽略其他 cast 消息
+closing(cast, _Msg, _Data) ->
     keep_state_and_data.
 
 %%==============================================================================
@@ -736,6 +758,39 @@ handle_timeout_connected(#{pcb := PCB} = Data) ->
             {keep_state, Data#{pcb := PCB1, tick_timer := Timer}}
     end.
 
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理 closing 状态下收到的数据包
+%%
+%% 继续处理数据包以接收 FIN 的 ACK。
+%% 当 PCB 进入 CS_DESTROY/CS_RESET 时完成关闭。
+%%------------------------------------------------------------------------------
+handle_packet_closing({Packet, _RecvTime}, #{pcb := PCB} = Data) ->
+    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
+    case aiutp_pcb:state(PCB1) of
+        State when State =:= ?CS_DESTROY; State =:= ?CS_RESET ->
+            do_closing_cleanup(Data#{pcb := PCB1}, normal);
+        _ ->
+            {keep_state, Data#{pcb := PCB1}}
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理 closing 状态下的超时
+%%
+%% 继续处理超时以触发 FIN 重传。
+%% 当 PCB 超时关闭时完成清理。
+%%------------------------------------------------------------------------------
+handle_timeout_closing(#{pcb := PCB} = Data) ->
+    PCB1 = aiutp_pcb:check_timeouts(PCB),
+    case aiutp_pcb:closed(PCB1) of
+        {closed, Reason} ->
+            do_closing_cleanup(Data#{pcb := PCB1}, Reason);
+        not_closed ->
+            Timer = start_tick_timer(),
+            {keep_state, Data#{pcb := PCB1, tick_timer := Timer}}
+    end.
+
 %%==============================================================================
 %% 内部函数 - 进程崩溃处理
 %%==============================================================================
@@ -775,6 +830,10 @@ handle_controller_down(#{pcb := PCB} = Data) ->
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc 处理 close 请求
+%%
+%% 两种情况：
+%% - PCB 立即进入 CS_DESTROY/CS_RESET: 立即回复 ok 并进入 closing
+%% - 否则: 等待 FIN 被确认，暂不回复调用者
 %%------------------------------------------------------------------------------
 handle_close(From, #{pcb := PCB, controller_monitor := ControllerMonitor} = Data) ->
     PCB1 = aiutp_pcb:close(PCB),
@@ -790,28 +849,46 @@ handle_close(From, #{pcb := PCB, controller_monitor := ControllerMonitor} = Data
             },
             {next_state, closing, NewData, [{reply, From, ok}]};
         _ ->
-            %% 等待 FIN 确认
+            %% 等待 FIN 确认，不立即回复
             NewData = Data#{
                 pcb := PCB1,
-                blocker => From
+                blocker := From
             },
             {next_state, closing, NewData}
     end.
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 处理进入 closing 状态
+%% @doc 处理进入 closing 状态（立即关闭情况）
+%%
+%% 仅当 PCB 已经是 CS_DESTROY/CS_RESET 时调用。
+%% 执行资源清理并停止进程。
 %%------------------------------------------------------------------------------
-handle_closing_enter(#{parent := Parent,
-                       controller := Controller,
-                       active := Active} = Data) ->
+handle_closing_enter(Data) ->
+    do_closing_cleanup(Data, normal).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 执行 closing 清理并停止进程
+%%
+%% 统一的清理逻辑，处理：
+%% - 取消定时器
+%% - 回复阻塞的调用者
+%% - 通知 controller
+%% - 释放连接 ID
+%% - 停止进程
+%%------------------------------------------------------------------------------
+do_closing_cleanup(Data, Reason) ->
     %% 取消定时器
     cancel_tick_timer(maps:get(tick_timer, Data, undefined)),
 
     %% 获取连接信息
+    Parent = maps:get(parent, Data),
     Remote = maps:get(remote, Data, undefined),
     ConnId = maps:get(conn_id, Data, undefined),
     Blocker = maps:get(blocker, Data, undefined),
+    Controller = maps:get(controller, Data, undefined),
+    Active = maps:get(active, Data, false),
 
     %% 回复阻塞的调用者
     Actions = case Blocker of
@@ -820,7 +897,7 @@ handle_closing_enter(#{parent := Parent,
     end,
 
     %% 通知 controller
-    notify_controller_if_active(Controller, Active, Data, normal),
+    notify_controller_if_active(Controller, Active, Data, Reason),
 
     %% 释放连接 ID
     release_conn_id(Parent, Remote, ConnId),
