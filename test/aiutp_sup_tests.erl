@@ -19,12 +19,15 @@ child_ids_spelling_test() ->
     %% Extract child IDs
     ChildIds = [maps:get(id, Spec) || Spec <- ChildSpecs],
 
-    %% Verify expected child IDs exist
+    %% aiutp_sup now only has aiutp_socket_sup as child (simple_one_for_one)
+    %% aiutp_channel_sup is now a child of aiutp_socket_sup
     ?assert(lists:member(aiutp_socket_sup, ChildIds)),
-    ?assert(lists:member(aiutp_channel_sup, ChildIds)),
 
     %% Verify old worker_sup is removed
-    ?assertNot(lists:member(aiutp_worker_sup, ChildIds)).
+    ?assertNot(lists:member(aiutp_worker_sup, ChildIds)),
+
+    %% Verify channel_sup is NOT a direct child of aiutp_sup anymore
+    ?assertNot(lists:member(aiutp_channel_sup, ChildIds)).
 
 child_specs_modules_match_test() ->
     %% Verify that the 'id' and 'modules' fields are consistent
@@ -52,8 +55,26 @@ supervisor_flags_test() ->
     %% Verify supervisor flags are reasonable
     {ok, {SupFlags, _ChildSpecs}} = aiutp_sup:init([]),
 
-    %% rest_for_one: if socket_sup crashes, channel_sup restarts too
-    %% but if channel_sup crashes, socket_sup continues working
-    ?assertEqual(rest_for_one, maps:get(strategy, SupFlags)),
+    %% New structure uses simple_one_for_one to spawn socket_sup instances
+    %% Each socket_sup (one_for_all) manages socket + channel_sup
+    ?assertEqual(simple_one_for_one, maps:get(strategy, SupFlags)),
     ?assert(maps:get(intensity, SupFlags) >= 1),
     ?assert(maps:get(period, SupFlags) >= 1).
+
+%%==============================================================================
+%% Test: aiutp_socket_sup structure
+%%==============================================================================
+
+socket_sup_structure_test() ->
+    %% Verify aiutp_socket_sup has both socket and channel_sup as children
+    {ok, {SupFlags, ChildSpecs}} = aiutp_socket_sup:init([0, []]),
+
+    %% one_for_all strategy: socket crash kills channel_sup and vice versa
+    ?assertEqual(one_for_all, maps:get(strategy, SupFlags)),
+
+    %% Should have exactly 2 children
+    ?assertEqual(2, length(ChildSpecs)),
+
+    ChildIds = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    ?assert(lists:member(aiutp_socket, ChildIds)),
+    ?assert(lists:member(aiutp_channel_sup, ChildIds)).

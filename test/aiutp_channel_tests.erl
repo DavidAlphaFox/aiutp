@@ -90,11 +90,12 @@ gen_statem_callbacks_exported_test() ->
 %%==============================================================================
 
 sup_child_spec_consistency_test() ->
-    %% Verify aiutp_sup includes channel_sup
-    {ok, {_SupFlags, ChildSpecs}} = aiutp_sup:init([]),
+    %% New structure: channel_sup is a child of socket_sup, not aiutp_sup
+    %% Verify aiutp_socket_sup includes channel_sup
+    {ok, {_SupFlags, ChildSpecs}} = aiutp_socket_sup:init([0, []]),
     ChildIds = [maps:get(id, Spec) || Spec <- ChildSpecs],
 
     ?assert(lists:member(aiutp_channel_sup, ChildIds)),
-    ?assert(lists:member(aiutp_socket_sup, ChildIds)),
+    ?assert(lists:member(aiutp_socket, ChildIds)),
     %% Worker sup has been removed
     ?assertNot(lists:member(aiutp_worker_sup, ChildIds)).

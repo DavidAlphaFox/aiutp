@@ -74,6 +74,7 @@
 
 %% 服务器状态
 %% - socket: UDP 套接字句柄
+%% - channel_sup: channel 监督者 pid（由父监督者启动）
 %% - conns: 连接注册表，按 {Remote, ConnId} 索引
 %% - monitors: 监视器反向索引，用于快速查找要清理的连接
 %% - conn_count: 当前连接数（缓存值，O(1) 访问）
@@ -82,6 +83,7 @@
 %% - options: uTP 选项
 -type state() :: #{
     socket := gen_udp:socket() | undefined,
+    channel_sup := pid(),
     conns := #{conn_key() => conn_value()},
     monitors := #{reference() => conn_key()},
     conn_count := non_neg_integer(),
@@ -124,8 +126,8 @@ start_link(Port, Options) ->
     {ok, {utp, pid(), pid()}} | {error, term()}.
 connect(Socket, Address, Port) ->
     case gen_server:call(Socket, get_socket_info) of
-        {ok, {UDPSocket, _Options}} ->
-            case aiutp_channel_sup:new(Socket, UDPSocket) of
+        {ok, {UDPSocket, ChannelSup, _Options}} ->
+            case aiutp_channel_sup:new(ChannelSup, Socket, UDPSocket) of
                 {ok, Channel} ->
                     ResolvedAddr = aiutp_util:getaddr(Address),
                     Caller = self(),
@@ -227,6 +229,7 @@ free_conn(Socket, Remote, ConnId) ->
 %% @doc 初始化服务器
 %%
 %% 打开 UDP 套接字并初始化状态。
+%% 从父监督者获取 channel_sup 的 pid。
 %% @end
 %%------------------------------------------------------------------------------
 -spec init(list()) -> {ok, state()} | {stop, term()}.
@@ -240,20 +243,28 @@ init([Port, Options]) ->
     %% 解析 uTP 选项
     UTPOptions = proplists:get_value(utp, Options, []),
 
-    %% 打开 UDP 套接字
-    case open_udp_socket(Port, UDPOptions1) of
-        {ok, Socket} ->
-            {ok, #{
-                socket => Socket,
-                conns => #{},
-                monitors => #{},
-                conn_count => 0,
-                max_conns => ?DEFAULT_MAX_CONNS,
-                acceptor => closed,
-                options => UTPOptions
-            }};
+    %% 从父监督者获取 channel_sup pid
+    %% 注意：channel_sup 在监督树中先于 socket 启动
+    case get_sibling_channel_sup() of
+        {ok, ChannelSup} ->
+            %% 打开 UDP 套接字
+            case open_udp_socket(Port, UDPOptions1) of
+                {ok, Socket} ->
+                    {ok, #{
+                        socket => Socket,
+                        channel_sup => ChannelSup,
+                        conns => #{},
+                        monitors => #{},
+                        conn_count => 0,
+                        max_conns => ?DEFAULT_MAX_CONNS,
+                        acceptor => closed,
+                        options => UTPOptions
+                    }};
+                {error, Reason} ->
+                    {stop, Reason}
+            end;
         {error, Reason} ->
-            {stop, Reason}
+            {stop, {channel_sup_not_found, Reason}}
     end.
 
 %%------------------------------------------------------------------------------
@@ -264,13 +275,15 @@ init([Port, Options]) ->
 -spec handle_call(term(), {pid(), term()}, state()) ->
     {reply, term(), state()} | {noreply, state()}.
 
-%% 获取套接字信息
-handle_call(get_socket_info, _From, #{socket := Socket, options := Options} = State) ->
-    {reply, {ok, {Socket, Options}}, State};
+%% 获取套接字信息（包含 channel_sup）
+handle_call(get_socket_info, _From,
+            #{socket := Socket, channel_sup := ChannelSup, options := Options} = State) ->
+    {reply, {ok, {Socket, ChannelSup, Options}}, State};
 
-%% 向后兼容：旧的 socket 调用
-handle_call(socket, _From, #{socket := Socket, options := Options} = State) ->
-    {reply, {ok, {Socket, Options}}, State};
+%% 向后兼容：旧的 socket 调用（也包含 channel_sup）
+handle_call(socket, _From,
+            #{socket := Socket, channel_sup := ChannelSup, options := Options} = State) ->
+    {reply, {ok, {Socket, ChannelSup, Options}}, State};
 
 %% 注册 Channel
 handle_call({register_channel, Remote, ConnId, Channel}, _From, State) ->
@@ -294,9 +307,10 @@ handle_call({free_conn, Remote, ConnId}, _From, State) ->
 
 %% 开始监听
 handle_call({listen, Options}, _From,
-            #{socket := Socket, acceptor := closed, options := UTPOptions} = State) ->
+            #{socket := Socket, channel_sup := ChannelSup,
+              acceptor := closed, options := UTPOptions} = State) ->
     Parent = self(),
-    {ok, Acceptor} = aiutp_acceptor:start_link(Parent, Socket, Options, UTPOptions),
+    {ok, Acceptor} = aiutp_acceptor:start_link(Parent, Socket, ChannelSup, Options, UTPOptions),
     {reply, ok, State#{acceptor := Acceptor}};
 
 handle_call({listen, _Options}, _From, State) ->
@@ -395,6 +409,34 @@ code_change(_OldVsn, State, _Extra) ->
 -spec format_status(map()) -> map().
 format_status(Status) ->
     Status.
+
+%%==============================================================================
+%% 内部函数 - 监督树交互
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 获取同级的 channel_sup 进程
+%%
+%% 通过 $ancestors 进程字典获取父监督者，
+%% 然后查找 channel_sup 子进程。
+%% @end
+%%------------------------------------------------------------------------------
+-spec get_sibling_channel_sup() -> {ok, pid()} | {error, term()}.
+get_sibling_channel_sup() ->
+    case get('$ancestors') of
+        [Parent | _] when is_pid(Parent) ->
+            aiutp_socket_sup:get_channel_sup(Parent);
+        [Parent | _] when is_atom(Parent) ->
+            case whereis(Parent) of
+                Pid when is_pid(Pid) ->
+                    aiutp_socket_sup:get_channel_sup(Pid);
+                undefined ->
+                    {error, parent_not_found}
+            end;
+        _ ->
+            {error, no_ancestors}
+    end.
 
 %%==============================================================================
 %% 内部函数 - UDP 套接字管理

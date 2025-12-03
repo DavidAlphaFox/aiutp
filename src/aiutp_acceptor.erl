@@ -12,7 +12,7 @@
 
 -include("aiutp.hrl").
 %% API
--export([start_link/4]).
+-export([start_link/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -26,6 +26,7 @@
 %% 状态是一个 map，包含以下键：
 %% - parent: pid() - 父套接字进程
 %% - socket: gen_udp:socket() - UDP 套接字
+%% - channel_sup: pid() - channel 监督者进程
 %% - acceptors: queue:queue({pid(), term()}) - 等待的接受器队列
 %% - syns: queue:queue(syn_request()) - 待处理的 SYN 请求队列
 %% - syn_len: non_neg_integer() - 当前 SYN 队列长度
@@ -36,6 +37,7 @@
 -type state() :: #{
     parent := pid(),
     socket := gen_udp:socket(),
+    channel_sup := pid(),
     acceptors := queue:queue({pid(), term()}),
     syns := queue:queue(syn_request()),
     syn_len := non_neg_integer(),
@@ -57,16 +59,19 @@ accept(Pid,Acceptor)->
 incoming(Pid,Req)->
   gen_server:cast(Pid,Req).
 %%--------------------------------------------------------------------
-%% @doc
-%% 启动服务器
+%% @doc 启动服务器
+%%
+%% @param Parent 父套接字进程
+%% @param Socket UDP 套接字
+%% @param ChannelSup channel 监督者 pid
+%% @param Options 监听选项
+%% @param UTPOptions UTP 协议选项
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(pid(),port(),list(),list()) -> {ok, Pid :: pid()} |
-        {error, Error :: {already_started, pid()}} |
-        {error, Error :: term()} |
-        ignore.
-start_link(Parent,Socket,Options,UTPOptions) ->
-  gen_server:start_link(?MODULE, [Parent,Socket,Options,UTPOptions], []).
+-spec start_link(pid(), port(), pid(), list(), list()) ->
+    {ok, pid()} | {error, term()} | ignore.
+start_link(Parent, Socket, ChannelSup, Options, UTPOptions) ->
+  gen_server:start_link(?MODULE, [Parent, Socket, ChannelSup, Options, UTPOptions], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -83,7 +88,7 @@ start_link(Parent,Socket,Options,UTPOptions) ->
         {ok, State :: term(), hibernate} |
         {stop, Reason :: term()} |
         ignore.
-init([Parent,Socket,Options,UTPOptions]) ->
+init([Parent, Socket, ChannelSup, Options, UTPOptions]) ->
   Backlog =
     case Options of
       undefined -> ?BACKLOG;
@@ -91,6 +96,7 @@ init([Parent,Socket,Options,UTPOptions]) ->
     end,
   {ok, #{parent => Parent,
          socket => Socket,
+         channel_sup => ChannelSup,
          acceptors => queue:new(),
          syns => queue:new(),
          syn_len => 0,
@@ -203,8 +209,9 @@ accept_incoming(Acceptor, #{acceptors := Acceptors, syn_len := 0} = State)->
   {noreply, State#{acceptors := queue:in(Acceptor, Acceptors)}};
 accept_incoming({Caller,_} = Acceptor,
                 #{syns := Syns, syn_len := SynLen,
-                  parent := Parent, socket := Socket} = State)->
-  {ok, Channel} = aiutp_channel_sup:new(Parent, Socket),
+                  parent := Parent, socket := Socket,
+                  channel_sup := ChannelSup} = State)->
+  {ok, Channel} = aiutp_channel_sup:new(ChannelSup, Parent, Socket),
   {{value, Req}, Syns0} = queue:out(Syns),
   {Remote, {SYN, _} = P} = Req,
   case aiutp_channel:accept(Channel, Caller, Remote, P) of

@@ -15,11 +15,15 @@
 
 %% @doc 在指定端口打开一个 uTP 套接字
 -spec open(inet:port_number()) -> {ok, utp_socket()} | {error, term()}.
-open(Port) -> aiutp_socket_sup:open(Port,[]).
+open(Port) -> open(Port, []).
 
 %% @doc 在指定端口打开一个带选项的 uTP 套接字
 -spec open(inet:port_number(), [utp_option()]) -> {ok, utp_socket()} | {error, term()}.
-open(Port,Options) -> aiutp_socket_sup:open(Port,Options).
+open(Port, Options) ->
+    case aiutp_sup:new(Port, Options) of
+        {ok, SocketPid} -> {ok, {utp, SocketPid}};
+        {error, _} = Error -> Error
+    end.
 
 %% @doc 连接到远程 uTP 端点
 -spec connect(utp_socket(), inet:ip_address() | string(), inet:port_number()) ->

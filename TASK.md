@@ -22,6 +22,18 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] 监督树重构（故障隔离）
+  - 新结构：aiutp_sup (simple_one_for_one) → aiutp_socket_sup (one_for_all) → {socket, channel_sup}
+  - 每个 socket 拥有独立的 channel_sup 实例
+  - socket 崩溃时自动终止所有相关 channel
+  - 修改 aiutp_sup.erl: rest_for_one → simple_one_for_one
+  - 修改 aiutp_socket_sup.erl: simple_one_for_one → one_for_all，管理 socket + channel_sup
+  - 修改 aiutp_channel_sup.erl: 移除全局注册，new/2 → new/3
+  - 修改 aiutp_socket.erl: 从父监督者获取 channel_sup pid
+  - 修改 aiutp_acceptor.erl: start_link/4 → start_link/5，添加 channel_sup 参数
+  - 修改 aiutp.erl: open 调用 aiutp_sup:new/2
+  - 更新测试用例适配新结构
+  - 147 个测试全部通过
 - [x] aiutp_socket 代码重构和注释
   - 添加完整模块文档和架构图
   - 函数重命名: `add_conn_inner` → `do_register_channel`, `free_conn_inner` → `do_unregister_channel`
