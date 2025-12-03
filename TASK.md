@@ -22,6 +22,14 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] 常量优化（BEP-29 合规性）
+  - `MIN_WINDOW_SIZE`: 2906 → 3*PACKET_SIZE (3888)，计算更直观
+  - `RTT_VAR_INITIAL`: 800 → 250ms，符合 RFC 6298
+  - `DUPLICATE_ACKS_BEFORE_RESEND`: 4 → 3，符合 BEP-29 和 TCP 标准
+  - `BURST_OUTGOING_BUFFER_SIZE` → `BURST_SEND_COUNT`: 255 → 256（2的幂次）
+  - `max_window_user`: 255 → 256 个包（2的幂次）
+  - 移除冗余常量：`REORDER_BUFFER_MAX_SIZE`、`DUPLICATE_ACKS_BEFORE_RESEND_BEP29`
+  - 147 个测试全部通过
 - [x] 监督树重构（故障隔离）
   - 新结构：aiutp_sup (simple_one_for_one) → aiutp_socket_sup (one_for_all) → {socket, channel_sup}
   - 每个 socket 拥有独立的 channel_sup 实例

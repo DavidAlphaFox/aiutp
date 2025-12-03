@@ -79,7 +79,9 @@
 -define(RTO_INITIAL, 1000).
 
 %% 初始 RTT 方差估计（毫秒）
--define(RTT_VAR_INITIAL, 800).
+%% 根据 RFC 6298，初始 RTO 应为 1 秒
+%% RTT_VAR 初始值 = (RTO_INITIAL - RTT) / 4 ≈ 250ms
+-define(RTT_VAR_INITIAL, 250).
 
 %% Keep-alive 间隔: 29 秒
 %% 原因: 根据多数家用 NAT 设备测量，用于防止 NAT 超时
@@ -106,19 +108,22 @@
 
 %% BEP-29: 最小窗口大小为 150 字节
 %% 这防止窗口缩小到零
-%% 注意: 当前实现使用较大值以提高性能
 -define(MIN_WINDOW_SIZE_BEP29, 150).
--define(MIN_WINDOW_SIZE, 2906).  %% = 2 * PACKET_SIZE + 314
+
+%% 实际使用的最小窗口大小
+%% 设为 3 个包大小，确保流水线效率
+-define(MIN_WINDOW_SIZE, (3 * ?PACKET_SIZE)).  %% = 3888 字节
 
 %% 最大发送缓冲区大小（包数）
 -define(OUTGOING_BUFFER_MAX_SIZE, 1024).
 
-%% 最大重排序缓冲区大小（包数）
--define(REORDER_BUFFER_MAX_SIZE, 1024).
+%% 重排序缓冲区大小（包数）
+%% 用于接收乱序包的临时存储
 -define(REORDER_BUFFER_SIZE, 32).
 
-%% 突发模式缓冲区大小
--define(BURST_OUTGOING_BUFFER_SIZE, 255).
+%% 突发模式每批发送的最大包数
+%% 使用 2 的幂次以优化位运算
+-define(BURST_SEND_COUNT, 256).
 
 %%==============================================================================
 %% 第 7 节: 拥塞控制参数 (LEDBAT)
@@ -153,10 +158,9 @@
 %% 第 8 节: 重传参数
 %%==============================================================================
 
-%% BEP-29: 快速重传的重复 ACK 阈值为 3
-%% 注意: 实现使用 4 以获得更保守的行为
--define(DUPLICATE_ACKS_BEFORE_RESEND_BEP29, 3).
--define(DUPLICATE_ACKS_BEFORE_RESEND, 4).
+%% BEP-29: 快速重传的重复 ACK 阈值
+%% 收到 3 个重复 ACK 后触发快速重传（与 TCP 一致）
+-define(DUPLICATE_ACKS_BEFORE_RESEND, 3).
 
 %% ACK 号允许窗口
 %% ack_nr 差值大于此值的非 SYN 包被视为可疑
@@ -338,7 +342,8 @@
     max_window = 0 :: non_neg_integer(),
 
     %% 对端通告的最大接收窗口（字节）
-    max_window_user = 255 * ?PACKET_SIZE :: non_neg_integer(),
+    %% 默认 256 个包大小，使用 2 的幂次
+    max_window_user = 256 * ?PACKET_SIZE :: non_neg_integer(),
 
     %% 我们通告的最后接收窗口（字节）
     last_rcv_win = 0 :: non_neg_integer(),

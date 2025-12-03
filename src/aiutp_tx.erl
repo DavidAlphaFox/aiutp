@@ -177,7 +177,7 @@ update_skip_counts_iter(MaxSAckedSeq, SAckedSeqs, Iter, SkippedCount, CurWindow,
 
     if ShouldIncrement ->
         NewSkipCount = SkipCount + 1,
-        if NewSkipCount >= ?DUPLICATE_ACKS_BEFORE_RESEND_BEP29 ->
+        if NewSkipCount >= ?DUPLICATE_ACKS_BEFORE_RESEND ->
             %% 标记为快速重传
             WrapPacket0 = WrapPacket#aiutp_packet_wrap{
                 skip_count = NewSkipCount,

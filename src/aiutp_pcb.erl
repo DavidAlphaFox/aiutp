@@ -251,9 +251,9 @@ validate_and_init(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
     NextPktAckNR = aiutp_util:bit16(PCB0#aiutp_pcb.ack_nr + 1),
     SeqDistance = aiutp_util:bit16(PktSeqNR - NextPktAckNR),
 
-    if SeqDistance >= ?REORDER_BUFFER_MAX_SIZE ->
+    if SeqDistance >= ?OUTGOING_BUFFER_MAX_SIZE ->
         %% 包序列号偏差过大
-        if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?REORDER_BUFFER_MAX_SIZE)) and
+        if (SeqDistance >= (?SEQ_NR_MASK + 1 - ?OUTGOING_BUFFER_MAX_SIZE)) and
            (PktType /= ?ST_STATE) ->
             %% 旧包，调度立即 ACK
             PCB0#aiutp_pcb{ida = true};
@@ -265,8 +265,8 @@ validate_and_init(#aiutp_packet{type = PktType, seq_nr = PktSeqNR} = Packet,
 
 %% @private 阶段 2：处理重复 ACK 检测以触发快速重传
 %%
-%% 根据 BEP-29：当收到 DUPLICATE_ACKS_BEFORE_RESEND (4) 个相同序列号的
-%% 重复 ACK 时，触发最旧未确认包的快速重传。
+%% 根据 BEP-29：当收到 DUPLICATE_ACKS_BEFORE_RESEND (3) 个相同序列号的
+%% 重复 ACK 时，触发最旧未确认包的快速重传（与 TCP 一致）。
 %%
 %% 重复 ACK 是指与之前具有相同 ack_nr 的 ST_STATE 包，
 %% 表明接收方仍在等待某个特定包。
