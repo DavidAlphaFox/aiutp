@@ -22,6 +22,11 @@
 ## 已完成任务
 
 ### 2025-12-03
+- [x] aiutp_socket 代码优化
+  - 改进 `connect` 函数错误处理，使用嵌套 case 替代模式匹配崩溃
+  - 添加 `conn_count` 字段缓存连接数，避免 `dispatch` 中重复调用 `maps:size`
+  - 更新 `add_conn_inner`、`free_conn_inner`、`handle_info DOWN` 同步维护计数
+  - 146 个测试全部通过
 - [x] aiutp_pcb 与 aiutp_channel 配合修复
   - 修复 `aiutp_pcb:write/2` 返回值统一为 `{ok, PCB} | {{error, atom()}, PCB}`
   - 修复 `aiutp_channel` 中 `connected` 状态对 write 返回值的处理

@@ -26,6 +26,7 @@
 %% - socket: gen_udp:socket() | undefined - UDP 套接字
 %% - conns: #{conn_key() => {pid(), reference()}} - 连接映射
 %% - monitors: #{reference() => conn_key()} - 监视器映射
+%% - conn_count: non_neg_integer() - 当前连接数（缓存，避免重复计算 maps:size）
 %% - max_conns: pos_integer() - 最大连接数
 %% - acceptor: pid() | closed - 接受器进程或已关闭
 %% - options: list() - 选项列表
@@ -34,6 +35,7 @@
     socket := gen_udp:socket() | undefined,
     conns := #{conn_key() => {pid(), reference()}},
     monitors := #{reference() => conn_key()},
+    conn_count := non_neg_integer(),
     max_conns := pos_integer(),
     acceptor := pid() | closed,
     options := list()
@@ -46,14 +48,26 @@
 %% @doc 连接到远程 uTP 端点
 -spec connect(pid(), inet:ip_address() | string(), inet:port_number()) ->
     {ok, {utp, pid(), pid()}} | {error, term()}.
-connect(UTPSocket,Address,Port)->
-  {ok,{Socket,_}} = gen_server:call(UTPSocket,socket),
-  {ok,Channel} = aiutp_channel_sup:new(UTPSocket, Socket),
-  Address0 = aiutp_util:getaddr(Address),
-  Caller = self(),
-  case aiutp_channel:connect(Channel,Caller,Address0, Port) of
-    ok -> {ok,{utp,UTPSocket,Channel}};
-    Error -> Error
+connect(UTPSocket, Address, Port) ->
+  case gen_server:call(UTPSocket, socket) of
+    {ok, {Socket, _}} ->
+      case aiutp_channel_sup:new(UTPSocket, Socket) of
+        {ok, Channel} ->
+          Address0 = aiutp_util:getaddr(Address),
+          Caller = self(),
+          case aiutp_channel:connect(Channel, Caller, Address0, Port) of
+            ok ->
+              {ok, {utp, UTPSocket, Channel}};
+            Error ->
+              %% 连接失败，Channel 进程会自动进入 closing 状态并停止
+              %% 因为 aiutp_channel:connect 失败时会返回错误并停止进程
+              Error
+          end;
+        {error, _} = Error ->
+          Error
+      end;
+    {error, _} = Error ->
+      Error
   end.
 
 %% @doc 开始监听传入连接
@@ -118,6 +132,7 @@ init([Port,Options]) ->
       {ok, #{socket => Socket,
              conns => #{},
              monitors => #{},
+             conn_count => 0,
              max_conns => ?DEFAULT_MAX_CONNS,
              acceptor => closed,
              options => UTPOptions}};
@@ -203,12 +218,13 @@ handle_info({udp, Socket, IP, Port, Payload},
   ok = inet:setopts(Socket, [{active,once}]),
   {noreply,State};
 handle_info({'DOWN',MRef,process,_Worker,_Reason},
-            #{monitors := Monitors, conns := Conns} = State)->
+            #{monitors := Monitors, conns := Conns, conn_count := ConnCount} = State)->
   case maps:get(MRef,Monitors,undefined) of
     undefined -> {noreply,State};
     Key -> {noreply,
             State#{monitors := maps:remove(MRef, Monitors),
-                   conns := maps:remove(Key,Conns)}}
+                   conns := maps:remove(Key,Conns),
+                   conn_count := ConnCount - 1}}
   end;
 handle_info({'EXIT',Acceptor,Reason},
             #{acceptor := Acceptor, socket := Socket} = State) ->
@@ -274,24 +290,26 @@ reset_conn(Socket,Remote,ConnID,AckNR)->
 -spec add_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
                      pid(), state()) -> {ok | exists | overflow, state()}.
 add_conn_inner(Remote, ConnId, Worker,
-               #{conns := Conns, monitors := Monitors, max_conns := MaxConns} = State)->
+               #{conns := Conns, monitors := Monitors,
+                 conn_count := ConnCount, max_conns := MaxConns} = State)->
   Key = {Remote, ConnId},
   case maps:is_key(Key, Conns) of
     true -> {exists, State};
     false ->
-      ConnsSize = maps:size(Conns),
-      if ConnsSize > MaxConns -> {overflow, State};
+      if ConnCount >= MaxConns -> {overflow, State};
          true ->
           Monitor = erlang:monitor(process, Worker),
           {ok, State#{conns := maps:put(Key, {Worker, Monitor}, Conns),
-                      monitors := maps:put(Monitor, Key, Monitors)}}
+                      monitors := maps:put(Monitor, Key, Monitors),
+                      conn_count := ConnCount + 1}}
       end
   end.
 
 %% @private 从内部状态释放连接
 -spec free_conn_inner({inet:ip_address(), inet:port_number()}, non_neg_integer(),
                       state()) -> state().
-free_conn_inner(Remote, ConnId, #{conns := Conns, monitors := Monitors} = State)->
+free_conn_inner(Remote, ConnId,
+                #{conns := Conns, monitors := Monitors, conn_count := ConnCount} = State)->
   Key = {Remote, ConnId},
   case maps:is_key(Key, Conns) of
     false -> State;
@@ -299,21 +317,23 @@ free_conn_inner(Remote, ConnId, #{conns := Conns, monitors := Monitors} = State)
       {_, Monitor} = maps:get(Key, Conns),
       erlang:demonitor(Monitor, [flush]),
       State#{monitors := maps:remove(Monitor, Monitors),
-             conns := maps:remove(Key, Conns)}
+             conns := maps:remove(Key, Conns),
+             conn_count := ConnCount - 1}
   end.
 
 %% @private 将传入的数据包分发到适当的处理程序
 -spec dispatch({inet:ip_address(), inet:port_number()}, #aiutp_packet{}, state()) -> ok.
 dispatch(Remote, #aiutp_packet{conn_id = ConnId, type = PktType, seq_nr = AckNR} = Packet,
-         #{socket := Socket, conns := Conns, acceptor := Acceptor, max_conns := MaxConns})->
+         #{socket := Socket, conns := Conns, acceptor := Acceptor,
+           conn_count := ConnCount, max_conns := MaxConns})->
   Key = {Remote, ConnId},
   RecvTime = aiutp_util:microsecond(),
   case maps:get(Key, Conns, undefined) of
     undefined ->
       if (PktType == ?ST_SYN) and
          (Acceptor /= closed) ->
-          ConnsSize = maps:size(Conns),
-          if ConnsSize >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
+          %% 使用缓存的 conn_count 而不是 maps:size(Conns)
+          if ConnCount >= MaxConns -> reset_conn(Socket, Remote, ConnId, AckNR);
              true -> aiutp_acceptor:incoming(Acceptor, {?ST_SYN, Remote, {Packet, RecvTime}})
           end;
          (PktType == ?ST_RESET) -> ok;
