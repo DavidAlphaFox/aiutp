@@ -419,8 +419,11 @@ update_ack_state(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
         end,
 
     %% 连接建立的状态转换
+    %% CS_SYN_RECV -> CS_CONNECTED: 收到任何有效数据包（ST_DATA 或 ST_STATE）
+    %% 客户端可能发送纯 ACK (ST_STATE) 或携带数据的包 (ST_DATA) 来完成三次握手
     State0 =
-        if (PktType == ?ST_DATA) and (State == ?CS_SYN_RECV) -> ?CS_CONNECTED;
+        if ((PktType == ?ST_DATA) or (PktType == ?ST_STATE)) and (State == ?CS_SYN_RECV) ->
+            ?CS_CONNECTED;
            true -> State
         end,
 

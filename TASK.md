@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 CS_SYN_RECV 状态未处理 ST_STATE 包** - aiutp_pcb.erl:423
+  - 根因：只有 ST_DATA 包才触发 CS_SYN_RECV -> CS_CONNECTED 转换
+  - 修复：同时处理 ST_STATE 和 ST_DATA 完成三次握手
+  - 影响：服务端 accept 后收到纯 ACK 时无法进入 connected 状态
 - ✅ **修复 controlling_process 未处理错误返回** - aiutp_channel.erl:284
   - 根因：case 语句只匹配 `{ok, ...}`，未处理 `{error, accepting}` 等错误
   - 修复：添加 `{error, _Reason} = Error` 分支
