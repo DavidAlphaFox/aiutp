@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 accepting 状态拒绝所有 API 调用** - aiutp_channel.erl:469
+  - 根因：accepting 状态的 catch-all 子句拒绝所有调用，包括 active、controlling_process
+  - 修复：在 accepting 状态添加 active、get_controller、get_active、set_controller 等 API 支持
+  - 影响：accept 返回后无法调用 active、controlling_process 等必要 API
 - ✅ **修复 CS_SYN_RECV 状态未处理 ST_STATE 包** - aiutp_pcb.erl:423
   - 根因：只有 ST_DATA 包才触发 CS_SYN_RECV -> CS_CONNECTED 转换
   - 修复：同时处理 ST_STATE 和 ST_DATA 完成三次握手

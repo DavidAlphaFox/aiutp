@@ -465,6 +465,34 @@ accepting(info, {'DOWN', MRef, process, Controller, _Reason},
           #{controller := Controller, controller_monitor := MRef} = Data) ->
     handle_controller_down(Data);
 
+%% 设置主动模式 - 允许在 accepting 状态设置
+accepting({call, From}, {active, Active}, Data) ->
+    {keep_state, Data#{active := Active}, [{reply, From, ok}]};
+
+%% 获取 controller - 允许在 accepting 状态查询
+accepting({call, From}, get_controller, #{controller := Controller}) ->
+    {keep_state_and_data, [{reply, From, {ok, Controller}}]};
+
+%% 获取 active 状态 - 允许在 accepting 状态查询
+accepting({call, From}, get_active, #{active := Active}) ->
+    {keep_state_and_data, [{reply, From, {ok, Active}}]};
+
+%% 获取 socket 信息 - 允许在 accepting 状态查询
+accepting({call, From}, get_socket_info, #{parent := Parent}) ->
+    {keep_state_and_data, [{reply, From, {ok, Parent}}]};
+
+%% 设置新的 controller - 允许在 accepting 状态转移控制权
+accepting({call, From}, {set_controller, OldController, NewController, Active},
+          #{controller := OldController, controller_monitor := OldMon} = Data) ->
+    erlang:demonitor(OldMon, [flush]),
+    NewMon = erlang:monitor(process, NewController),
+    NewData = Data#{
+        controller := NewController,
+        controller_monitor := NewMon,
+        active := Active
+    },
+    {keep_state, NewData, [{reply, From, ok}]};
+
 %% 其他调用返回错误
 accepting({call, From}, _Request, _Data) ->
     {keep_state_and_data, [{reply, From, {error, accepting}}]};
