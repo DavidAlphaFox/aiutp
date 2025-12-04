@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 ST_STATE 包处理 function_clause 错误** - aiutp_channel.erl 中 process_incoming 调用参数错误
+  - 根因：4 处 handle_packet_* 函数解构 `{Packet, RecvTime}` 后只传递 `Packet`，但 `process_incoming` 期望完整元组
+  - 修复：使用 `= PacketWithTS` 模式匹配保留完整元组传递给 process_incoming
+  - 影响函数：handle_packet_connecting, handle_packet_accepting, handle_packet_connected, handle_packet_closing
 - ✅ **数据发送流程优化分析** - 深入分析发送流程，识别优化空间，对比 libutp
   - 分析 outque → outbuf → UDP 完整流程
   - 对比 libutp 发送策略（Nagle、批量发送、定时器频率）

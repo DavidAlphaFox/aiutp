@@ -660,8 +660,8 @@ handle_accept(From, Controller, Remote, PacketInfo,
 %% @private
 %% @doc 处理 connecting 状态下收到的数据包
 %%------------------------------------------------------------------------------
-handle_packet_connecting({Packet, _RecvTime}, #{pcb := PCB, blocker := Blocker} = Data) ->
-    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
+handle_packet_connecting({_Packet, _RecvTime} = PacketWithTS, #{pcb := PCB, blocker := Blocker} = Data) ->
+    PCB1 = aiutp_pcb:process_incoming(PacketWithTS, PCB),
     case aiutp_pcb:state(PCB1) of
         ?CS_CONNECTED ->
             %% 连接建立成功
@@ -680,8 +680,8 @@ handle_packet_connecting({Packet, _RecvTime}, #{pcb := PCB, blocker := Blocker} 
 %% @private
 %% @doc 处理 accepting 状态下收到的数据包
 %%------------------------------------------------------------------------------
-handle_packet_accepting({Packet, _RecvTime}, #{pcb := PCB} = Data) ->
-    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
+handle_packet_accepting({_Packet, _RecvTime} = PacketWithTS, #{pcb := PCB} = Data) ->
+    PCB1 = aiutp_pcb:process_incoming(PacketWithTS, PCB),
     case aiutp_pcb:state(PCB1) of
         ?CS_CONNECTED ->
             {next_state, connected, Data#{pcb := PCB1}};
@@ -695,8 +695,8 @@ handle_packet_accepting({Packet, _RecvTime}, #{pcb := PCB} = Data) ->
 %% @private
 %% @doc 处理 connected 状态下收到的数据包
 %%------------------------------------------------------------------------------
-handle_packet_connected({Packet, _RecvTime}, #{pcb := PCB} = Data) ->
-    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
+handle_packet_connected({_Packet, _RecvTime} = PacketWithTS, #{pcb := PCB} = Data) ->
+    PCB1 = aiutp_pcb:process_incoming(PacketWithTS, PCB),
     case aiutp_pcb:state(PCB1) of
         State when State =:= ?CS_DESTROY; State =:= ?CS_RESET ->
             {next_state, closing, Data#{pcb := PCB1}};
@@ -765,8 +765,8 @@ handle_timeout_connected(#{pcb := PCB} = Data) ->
 %% 继续处理数据包以接收 FIN 的 ACK。
 %% 当 PCB 进入 CS_DESTROY/CS_RESET 时完成关闭。
 %%------------------------------------------------------------------------------
-handle_packet_closing({Packet, _RecvTime}, #{pcb := PCB} = Data) ->
-    PCB1 = aiutp_pcb:process_incoming(Packet, PCB),
+handle_packet_closing({_Packet, _RecvTime} = PacketWithTS, #{pcb := PCB} = Data) ->
+    PCB1 = aiutp_pcb:process_incoming(PacketWithTS, PCB),
     case aiutp_pcb:state(PCB1) of
         State when State =:= ?CS_DESTROY; State =:= ?CS_RESET ->
             do_closing_cleanup(Data#{pcb := PCB1}, normal);
