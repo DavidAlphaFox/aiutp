@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 handle_controller_down map 更新操作符错误** - aiutp_channel.erl:822
+  - 根因：`blocker := undefined` 使用 `:=` 更新不存在的键，accepting 状态下无 blocker
+  - 修复：改用 `blocker => undefined`（插入操作符）
+  - 影响：服务端 accepting 状态下 controller 进程崩溃时触发 badkey 错误
 - ✅ **修复 do_closing_cleanup gen_statem 返回格式 bug** - aiutp_channel.erl:905
   - 根因：`{stop, normal, Data, Actions}` 不是有效的 gen_statem 返回格式
   - 修复：当有 Actions 时使用 `{stop_and_reply, normal, Actions}`，否则使用 `{stop, normal}`

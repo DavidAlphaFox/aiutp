@@ -819,7 +819,7 @@ handle_controller_down(#{pcb := PCB} = Data) ->
         pcb := PCB1,
         controller := undefined,
         controller_monitor := undefined,
-        blocker := undefined
+        blocker => undefined  %% 使用 => 因为 accepting 状态下 blocker 键可能不存在
     },
     {next_state, closing, NewData}.
 
