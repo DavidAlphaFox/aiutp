@@ -306,7 +306,10 @@ controlling_process(Pid, NewOwner) ->
                 false ->
                     %% 更新 controller 并恢复主动模式
                     gen_statem:call(Pid, {set_controller, Caller, NewOwner, Active}, infinity)
-            end
+            end;
+        {error, _Reason} = Error ->
+            %% 连接未就绪 (idle/connecting/accepting/closing 状态)
+            Error
     end.
 
 %%==============================================================================

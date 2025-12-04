@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 controlling_process 未处理错误返回** - aiutp_channel.erl:284
+  - 根因：case 语句只匹配 `{ok, ...}`，未处理 `{error, accepting}` 等错误
+  - 修复：添加 `{error, _Reason} = Error` 分支
+  - 影响：accepting 状态下调用 controlling_process 触发 case_clause 错误
 - ✅ **修复 handle_controller_down map 更新操作符错误** - aiutp_channel.erl:822
   - 根因：`blocker := undefined` 使用 `:=` 更新不存在的键，accepting 状态下无 blocker
   - 修复：改用 `blocker => undefined`（插入操作符）
