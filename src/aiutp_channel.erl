@@ -902,7 +902,11 @@ do_closing_cleanup(Data, Reason) ->
     %% 释放连接 ID
     release_conn_id(Parent, Remote, ConnId),
 
-    {stop, normal, Data, Actions}.
+    %% 根据是否有待回复的调用者选择正确的 gen_statem 返回格式
+    case Actions of
+        [] -> {stop, normal};
+        _ -> {stop_and_reply, normal, Actions}
+    end.
 
 %%==============================================================================
 %% 内部函数 - 数据投递

@@ -59,6 +59,10 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **修复 do_closing_cleanup gen_statem 返回格式 bug** - aiutp_channel.erl:905
+  - 根因：`{stop, normal, Data, Actions}` 不是有效的 gen_statem 返回格式
+  - 修复：当有 Actions 时使用 `{stop_and_reply, normal, Actions}`，否则使用 `{stop, normal}`
+  - 影响：调用 `aiutp:active` 时导致 `bad_return_from_state_function` 错误
 - ✅ **修复 ST_STATE 包处理 function_clause 错误** - aiutp_channel.erl 中 process_incoming 调用参数错误
   - 根因：4 处 handle_packet_* 函数解构 `{Packet, RecvTime}` 后只传递 `Packet`，但 `process_incoming` 期望完整元组
   - 修复：使用 `= PacketWithTS` 模式匹配保留完整元组传递给 process_incoming
