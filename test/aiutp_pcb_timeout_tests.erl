@@ -134,3 +134,186 @@ exports_test() ->
     Exports = aiutp_pcb_timeout:module_info(exports),
     ?assert(lists:member({check_timeouts, 1}, Exports)),
     ?assert(lists:member({mark_need_resend, 4}, Exports)).
+
+%%==============================================================================
+%% Test: MTU 探测超时处理
+%%==============================================================================
+
+mtu_probe_timeout_test_() ->
+    {"MTU 探测超时测试",
+     [{"RTO 超时时处理 MTU 探测超时",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = Now - 100,  %% 已超时
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               %% 设置在途 MTU 探测
+               mtu_probe_seq = 100,
+               mtu_probe_size = 1000,
+               mtu_floor = ?MTU_FLOOR_DEFAULT,
+               mtu_ceiling = ?MTU_CEILING_DEFAULT,
+               mtu_probe_failures = 0,
+               %% 避免 keepalive 超时
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% MTU 探测超时应该被处理
+           ?assertEqual(0, Result#aiutp_pcb.mtu_probe_seq),
+           ?assertEqual(0, Result#aiutp_pcb.mtu_probe_size),
+           ?assertEqual(999, Result#aiutp_pcb.mtu_ceiling),  %% probe_size - 1
+           ?assertEqual(1, Result#aiutp_pcb.mtu_probe_failures)
+       end},
+      {"无 MTU 探测时不处理",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = Now - 100,
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               %% 无 MTU 探测
+               mtu_probe_seq = 0,
+               mtu_floor = ?MTU_FLOOR_DEFAULT,
+               mtu_ceiling = ?MTU_CEILING_DEFAULT,
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% ceiling 应该不变
+           ?assertEqual(?MTU_CEILING_DEFAULT, Result#aiutp_pcb.mtu_ceiling)
+       end},
+      {"连续失败达到阈值时回退到 floor",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = Now - 100,
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               mtu_probe_seq = 100,
+               mtu_probe_size = 1000,
+               mtu_floor = 600,
+               mtu_ceiling = 1200,
+               mtu_probe_failures = ?MTU_PROBE_FAILURE_THRESHOLD - 1,
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% 应该回退到 floor
+           ?assertEqual(600, Result#aiutp_pcb.mtu_last),
+           ?assertEqual(600, Result#aiutp_pcb.mtu_ceiling)
+       end}
+     ]}.
+
+%%==============================================================================
+%% Test: MTU 周期性重新探测
+%%==============================================================================
+
+mtu_restart_discovery_test_() ->
+    {"MTU 周期性重新探测测试",
+     [{"搜索完成且时间到时重新开始探测",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           NowMicro = aiutp_util:microsecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = 0,  %% 无 RTO 超时
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               %% MTU 搜索已完成
+               mtu_floor = 1000,
+               mtu_ceiling = 1000,
+               mtu_probe_seq = 0,
+               mtu_probe_size = 0,
+               mtu_discover_time = NowMicro - 1000,  %% 时间已到
+               mtu_last = 1000,
+               %% 避免其他超时
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% 应该重新开始探测
+           ?assertEqual(?MTU_FLOOR_DEFAULT, Result#aiutp_pcb.mtu_floor),
+           ?assertEqual(?MTU_CEILING_DEFAULT, Result#aiutp_pcb.mtu_ceiling)
+       end},
+      {"时间未到时不重新探测",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           NowMicro = aiutp_util:microsecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = 0,
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               mtu_floor = 1000,
+               mtu_ceiling = 1000,
+               mtu_probe_seq = 0,
+               mtu_discover_time = NowMicro + ?MTU_PROBE_INTERVAL,  %% 时间未到
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% 不应该重新探测
+           ?assertEqual(1000, Result#aiutp_pcb.mtu_floor)
+       end},
+      {"搜索未完成时不重新探测",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           NowMicro = aiutp_util:microsecond(),
+           PCB = #aiutp_pcb{
+               state = ?CS_CONNECTED,
+               time = Now,
+               rto_timeout = 0,
+               retransmit_timeout = 1000,
+               cur_window_packets = 0,
+               max_window = ?PACKET_SIZE * 4,
+               outbuf = aiutp_buffer:new(16),
+               inbuf = aiutp_buffer:new(16),
+               outque = aiutp_queue:new(),
+               mtu_floor = ?MTU_FLOOR_DEFAULT,
+               mtu_ceiling = ?MTU_CEILING_DEFAULT,  %% 搜索未完成
+               mtu_probe_seq = 0,
+               mtu_discover_time = NowMicro - 1000,
+               last_got_packet = Now,
+               fin_sent = false,
+               last_sent_packet = Now
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB),
+           %% 不应该重置
+           ?assertEqual(?MTU_FLOOR_DEFAULT, Result#aiutp_pcb.mtu_floor),
+           ?assertEqual(?MTU_CEILING_DEFAULT, Result#aiutp_pcb.mtu_ceiling)
+       end}
+     ]}.

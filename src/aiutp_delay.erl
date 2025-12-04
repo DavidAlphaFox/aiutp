@@ -54,12 +54,16 @@
 -module(aiutp_delay).
 -include("aiutp.hrl").
 
--export([new/0,
-         new/1,
+-export([new/1,
          shift/2,
          add_sample/3,
          delay_base/1,
          value/1]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([new/0]).
+-endif.
 
 -export_type([aiutp_delay/0]).
 

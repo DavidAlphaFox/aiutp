@@ -135,3 +135,99 @@ create_test_pcb_with_packets_and_skip_count(SeqNRs, SkipCount) ->
         OutBuf0,
         SeqNRs),
     create_test_pcb_with_outbuf(OutBuf).
+
+%%==============================================================================
+%% Test: MTU 探测包丢失检测
+%%==============================================================================
+
+mtu_probe_lost_test_() ->
+    {"MTU 探测包丢失检测测试",
+     [{"探测包被 SACK 跳过时调用 on_probe_lost",
+       fun() ->
+           %% 创建带有 MTU 探测包的 PCB
+           %% 探测包 seq_nr=100，后续包 seq_nr=101 被 SACK 确认
+           PCB = create_test_pcb_with_mtu_probe(100, 101),
+           %% SACK 确认 101，跳过 100 三次（触发丢包）
+           PCB1 = set_skip_count(100, ?DUPLICATE_ACKS_BEFORE_RESEND - 1, PCB),
+           %% 这次 SACK 会触发探测包丢失
+           {_SkippedCount, PCB2} = aiutp_tx:update_skip_counts([101], PCB1),
+           %% MTU 探测应该被处理
+           ?assertEqual(0, PCB2#aiutp_pcb.mtu_probe_seq),
+           ?assertEqual(999, PCB2#aiutp_pcb.mtu_ceiling)  %% probe_size - 1
+       end},
+      {"非探测包不影响 MTU 状态",
+       fun() ->
+           %% 创建普通包（非探测）
+           PCB = create_test_pcb_with_packets([100, 101]),
+           PCB1 = PCB#aiutp_pcb{
+               mtu_probe_seq = 200,  %% 探测包是 200，不是 100
+               mtu_probe_size = 1000,
+               mtu_ceiling = ?MTU_CEILING_DEFAULT
+           },
+           PCB2 = set_skip_count(100, ?DUPLICATE_ACKS_BEFORE_RESEND - 1, PCB1),
+           {_SkippedCount, PCB3} = aiutp_tx:update_skip_counts([101], PCB2),
+           %% MTU 状态不应改变
+           ?assertEqual(200, PCB3#aiutp_pcb.mtu_probe_seq),
+           ?assertEqual(?MTU_CEILING_DEFAULT, PCB3#aiutp_pcb.mtu_ceiling)
+       end},
+      {"未达到阈值时不触发丢失",
+       fun() ->
+           PCB = create_test_pcb_with_mtu_probe(100, 101),
+           %% 只跳过一次，不触发丢失
+           {_SkippedCount, PCB1} = aiutp_tx:update_skip_counts([101], PCB),
+           %% MTU 探测状态应该保持
+           ?assertEqual(100, PCB1#aiutp_pcb.mtu_probe_seq),
+           ?assertEqual(?MTU_CEILING_DEFAULT, PCB1#aiutp_pcb.mtu_ceiling)
+       end}
+     ]}.
+
+%% 创建带 MTU 探测包的 PCB
+create_test_pcb_with_mtu_probe(ProbeSeq, OtherSeq) ->
+    OutBuf0 = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE),
+    %% 探测包
+    ProbePacket = #aiutp_packet{seq_nr = ProbeSeq, type = ?ST_DATA},
+    ProbeWrap = #aiutp_packet_wrap{
+        packet = ProbePacket,
+        transmissions = 1,
+        payload = 1000,
+        skip_count = 0,
+        is_mtu_probe = true
+    },
+    OutBuf1 = aiutp_buffer:append(ProbeWrap, OutBuf0),
+    %% 普通包
+    OtherPacket = #aiutp_packet{seq_nr = OtherSeq, type = ?ST_DATA},
+    OtherWrap = #aiutp_packet_wrap{
+        packet = OtherPacket,
+        transmissions = 1,
+        payload = 100,
+        skip_count = 0,
+        is_mtu_probe = false
+    },
+    OutBuf2 = aiutp_buffer:append(OtherWrap, OutBuf1),
+    PCB = create_test_pcb_with_outbuf(OutBuf2),
+    PCB#aiutp_pcb{
+        mtu_probe_seq = ProbeSeq,
+        mtu_probe_size = 1000,
+        mtu_floor = ?MTU_FLOOR_DEFAULT,
+        mtu_ceiling = ?MTU_CEILING_DEFAULT,
+        mtu_probe_failures = 0
+    }.
+
+%% 设置指定序列号包的 skip_count
+set_skip_count(SeqNR, SkipCount, #aiutp_pcb{outbuf = OutBuf} = PCB) ->
+    OutBuf1 = set_skip_count_in_buffer(SeqNR, SkipCount, aiutp_buffer:head(OutBuf), OutBuf),
+    PCB#aiutp_pcb{outbuf = OutBuf1}.
+
+set_skip_count_in_buffer(_SeqNR, _SkipCount, -1, OutBuf) ->
+    OutBuf;
+set_skip_count_in_buffer(SeqNR, SkipCount, Iter, OutBuf) ->
+    WrapPacket = aiutp_buffer:data(Iter, OutBuf),
+    Packet = WrapPacket#aiutp_packet_wrap.packet,
+    case Packet#aiutp_packet.seq_nr of
+        SeqNR ->
+            WrapPacket1 = WrapPacket#aiutp_packet_wrap{skip_count = SkipCount},
+            aiutp_buffer:replace(Iter, WrapPacket1, OutBuf);
+        _ ->
+            Next = aiutp_buffer:next(Iter, OutBuf),
+            set_skip_count_in_buffer(SeqNR, SkipCount, Next, OutBuf)
+    end.

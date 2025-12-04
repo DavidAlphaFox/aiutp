@@ -1,0 +1,293 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp_channel</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp_channel</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>uTP 通道 - 连接状态机.
+<p>Copyright © (C) 2025, David Gao</p>
+
+<p><b>Behaviours:</b> <a href="gen_statem.html"><code>gen_statem</code></a>.</p>
+<p><b>Authors:</b> David Gao (<a href="mailto:david.alpha.fox@gmail.com"><code>david.alpha.fox@gmail.com</code></a>).</p>
+
+<h2><a name="description">Description</a></h2><p>uTP 通道 - 连接状态机</p>
+ 
+  <p>本模块使用 gen_statem 行为管理单个 uTP 连接的生命周期。  
+每个 uTP 连接由一个独立的 channel 进程管理。</p>
+ 
+  <h3><a name="架构图">架构图</a></h3>
+  <pre>                     aiutp_socket (UDP 端口管理)
+                            │
+                     aiutp_channel_sup
+                     /      │       \
+             channel_1  channel_2  channel_N
+                 │
+           +-----+-----+
+           │           │
+         PCB      Controller
+    (协议状态)    (用户进程)</pre>
+ 
+  <h3><a name="状态机">状态机</a></h3>
+  <pre>                      ┌──────────┐
+                      │   idle   │ 初始状态
+                      └────┬─────┘
+                 ┌─────────┴─────────┐
+           connect()              accept()
+                 │                    │
+          ┌──────▼──────┐      ┌──────▼──────┐
+          │ connecting  │      │  accepting  │
+          │ (发送SYN)   │      │ (收到SYN)   │
+          └──────┬──────┘      └──────┬──────┘
+                 │                    │
+           收到SYN-ACK           发送ACK
+                 │                    │
+                 └─────────┬──────────┘
+                    ┌──────▼──────┐
+                    │  connected  │ 数据传输
+                    └──────┬──────┘
+                           │
+                    close()/超时/RESET
+                           │
+                    ┌──────▼──────┐
+                    │   closing   │ 清理资源
+                    └──────┬──────┘
+                           │
+                        停止进程</pre>
+ 
+  <h3><a name="状态说明">状态说明</a></h3><p>  
+- idle: 初始状态，等待 connect 或 accept 命令  
+- connecting: 客户端发起连接，已发送 SYN，等待 SYN-ACK  
+- accepting: 服务端收到 SYN，已发送 STATE，等待数据确认连接  
+- connected: 连接已建立，可双向传输数据  
+- closing: 连接正在关闭，清理资源后停止进程</p>
+ 
+  <h3><a name="主动模式_(Active_Mode)">主动模式 (Active Mode)</a></h3>
+  - active=true: 数据自动发送给 controller 进程 (once 语义)
+  - active=false: 数据缓存在 PCB 中，需调用 recv 获取
+ 
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-state_data">state_data()</a></h3>
+<p><code>state_data() = #{parent := pid(), parent_monitor := reference(), socket := <a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, active := boolean(), remote =&gt; {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}, conn_id =&gt; non_neg_integer(), controller =&gt; pid(), controller_monitor =&gt; reference(), pcb =&gt; #aiutp_pcb{conn_id_recv = non_neg_integer() | undefined, conn_id_send = non_neg_integer() | undefined, socket = {<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}} | undefined, state = atom(), close_requested = boolean(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), fast_resend_seq_nr = non_neg_integer(), got_fin = boolean(), got_fin_reached = boolean(), fin_sent = boolean(), fin_sent_acked = boolean(), eof_pkt = non_neg_integer(), cur_window = non_neg_integer(), cur_window_packets = non_neg_integer(), max_window = non_neg_integer(), max_window_user = non_neg_integer(), last_rcv_win = non_neg_integer(), last_rwin_decay = non_neg_integer(), rtt = non_neg_integer(), rtt_var = non_neg_integer(), rto = non_neg_integer(), rtt_hist = any(), retransmit_timeout = non_neg_integer(), rto_timeout = non_neg_integer(), target_delay = non_neg_integer(), ssthresh = non_neg_integer(), slow_start = boolean(), last_maxed_out_window = non_neg_integer(), our_hist = any(), their_hist = any(), average_delay = integer(), current_delay_sum = integer(), current_delay_samples = non_neg_integer(), average_delay_base = non_neg_integer(), average_sample_time = non_neg_integer(), last_measured_delay = non_neg_integer(), clock_drift = integer(), retransmit_count = non_neg_integer(), duplicate_ack = non_neg_integer(), fast_timeout = boolean(), reorder_count = non_neg_integer(), time = non_neg_integer() | undefined, recv_time = non_neg_integer() | undefined, last_got_packet = non_neg_integer(), last_sent_packet = non_neg_integer(), reply_micro = non_neg_integer(), zerowindow_time = non_neg_integer(), inbuf = any(), outbuf = any(), inque = any(), outque = any(), ida = boolean(), mtu_floor = non_neg_integer(), mtu_ceiling = non_neg_integer(), mtu_last = non_neg_integer(), mtu_probe_seq = non_neg_integer(), mtu_probe_size = non_neg_integer(), mtu_discover_time = non_neg_integer(), mtu_probe_failures = non_neg_integer()}, tick_timer =&gt; reference(), blocker =&gt; <a href="/home/david/workspace/stdlib/doc/gen_statem.html#type-from" docgen-rel="seetype" docgen-href="stdlib:gen_statem#from/0">gen_statem:from()</a>}</code></p>
+
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-4">accept/4</a></td><td>接受入站连接.</td></tr>
+<tr><td valign="top"><a href="#accepting-3">accepting/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#active-2">active/2</a></td><td>设置主动模式.</td></tr>
+<tr><td valign="top"><a href="#callback_mode-0">callback_mode/0</a></td><td>回调模式.</td></tr>
+<tr><td valign="top"><a href="#close-2">close/2</a></td><td>关闭连接.</td></tr>
+<tr><td valign="top"><a href="#closing-3">closing/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#code_change-4">code_change/4</a></td><td>代码热更新回调.</td></tr>
+<tr><td valign="top"><a href="#connect-4">connect/4</a></td><td>发起出站连接.</td></tr>
+<tr><td valign="top"><a href="#connected-3">connected/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#connecting-3">connecting/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>转移控制权.</td></tr>
+<tr><td valign="top"><a href="#idle-3">idle/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#incoming-2">incoming/2</a></td><td>处理传入的数据包.</td></tr>
+<tr><td valign="top"><a href="#init-1">init/1</a></td><td>初始化回调.</td></tr>
+<tr><td valign="top"><a href="#recv-2">recv/2</a></td><td>接收数据.</td></tr>
+<tr><td valign="top"><a href="#send-2">send/2</a></td><td>发送数据.</td></tr>
+<tr><td valign="top"><a href="#start_link-2">start_link/2</a></td><td>启动新的通道进程.</td></tr>
+<tr><td valign="top"><a href="#terminate-3">terminate/3</a></td><td>终止回调.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="accept-4">accept/4</a></h3>
+<div class="spec">
+<p><code>accept(Pid::pid(), Caller::pid(), Remote::{<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}, PacketInfo::{#aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}, non_neg_integer()}) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Caller</code>: 控制进程<br>
+<code>Remote</code>: 远端地址 {IP, Port}<br>
+<code>PacketInfo</code>: 收到的 SYN 数据包及接收时间 {Packet, RecvTime}<br>
+</p>
+<p>returns: ok | {error, Reason}</p>
+</div><p><p>接受入站连接</p>
+ 
+  处理收到的 SYN 包，发送 STATE 响应，进入 accepting 状态。
+ </p>
+
+<h3 class="function"><a name="accepting-3">accepting/3</a></h3>
+<div class="spec">
+<p><code>accepting(X1, Request, Data) -&gt; any()</code></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="active-2">active/2</a></h3>
+<div class="spec">
+<p><code>active(Pid::pid(), Active::boolean()) -&gt; ok</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Active</code>: 是否启用主动模式<br>
+</p>
+<p>returns: ok</p>
+</div><p><p>设置主动模式</p>
+ 
+  <p>- active=true: 收到数据时自动发送 {utp_data, Socket, Data} 给 controller  
+- active=false: 数据缓存在 PCB 中</p>
+ 
+  注意: 当前实现使用 "once" 语义，即发送一次数据后自动切换为 false。
+ </p>
+
+<h3 class="function"><a name="callback_mode-0">callback_mode/0</a></h3>
+<div class="spec">
+<p><code>callback_mode() -&gt; <a href="/home/david/workspace/stdlib/doc/gen_statem.html#type-callback_mode_result" docgen-rel="seetype" docgen-href="stdlib:gen_statem#callback_mode_result/0">gen_statem:callback_mode_result()</a></code><br></p>
+<p> </p>
+</div><p><p>回调模式</p>
+ 
+  使用状态函数模式，并启用状态进入回调。</p>
+
+<h3 class="function"><a name="close-2">close/2</a></h3>
+<div class="spec">
+<p><code>close(Pid::pid(), Caller::pid()) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Caller</code>: 调用者进程 (必须是 controller)<br>
+</p>
+<p>returns: ok | {error, Reason}</p>
+</div><p><p>关闭连接</p>
+ 
+  优雅关闭连接，发送 FIN 包通知对端。
+  只有 controller 进程可以关闭连接。
+ </p>
+
+<h3 class="function"><a name="closing-3">closing/3</a></h3>
+<div class="spec">
+<p><code>closing(X1, OldState, Data) -&gt; any()</code></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="code_change-4">code_change/4</a></h3>
+<div class="spec">
+<p><code>code_change(OldVsn::term(), State::atom(), Data::<a href="#type-state_data" docgen-rel="seetype" docgen-href="#state_data/0">state_data()</a>, Extra::term()) -&gt; {ok, atom(), <a href="#type-state_data" docgen-rel="seetype" docgen-href="#state_data/0">state_data()</a>}</code><br></p>
+<p> </p>
+</div><p>代码热更新回调</p>
+
+<h3 class="function"><a name="connect-4">connect/4</a></h3>
+<div class="spec">
+<p><code>connect(Pid::pid(), Caller::pid(), Address::<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a> | string(), Port::<a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Caller</code>: 控制进程 (接收数据和通知的进程)<br>
+<code>Address</code>: 远端 IP 地址或主机名<br>
+<code>Port</code>: 远端端口<br>
+</p>
+<p>returns: ok | {error, Reason}</p>
+</div><p><p>发起出站连接</p>
+ 
+  发送 SYN 包到远端，进入 connecting 状态等待响应。
+  调用会阻塞直到连接建立或失败。
+ </p>
+
+<h3 class="function"><a name="connected-3">connected/3</a></h3>
+<div class="spec">
+<p><code>connected(X1, OldState, Data) -&gt; any()</code></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="connecting-3">connecting/3</a></h3>
+<div class="spec">
+<p><code>connecting(X1, Request, Data) -&gt; any()</code></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="controlling_process-2">controlling_process/2</a></h3>
+<div class="spec">
+<p><code>controlling_process(Pid::pid(), NewOwner::pid()) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>NewOwner</code>: 新的控制进程<br>
+</p>
+<p>returns: ok | {error, not_owner}</p>
+</div><p><p>转移控制权</p>
+ 
+  <p>将连接的控制权从当前 controller 转移给新进程。  
+新进程将接收后续的 utp_data 和 utp_closed 消息。</p>
+ 
+  转移过程:
+  1. 验证调用者是当前 controller
+  2. 暂停主动模式
+  3. 将当前进程邮箱中的 utp 消息转发给新 owner
+  4. 更新 controller 并恢复主动模式
+ </p>
+
+<h3 class="function"><a name="idle-3">idle/3</a></h3>
+<div class="spec">
+<p><code>idle(X1, OldState, Data) -&gt; any()</code></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="incoming-2">incoming/2</a></h3>
+<div class="spec">
+<p><code>incoming(Pid::pid(), PacketInfo::{#aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}, non_neg_integer()}) -&gt; ok</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>PacketInfo</code>: 数据包和接收时间元组 {Packet, RecvTime}<br>
+</p>
+</div><p><p>处理传入的数据包</p>
+ 
+  由 aiutp_socket 调用，将收到的 UDP 数据包分发给对应的 channel。
+  使用 cast 异步处理，不阻塞 socket 进程。
+ </p>
+
+<h3 class="function"><a name="init-1">init/1</a></h3>
+<div class="spec">
+<p><code>init(X1::{pid(), <a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>}) -&gt; <a href="/home/david/workspace/stdlib/doc/gen_statem.html#type-init_result" docgen-rel="seetype" docgen-href="stdlib:gen_statem#init_result/0">gen_statem:init_result</a>(atom())</code><br></p>
+<p> </p>
+</div><p><p>初始化回调</p>
+ 
+  创建初始状态数据，监视父进程，进入 idle 状态。</p>
+
+<h3 class="function"><a name="recv-2">recv/2</a></h3>
+<div class="spec">
+<p><code>recv(Pid::pid(), Len::non_neg_integer()) -&gt; {ok, binary()} | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Len</code>: 期望接收的字节数 (当前未使用)<br>
+</p>
+<p>returns: {ok, Data} | {error, Reason}</p>
+</div><p><p>接收数据</p>
+ 
+  从 PCB 接收缓冲区读取数据。
+  注意: 当前实现仅支持主动模式，此函数返回 not_implemented。
+ </p>
+
+<h3 class="function"><a name="send-2">send/2</a></h3>
+<div class="spec">
+<p><code>send(Pid::pid(), Data::iodata()) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Pid</code>: 通道进程<br>
+<code>Data</code>: 要发送的数据<br>
+</p>
+<p>returns: ok | {error, Reason}</p>
+</div><p><p>发送数据</p>
+ 
+  将数据写入 PCB 发送缓冲区，由协议层负责分片和发送。
+ </p>
+
+<h3 class="function"><a name="start_link-2">start_link/2</a></h3>
+<div class="spec">
+<p><code>start_link(Parent::pid(), Socket::<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>) -&gt; <a href="/home/david/workspace/stdlib/doc/gen_statem.html#type-start_ret" docgen-rel="seetype" docgen-href="stdlib:gen_statem#start_ret/0">gen_statem:start_ret()</a></code><br></p>
+<p><code>Parent</code>: 父套接字进程 (aiutp_socket)<br>
+<code>Socket</code>: UDP 套接字<br>
+</p>
+<p>returns: {ok, Pid} | {error, Reason}</p>
+</div><p><p>启动新的通道进程</p>
+ 
+  由 aiutp_channel_sup 调用，创建一个新的 channel 进程。
+  进程启动后处于 idle 状态，等待 connect 或 accept 命令。
+ </p>
+
+<h3 class="function"><a name="terminate-3">terminate/3</a></h3>
+<div class="spec">
+<p><code>terminate(Reason::term(), State::atom(), Data::<a href="#type-state_data" docgen-rel="seetype" docgen-href="#state_data/0">state_data()</a>) -&gt; ok</code><br></p>
+<p> </p>
+</div><p><p>终止回调</p>
+ 
+  清理所有资源：取消监视器和定时器。</p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

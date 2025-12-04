@@ -15,10 +15,14 @@
 -include("aiutp.hrl").
 
 -export([cc_control/4,
-         maybe_decay_win/1,
          ack_packet/3,
          caculate_acked_bytes/4,
          selective_ack_packet/3]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([maybe_decay_win/1]).
+-endif.
 
 %%------------------------------------------------------------------------------
 %% @doc LEDBAT 拥塞控制算法

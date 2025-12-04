@@ -196,9 +196,15 @@ update_skip_counts(SAckedSeqs, #aiutp_pcb{outbuf = OutBuf, cur_window = CurWindo
     Iter = aiutp_buffer:head(OutBuf),
     %% 转换为 sets 以实现 O(1) 查找
     SAckSet = sets:from_list(SAckedSeqs),
-    {SkippedCount, CurWindow1, OutBuf1} =
-        update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, 0, CurWindow, OutBuf),
-    {SkippedCount, PCB#aiutp_pcb{outbuf = OutBuf1, cur_window = CurWindow1}}.
+    {SkippedCount, CurWindow1, OutBuf1, MtuProbeLost} =
+        update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, 0, CurWindow, OutBuf, PCB, false),
+    %% 处理 MTU 探测丢失
+    PCB1 = PCB#aiutp_pcb{outbuf = OutBuf1, cur_window = CurWindow1},
+    PCB2 = case MtuProbeLost of
+        true -> aiutp_mtu:on_probe_lost(PCB1);
+        false -> PCB1
+    end,
+    {SkippedCount, PCB2}.
 
 %%==============================================================================
 %% 内部函数 - ACK 计算
@@ -370,14 +376,17 @@ extract_sacked_packets_loop(SAckSet, MaxSeq, Iter, Prev, Acc, OutBuf) ->
 %% @doc 遍历 outbuf 更新跳过计数
 %%
 %% 使用 sets:is_element/2 实现 O(1) 查找（替代 lists:member/2 的 O(n)）。
+%% 返回 {SkippedCount, CurWindow, OutBuf, MtuProbeLost}，
+%% MtuProbeLost 表示是否有 MTU 探测包被判定丢失。
 %%------------------------------------------------------------------------------
 -spec update_skip_counts_loop(non_neg_integer(), sets:set(non_neg_integer()),
                               integer(), non_neg_integer(),
-                              non_neg_integer(), aiutp_buffer:aiutp_buffer()) ->
-    {non_neg_integer(), non_neg_integer(), aiutp_buffer:aiutp_buffer()}.
-update_skip_counts_loop(_MaxSAckedSeq, _SAckSet, -1, SkippedCount, CurWindow, OutBuf) ->
-    {SkippedCount, CurWindow, OutBuf};
-update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, SkippedCount, CurWindow, OutBuf) ->
+                              non_neg_integer(), aiutp_buffer:aiutp_buffer(),
+                              #aiutp_pcb{}, boolean()) ->
+    {non_neg_integer(), non_neg_integer(), aiutp_buffer:aiutp_buffer(), boolean()}.
+update_skip_counts_loop(_MaxSAckedSeq, _SAckSet, -1, SkippedCount, CurWindow, OutBuf, _PCB, MtuProbeLost) ->
+    {SkippedCount, CurWindow, OutBuf, MtuProbeLost};
+update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, SkippedCount, CurWindow, OutBuf, PCB, MtuProbeLost) ->
     WrapPacket = aiutp_buffer:data(Iter, OutBuf),
     Next = aiutp_buffer:next(Iter, OutBuf),
 
@@ -386,7 +395,8 @@ update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, SkippedCount, CurWindow, Ou
         transmissions = Transmissions,
         need_resend = NeedResend,
         skip_count = SkipCount,
-        payload = Payload
+        payload = Payload,
+        is_mtu_probe = IsMtuProbe
     } = WrapPacket,
     SeqNR = Packet#aiutp_packet.seq_nr,
 
@@ -411,17 +421,21 @@ update_skip_counts_loop(MaxSAckedSeq, SAckSet, Iter, SkippedCount, CurWindow, Ou
                         need_resend = true
                     },
                     OutBuf1 = aiutp_buffer:replace(Iter, WrapPacket1, OutBuf),
+                    %% 检查是否是 MTU 探测包丢失
+                    NewMtuProbeLost = MtuProbeLost orelse
+                        (IsMtuProbe andalso (SeqNR == PCB#aiutp_pcb.mtu_probe_seq)),
                     %% 从 cur_window 中减去载荷大小（因为将被重发）
                     update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
-                                            SkippedCount + 1, CurWindow - Payload, OutBuf1);
+                                            SkippedCount + 1, CurWindow - Payload, OutBuf1,
+                                            PCB, NewMtuProbeLost);
                 false ->
                     %% 只增加计数
                     WrapPacket1 = WrapPacket#aiutp_packet_wrap{skip_count = NewSkipCount},
                     OutBuf1 = aiutp_buffer:replace(Iter, WrapPacket1, OutBuf),
                     update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
-                                            SkippedCount, CurWindow, OutBuf1)
+                                            SkippedCount, CurWindow, OutBuf1, PCB, MtuProbeLost)
             end;
         false ->
             update_skip_counts_loop(MaxSAckedSeq, SAckSet, Next,
-                                    SkippedCount, CurWindow, OutBuf)
+                                    SkippedCount, CurWindow, OutBuf, PCB, MtuProbeLost)
     end.

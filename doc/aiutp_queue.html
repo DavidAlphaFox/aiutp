@@ -1,0 +1,147 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp_queue</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp_queue</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>双端队列（Deque）封装.
+
+<p><b>Authors:</b> David Gao (<a href="mailto:david.alpha.fox@gmail.com"><code>david.alpha.fox@gmail.com</code></a>).</p>
+
+<h2><a name="description">Description</a></h2><p>双端队列（Deque）封装</p>
+ 
+  <p>本模块封装 Erlang 标准库的 queue 模块，提供带大小跟踪的双端队列。  
+用于 uTP 协议中的数据缓冲，支持 FIFO 和 LIFO 操作。</p>
+ 
+  <h3><a name="主要用途">主要用途</a></h3><p>  
+- inque: 接收队列，存储按序到达的数据载荷  
+- outque: 发送队列，存储待发送的用户数据</p>
+ 
+  <h3><a name="队列操作">队列操作</a></h3>
+  <pre>  FIFO (先进先出):  push_back + pop_front
+    [1] -&gt; [1,2] -&gt; [1,2,3] -&gt; pop -&gt; [2,3]
+ 
+  LIFO (后进先出):  push_back + pop_back
+    [1] -&gt; [1,2] -&gt; [1,2,3] -&gt; pop -&gt; [1,2]
+ 
+  Deque (双端):     push_front/push_back + pop_front/pop_back
+    任意端插入和删除</pre>
+ 
+  <h3><a name="性能特性">性能特性</a></h3>
+  - 所有操作均为 O(1) 摊销时间复杂度
+  - 内部使用 Erlang 的 queue 模块（双列表实现）
+  - size 字段提供 O(1) 的大小查询（queue:len/1 是 O(n)）
+ 
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-aiutp_queue">aiutp_queue()</a></h3>
+<p><b>abstract datatype</b>: <code>aiutp_queue(T)</code></p>
+
+
+<h3 class="typedecl"><a name="type-aiutp_queue">aiutp_queue()</a></h3>
+<p><b>abstract datatype</b>: <code>aiutp_queue()</code></p>
+
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#empty-1">empty/1</a></td><td>检查队列是否为空.</td></tr>
+<tr><td valign="top"><a href="#front-1">front/1</a></td><td>查看头部元素（不移除）.</td></tr>
+<tr><td valign="top"><a href="#new-0">new/0</a></td><td>创建空队列.</td></tr>
+<tr><td valign="top"><a href="#pop_front-1">pop_front/1</a></td><td>从队列头部弹出元素.</td></tr>
+<tr><td valign="top"><a href="#push_back-2">push_back/2</a></td><td>在队列尾部插入元素.</td></tr>
+<tr><td valign="top"><a href="#push_front-2">push_front/2</a></td><td>在队列头部插入元素.</td></tr>
+<tr><td valign="top"><a href="#size-1">size/1</a></td><td>获取队列大小.</td></tr>
+<tr><td valign="top"><a href="#to_list-1">to_list/1</a></td><td>将队列转换为列表.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="empty-1">empty/1</a></h3>
+<div class="spec">
+<p><code>empty(Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; boolean()</code><br></p>
+<p> </p>
+<p>returns: true 如果为空，否则 false</p>
+</div><p>检查队列是否为空
+ </p>
+
+<h3 class="function"><a name="front-1">front/1</a></h3>
+<div class="spec">
+<p><code>front(Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; term()</code><br></p>
+<p> </p>
+<p>returns: 头部元素</p>
+</div><p><p>查看头部元素（不移除）</p>
+ 
+  注意：对空队列调用会抛出异常。
+ </p>
+
+<h3 class="function"><a name="new-0">new/0</a></h3>
+<div class="spec">
+<p><code>new() -&gt; <a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a></code><br></p>
+<p> </p>
+<p>returns: 新的空队列</p>
+</div><p>创建空队列
+ </p>
+
+<h3 class="function"><a name="pop_front-1">pop_front/1</a></h3>
+<div class="spec">
+<p><code>pop_front(Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; <a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a></code><br></p>
+<p> </p>
+<p>returns: 更新后的队列（不包含被弹出的元素）</p>
+</div><p><p>从队列头部弹出元素</p>
+ 
+  用于 FIFO 模式的出队操作。
+  注意：对空队列调用会抛出异常。
+ </p>
+
+<h3 class="function"><a name="push_back-2">push_back/2</a></h3>
+<div class="spec">
+<p><code>push_back(Val::term(), Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; <a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a></code><br></p>
+<p><code>Val</code>: 要插入的值<br>
+</p>
+<p>returns: 更新后的队列</p>
+</div><p><p>在队列尾部插入元素</p>
+ 
+  用于 FIFO 模式的入队操作。
+ </p>
+
+<h3 class="function"><a name="push_front-2">push_front/2</a></h3>
+<div class="spec">
+<p><code>push_front(Val::term(), Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; <a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a></code><br></p>
+<p><code>Val</code>: 要插入的值<br>
+</p>
+<p>returns: 更新后的队列</p>
+</div><p><p>在队列头部插入元素</p>
+ 
+  用于需要优先处理的元素。
+ </p>
+
+<h3 class="function"><a name="size-1">size/1</a></h3>
+<div class="spec">
+<p><code>size(Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; non_neg_integer()</code><br></p>
+<p> </p>
+<p>returns: 元素数量</p>
+</div><p><p>获取队列大小</p>
+ 
+  O(1) 时间复杂度，比 queue:len/1 的 O(n) 更高效。
+ </p>
+
+<h3 class="function"><a name="to_list-1">to_list/1</a></h3>
+<div class="spec">
+<p><code>to_list(Aiutp_queue::<a href="#type-aiutp_queue" docgen-rel="seetype" docgen-href="#aiutp_queue/0">aiutp_queue()</a>) -&gt; [term()]</code><br></p>
+<p> </p>
+<p>returns: 元素列表</p>
+</div><p><p>将队列转换为列表</p>
+ 
+  保持元素顺序：头部在前，尾部在后。
+ </p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

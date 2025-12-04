@@ -1,0 +1,258 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>aiutp - Erlang uTP (Micro Transport Protocol) implementation.
+
+
+<h2><a name="description">Description</a></h2><p>aiutp - Erlang uTP (Micro Transport Protocol) implementation</p>
+  
+   <p>This module provides the public API for the aiutp library, an implementation   
+of the uTP protocol as specified in BEP-29.</p>
+  
+   <h3><a name="Overview">Overview</a></h3>
+  
+   <p>uTP is a transport protocol layered on top of UDP that provides reliable,   
+ordered data delivery with congestion control using the LEDBAT algorithm.   
+It is designed to minimize impact on network latency while maintaining   
+high throughput.</p>
+  
+   <h3><a name="Usage">Usage</a></h3>
+  
+   <h4><a name="Server_Example">Server Example</a></h4>
+   <pre>   %% Start listening on port 9000
+   {ok, Socket} = aiutp:open(9000),
+   ok = aiutp:listen(Socket),
+  
+   %% Accept incoming connection
+   {ok, Conn} = aiutp:accept(Socket),
+  
+   %% Receive and send data
+   {ok, Data} = aiutp:recv(Conn, 0),
+   ok = aiutp:send(Conn, &lt;&lt;"Response"&gt;&gt;),
+  
+   %% Close connection
+   aiutp:close(Conn).</pre>
+  
+   <h4><a name="Client_Example">Client Example</a></h4>
+   <pre>   %% Open socket and connect
+   {ok, Socket} = aiutp:open(0),
+   {ok, Conn} = aiutp:connect(Socket, "127.0.0.1", 9000),
+  
+   %% Send and receive data
+   ok = aiutp:send(Conn, &lt;&lt;"Hello"&gt;&gt;),
+   {ok, Response} = aiutp:recv(Conn, 0),
+  
+   %% Close connection
+   aiutp:close(Conn).</pre>
+  
+   <h3><a name="Active_Mode">Active Mode</a></h3>
+  
+   Connections can operate in active or passive mode:
+   <ul>
+     <li><code>active(Conn, true)</code> - Data is delivered as messages:
+         <code>{utp_data, Conn, Data}</code></li>
+     <li><code>active(Conn, false)</code> - Data must be retrieved with <code>recv/2</code></li>
+   </ul>
+  
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-listen_option">listen_option()</a></h3>
+<p><code>listen_option() = {backlog, pos_integer()}</code></p>
+<p>  Listen options. <code>{backlog, N}</code> sets the maximum pending connections queue size.</p>
+
+<h3 class="typedecl"><a name="type-utp_connection">utp_connection()</a></h3>
+<p><code>utp_connection() = {utp, pid(), pid()}</code></p>
+<p>  A uTP connection handle. Created by <a docgen-rel="seemfa" docgen-href="#connect/3" href="#connect-3"><code>connect/3</code></a> or <a docgen-rel="seemfa" docgen-href="#accept/1" href="#accept-1"><code>accept/1</code></a>.</p>
+
+<h3 class="typedecl"><a name="type-utp_option">utp_option()</a></h3>
+<p><code>utp_option() = {udp, [<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-option" docgen-rel="seetype" docgen-href="kernel:gen_udp#option/0">gen_udp:option()</a>]} | {utp, list()}</code></p>
+<p>  Socket options. <code>{udp, Options}</code> passes options to the underlying UDP socket.</p>
+
+<h3 class="typedecl"><a name="type-utp_socket">utp_socket()</a></h3>
+<p><code>utp_socket() = {utp, pid()}</code></p>
+<p>  A uTP socket handle. Created by <a docgen-rel="seemfa" docgen-href="#open/1" href="#open-1"><code>open/1</code></a> or <a docgen-rel="seemfa" docgen-href="#open/2" href="#open-2"><code>open/2</code></a>.</p>
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-1">accept/1</a></td><td>Accepts an incoming connection.</td></tr>
+<tr><td valign="top"><a href="#active-2">active/2</a></td><td>Sets the connection's active mode.</td></tr>
+<tr><td valign="top"><a href="#close-1">close/1</a></td><td>Closes a uTP connection.</td></tr>
+<tr><td valign="top"><a href="#connect-3">connect/3</a></td><td>Connects to a remote uTP endpoint.</td></tr>
+<tr><td valign="top"><a href="#controlling_process-2">controlling_process/2</a></td><td>Transfers control of a connection to another process.</td></tr>
+<tr><td valign="top"><a href="#listen-1">listen/1</a></td><td>Starts listening for incoming connections.</td></tr>
+<tr><td valign="top"><a href="#listen-2">listen/2</a></td><td>Starts listening for incoming connections with options.</td></tr>
+<tr><td valign="top"><a href="#open-1">open/1</a></td><td>Opens a uTP socket on the specified port.</td></tr>
+<tr><td valign="top"><a href="#open-2">open/2</a></td><td>Opens a uTP socket on the specified port with options.</td></tr>
+<tr><td valign="top"><a href="#recv-2">recv/2</a></td><td>Receives data from a uTP connection.</td></tr>
+<tr><td valign="top"><a href="#send-2">send/2</a></td><td>Sends data over a uTP connection.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="accept-1">accept/1</a></h3>
+<div class="spec">
+<p><code>accept(X1::<a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>) -&gt; {ok, <a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>} | {error, term()}</code><br></p>
+<p> </p>
+<p>returns: <code>{ok, Connection}</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Accepts an incoming connection.</p>
+ 
+  Blocks until an incoming connection is available on the listening socket.
+  The socket must be in listening mode (see <a docgen-rel="seemfa" docgen-href="#listen/1" href="#listen-1"><code>listen/1</code></a>).
+ </p>
+<p><b>See also:</b> <a href="#connect-3" docgen-rel="seemfa" docgen-href="#connect/3">connect/3</a>, <a href="#listen-1" docgen-rel="seemfa" docgen-href="#listen/1">listen/1</a>.</p>
+
+<h3 class="function"><a name="active-2">active/2</a></h3>
+<div class="spec">
+<p><code>active(X1::<a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>, V::boolean()) -&gt; ok</code><br></p>
+<p> </p>
+<p>returns: <code>ok</code></p>
+</div><p><p>Sets the connection's active mode.</p>
+ 
+  In active mode (<code>true</code>), incoming data is delivered as messages to the
+  controlling process:
+  <ul>
+    <li><code>{utp_data, Connection, Data}</code> - Received data</li>
+    <li><code>{utp_closed, Connection, Reason}</code> - Connection closed</li>
+  </ul>
+ 
+  In passive mode (<code>false</code>), data must be retrieved using <a docgen-rel="seemfa" docgen-href="#recv/2" href="#recv-2"><code>recv/2</code></a>.
+ </p>
+<p><b>See also:</b> <a href="#recv-2" docgen-rel="seemfa" docgen-href="#recv/2">recv/2</a>.</p>
+
+<h3 class="function"><a name="close-1">close/1</a></h3>
+<div class="spec">
+<p><code>close(X1::<a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>) -&gt; ok | {error, term()}</code><br></p>
+<p> </p>
+<p>returns: <code>ok</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Closes a uTP connection.</p>
+ 
+  Initiates a graceful connection teardown. Pending data is flushed before
+  the connection is closed.
+ </p>
+
+<h3 class="function"><a name="connect-3">connect/3</a></h3>
+<div class="spec">
+<p><code>connect(X1::<a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>, Address::<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a> | string(), Port::<a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>) -&gt; {ok, <a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>} | {error, term()}</code><br></p>
+<p><code>Address</code>: The remote address (IP tuple or hostname string)<br>
+<code>Port</code>: The remote port number<br>
+</p>
+<p>returns: <code>{ok, Connection}</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Connects to a remote uTP endpoint.</p>
+ 
+  Initiates a connection to the specified address and port. This function
+  blocks until the connection is established or times out.
+ </p>
+<p><b>See also:</b> <a href="#accept-1" docgen-rel="seemfa" docgen-href="#accept/1">accept/1</a>.</p>
+
+<h3 class="function"><a name="controlling_process-2">controlling_process/2</a></h3>
+<div class="spec">
+<p><code>controlling_process(X1::<a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>, NewOwner::pid()) -&gt; ok | {error, term()}</code><br></p>
+<p><code>NewOwner</code>: The PID of the new controlling process<br>
+</p>
+<p>returns: <code>ok</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Transfers control of a connection to another process.</p>
+ 
+  The new owner will receive active mode messages and must handle
+  connection lifecycle events.
+ </p>
+
+<h3 class="function"><a name="listen-1">listen/1</a></h3>
+<div class="spec">
+<p><code>listen(X1::<a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>) -&gt; ok | {error, term()}</code><br></p>
+<p> </p>
+<p>returns: <code>ok</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p>Equivalent to <a href="#listen-2" docgen-rel="seemfa" docgen-href="#listen/2"><code>listen(Socket, [])</code></a>.</p>
+<p><p>Starts listening for incoming connections.</p>
+ 
+  Puts the socket into listening mode so it can accept incoming connections.
+ </p>
+<p><b>See also:</b> <a href="#accept-1" docgen-rel="seemfa" docgen-href="#accept/1">accept/1</a>, <a href="#listen-2" docgen-rel="seemfa" docgen-href="#listen/2">listen/2</a>.</p>
+
+<h3 class="function"><a name="listen-2">listen/2</a></h3>
+<div class="spec">
+<p><code>listen(X1::<a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>, Options::[<a href="#type-listen_option" docgen-rel="seetype" docgen-href="#listen_option/0">listen_option()</a>]) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Options</code>: List of listen options<br>
+</p>
+<p>returns: <code>ok</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Starts listening for incoming connections with options.</p>
+ 
+  <p>Puts the socket into listening mode with additional options.</p>
+ 
+  Options:
+  <ul>
+    <li><code>{backlog, N}</code> - Maximum number of pending connections (default: 5)</li>
+  </ul>
+ </p>
+<p><b>See also:</b> <a href="#accept-1" docgen-rel="seemfa" docgen-href="#accept/1">accept/1</a>, <a href="#listen-1" docgen-rel="seemfa" docgen-href="#listen/1">listen/1</a>.</p>
+
+<h3 class="function"><a name="open-1">open/1</a></h3>
+<div class="spec">
+<p><code>open(Port::<a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>) -&gt; {ok, <a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>} | {error, term()}</code><br></p>
+<p><code>Port</code>: The port number to bind to (0 for automatic assignment)<br>
+</p>
+<p>returns: <code>{ok, Socket}</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p>Equivalent to <a href="#open-2" docgen-rel="seemfa" docgen-href="#open/2"><code>open(Port, [])</code></a>.</p>
+<p><p>Opens a uTP socket on the specified port.</p>
+ 
+  Creates a new uTP socket bound to the given port. Use port 0 to let the
+  system choose an available port.
+ </p>
+<p><b>See also:</b> <a href="#open-2" docgen-rel="seemfa" docgen-href="#open/2">open/2</a>.</p>
+
+<h3 class="function"><a name="open-2">open/2</a></h3>
+<div class="spec">
+<p><code>open(Port::<a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>, Options::[<a href="#type-utp_option" docgen-rel="seetype" docgen-href="#utp_option/0">utp_option()</a>]) -&gt; {ok, <a href="#type-utp_socket" docgen-rel="seetype" docgen-href="#utp_socket/0">utp_socket()</a>} | {error, term()}</code><br></p>
+<p><code>Port</code>: The port number to bind to<br>
+<code>Options</code>: List of socket options<br>
+</p>
+<p>returns: <code>{ok, Socket}</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Opens a uTP socket on the specified port with options.</p>
+ 
+  <p>Creates a new uTP socket bound to the given port with additional options.</p>
+ 
+  Options:
+  <ul>
+    <li><code>{udp, UdpOpts}</code> - Options passed to the underlying UDP socket</li>
+    <li><code>{utp, UtpOpts}</code> - uTP-specific options (reserved for future use)</li>
+  </ul>
+ </p>
+<p><b>See also:</b> <a href="#open-1" docgen-rel="seemfa" docgen-href="#open/1">open/1</a>.</p>
+
+<h3 class="function"><a name="recv-2">recv/2</a></h3>
+<div class="spec">
+<p><code>recv(X1::<a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>, Len::non_neg_integer()) -&gt; {ok, binary()} | {error, term()}</code><br></p>
+<p> </p>
+<p>returns: <code>{ok, Data}</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Receives data from a uTP connection.</p>
+ 
+  Blocks until data is available. In active mode, data is delivered as
+  messages instead.
+ </p>
+<p><b>See also:</b> <a href="#active-2" docgen-rel="seemfa" docgen-href="#active/2">active/2</a>, <a href="#send-2" docgen-rel="seemfa" docgen-href="#send/2">send/2</a>.</p>
+
+<h3 class="function"><a name="send-2">send/2</a></h3>
+<div class="spec">
+<p><code>send(X1::<a href="#type-utp_connection" docgen-rel="seetype" docgen-href="#utp_connection/0">utp_connection()</a>, Data::iodata()) -&gt; ok | {error, term()}</code><br></p>
+<p><code>Data</code>: The data to send (binary or iolist)<br>
+</p>
+<p>returns: <code>ok</code> on success, <code>{error, Reason}</code> on failure</p>
+</div><p><p>Sends data over a uTP connection.</p>
+ 
+  Queues data for transmission. Returns immediately after queuing; actual
+  transmission is handled asynchronously with flow control and retransmission.
+ </p>
+<p><b>See also:</b> <a href="#recv-2" docgen-rel="seemfa" docgen-href="#recv/2">recv/2</a>.</p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

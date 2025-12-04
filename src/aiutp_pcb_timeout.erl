@@ -31,8 +31,12 @@
 -module(aiutp_pcb_timeout).
 -include("aiutp.hrl").
 
--export([check_timeouts/1,
-         mark_need_resend/4]).
+-export([check_timeouts/1]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([mark_need_resend/4]).
+-endif.
 
 %%------------------------------------------------------------------------------
 %% 常量定义
@@ -161,10 +165,21 @@ check_active_connection_timeouts(#aiutp_pcb{
     if Continue ->
         PCB2 = handle_keepalive(PCB1),
         PCB3 = flush_if_no_pending_packets(PCB2),
-        maybe_transition_from_full(PCB3);
+        PCB4 = maybe_transition_from_full(PCB3),
+        %% 步骤 4: 检查是否需要重新开始 MTU 发现
+        maybe_restart_mtu_discovery(PCB4);
        true ->
         PCB1
     end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查是否需要重新开始 MTU 发现
+%%
+%% 当 MTU 搜索完成且周期性重新探测时间到达时，重置 MTU 发现状态。
+%%------------------------------------------------------------------------------
+maybe_restart_mtu_discovery(PCB) ->
+    aiutp_mtu:maybe_restart_discovery(PCB).
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -196,9 +211,26 @@ handle_rto_timeout(PCB) ->
         {false, PCB0} ->
             {false, PCB0};
         {true, PCB0} ->
+            %% 处理 MTU 探测超时（如果有）
+            PCB1 = handle_mtu_probe_timeout(PCB0),
             %% 连接仍然有效，执行重传超时处理
-            do_retransmit_timeout(PCB0)
+            do_retransmit_timeout(PCB1)
     end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理 MTU 探测超时
+%%
+%% 当 RTO 超时且有在途 MTU 探测包时，调用 aiutp_mtu:on_probe_timeout/1
+%% 处理探测失败。
+%%------------------------------------------------------------------------------
+handle_mtu_probe_timeout(#aiutp_pcb{mtu_probe_seq = ProbeSeq} = PCB)
+  when ProbeSeq =/= 0 ->
+    %% 有在途 MTU 探测，处理超时
+    aiutp_mtu:on_probe_timeout(PCB);
+handle_mtu_probe_timeout(PCB) ->
+    %% 无 MTU 探测
+    PCB.
 
 %%------------------------------------------------------------------------------
 %% @private

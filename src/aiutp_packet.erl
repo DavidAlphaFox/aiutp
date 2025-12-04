@@ -2,7 +2,12 @@
 -include("aiutp.hrl").
 
 -export([decode/1,encode/1]).
--export([reset/2,syn/1,fin/2,ack/3,ack/2,data/2]).
+-export([reset/2,syn/1,ack/3,ack/2,data/2]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([fin/2]).
+-endif.
 
 %% 类型定义
 -type packet_type() :: ?ST_DATA | ?ST_FIN | ?ST_STATE | ?ST_RESET | ?ST_SYN.

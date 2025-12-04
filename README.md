@@ -19,6 +19,7 @@ aiutp 是一个基于 UDP 的可靠传输协议实现，遵循 [BEP-29](http://w
 - ✅ 快速重传机制
 - ✅ RTT/RTO 自适应计算
 - ✅ Active/Passive 模式数据接收
+- ✅ 路径 MTU 发现 (PMTUD)
 
 ## 安装
 
@@ -257,6 +258,7 @@ aiutp_sup (rest_for_one)
 | `aiutp_pcb` | 协议控制块，核心状态管理 |
 | `aiutp_pcb_cc` | LEDBAT 拥塞控制算法 |
 | `aiutp_pcb_timeout` | 超时检测和重传处理 |
+| `aiutp_mtu` | 路径 MTU 发现 |
 | `aiutp_packet` | 数据包编解码 |
 | `aiutp_net` | 网络发送逻辑 |
 
@@ -266,12 +268,15 @@ aiutp 遵循 BEP-29 规范，关键参数如下：
 
 | 参数 | 值 | 描述 |
 |------|-----|------|
-| `RTO_MIN` | 500ms | 最小重传超时 |
+| `RTO_MIN` | 1000ms | 最小重传超时 |
 | `RTO_MAX` | 6000ms | 最大重传超时 |
 | `RTO_INITIAL` | 1000ms | 初始重传超时 |
 | `KEEPALIVE_INTERVAL` | 29s | 保活间隔 |
 | `TARGET_DELAY` | 100ms | LEDBAT 目标延迟 |
-| `PACKET_SIZE` | 1400 bytes | 最大包大小 |
+| `PACKET_SIZE` | 1296 bytes | 默认最大包大小 |
+| `MTU_FLOOR` | 528 bytes | MTU 发现下限 |
+| `MTU_CEILING` | 1452 bytes | MTU 发现上限 |
+| `MTU_PROBE_INTERVAL` | 30 min | MTU 重新探测间隔 |
 
 ## 开发
 
@@ -326,7 +331,8 @@ rebar3 cover --verbose
 ### v0.2.0 (进行中)
 
 - ✅ gen_statem 重构 (aiutp_channel)
-- ✅ 单元测试套件 (115 个测试用例)
+- ✅ 路径 MTU 发现 (PMTUD)
+- ✅ 单元测试套件 (220 个测试用例)
 - 🔄 完整测试覆盖
 - 🔄 性能优化
 - 🔄 API 稳定化

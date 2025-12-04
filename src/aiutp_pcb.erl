@@ -18,8 +18,7 @@
 -module(aiutp_pcb).
 -include("aiutp.hrl").
 
--export([new/3,
-         state/1,
+-export([state/1,
          process_incoming/2,
          check_timeouts/1,
          write/2,
@@ -29,9 +28,6 @@
          accept/2,
          closed/1,
          flush/1]).
-
-%% 向后兼容别名
--export([process/2]).
 
 %% socket 引用的类型定义
 -type socket_ref() :: {gen_udp:socket(), {inet:ip_address(), inet:port_number()}}.
@@ -142,12 +138,6 @@ process_incoming({Packet, TS}, PCB) ->
     aiutp_net:schedule_ack(
         dispatch_by_type(Packet#aiutp_packet.type, Packet,
                          PCB#aiutp_pcb{recv_time = TS})).
-
-%% @doc process_incoming/2 的向后兼容别名
-%% @deprecated 请使用 process_incoming/2
--spec process({#aiutp_packet{}, integer()}, #aiutp_pcb{}) -> #aiutp_pcb{}.
-process(PacketWithTS, PCB) ->
-    process_incoming(PacketWithTS, PCB).
 
 %%==============================================================================
 %% 按类型分发数据包

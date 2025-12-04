@@ -1,0 +1,108 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp_pcb_cc</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp_pcb_cc</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>uTP 协议控制块的拥塞控制.
+
+
+<h2><a name="description">Description</a></h2><p>uTP 协议控制块的拥塞控制</p>
+ 
+  <p>本模块实现 BEP-29 规范中的 LEDBAT（低额外延迟后台传输）拥塞控制算法。</p>
+ 
+  主要函数：
+  - cc_control/4: LEDBAT 拥塞控制主逻辑
+  - maybe_decay_win/1: 超时时窗口衰减
+  - ack_packet/3: 处理已确认的包以计算 RTT
+  - caculate_acked_bytes/4: 计算已确认字节总数和最小 RTT
+  - selective_ack_packet/3: 处理选择性确认（SACK）
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ack_packet-3">ack_packet/3</a></td><td>处理已确认的包以计算 RTT.</td></tr>
+<tr><td valign="top"><a href="#caculate_acked_bytes-4">caculate_acked_bytes/4</a></td><td>计算已确认字节总数和最小 RTT.</td></tr>
+<tr><td valign="top"><a href="#cc_control-4">cc_control/4</a></td><td>LEDBAT 拥塞控制算法.</td></tr>
+<tr><td valign="top"><a href="#selective_ack_packet-3">selective_ack_packet/3</a></td><td>处理选择性确认（SACK）包.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="ack_packet-3">ack_packet/3</a></h3>
+<div class="spec">
+<p><code>ack_packet(MicroNow::integer(), Aiutp_packet_wrap::#aiutp_packet_wrap{packet = #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}, content = undefined | binary(), payload = non_neg_integer(), time_sent = non_neg_integer(), transmissions = non_neg_integer(), need_resend = boolean(), skip_count = non_neg_integer(), is_mtu_probe = boolean()}, X3::tuple()) -&gt; tuple()</code><br></p>
+<p><code>MicroNow</code>: 当前时间（微秒）<br>
+</p>
+<p>returns: 更新后的累加器</p>
+</div><p><p>处理已确认的包以计算 RTT</p>
+ 
+  根据已确认的包更新 RTT 估计值和当前窗口。
+  仅使用首次传输来计算 RTT（Karn 算法）。
+ </p>
+
+<h3 class="function"><a name="caculate_acked_bytes-4">caculate_acked_bytes/4</a></h3>
+<div class="spec">
+<p><code>caculate_acked_bytes(Acc::tuple(), Now::integer(), AckedPackets::list(), SAckedPackets::list()) -&gt; tuple()</code><br></p>
+<p><code>Acc</code>: 初始累加器 {Bytes, RTT}<br>
+<code>Now</code>: 当前时间戳<br>
+<code>AckedPackets</code>: 正常确认的包列表<br>
+<code>SAckedPackets</code>: 选择性确认的包列表<br>
+</p>
+<p>returns: {TotalBytes, MinRTT}</p>
+</div><p><p>计算已确认字节总数和最小 RTT</p>
+ 
+  处理已确认和选择性确认的包列表，
+  计算拥塞控制所需的总字节数和最小 RTT。
+ </p>
+
+<h3 class="function"><a name="cc_control-4">cc_control/4</a></h3>
+<div class="spec">
+<p><code>cc_control(Now::integer(), AckedBytes::integer(), RTT::integer(), Aiutp_pcb::#aiutp_pcb{conn_id_recv = non_neg_integer() | undefined, conn_id_send = non_neg_integer() | undefined, socket = {<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}} | undefined, state = atom(), close_requested = boolean(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), fast_resend_seq_nr = non_neg_integer(), got_fin = boolean(), got_fin_reached = boolean(), fin_sent = boolean(), fin_sent_acked = boolean(), eof_pkt = non_neg_integer(), cur_window = non_neg_integer(), cur_window_packets = non_neg_integer(), max_window = non_neg_integer(), max_window_user = non_neg_integer(), last_rcv_win = non_neg_integer(), last_rwin_decay = non_neg_integer(), rtt = non_neg_integer(), rtt_var = non_neg_integer(), rto = non_neg_integer(), rtt_hist = any(), retransmit_timeout = non_neg_integer(), rto_timeout = non_neg_integer(), target_delay = non_neg_integer(), ssthresh = non_neg_integer(), slow_start = boolean(), last_maxed_out_window = non_neg_integer(), our_hist = any(), their_hist = any(), average_delay = integer(), current_delay_sum = integer(), current_delay_samples = non_neg_integer(), average_delay_base = non_neg_integer(), average_sample_time = non_neg_integer(), last_measured_delay = non_neg_integer(), clock_drift = integer(), retransmit_count = non_neg_integer(), duplicate_ack = non_neg_integer(), fast_timeout = boolean(), reorder_count = non_neg_integer(), time = non_neg_integer() | undefined, recv_time = non_neg_integer() | undefined, last_got_packet = non_neg_integer(), last_sent_packet = non_neg_integer(), reply_micro = non_neg_integer(), zerowindow_time = non_neg_integer(), inbuf = any(), outbuf = any(), inque = any(), outque = any(), ida = boolean(), mtu_floor = non_neg_integer(), mtu_ceiling = non_neg_integer(), mtu_last = non_neg_integer(), mtu_probe_seq = non_neg_integer(), mtu_probe_size = non_neg_integer(), mtu_discover_time = non_neg_integer(), mtu_probe_failures = non_neg_integer()}) -&gt; #aiutp_pcb{conn_id_recv = non_neg_integer() | undefined, conn_id_send = non_neg_integer() | undefined, socket = {<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}} | undefined, state = atom(), close_requested = boolean(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), fast_resend_seq_nr = non_neg_integer(), got_fin = boolean(), got_fin_reached = boolean(), fin_sent = boolean(), fin_sent_acked = boolean(), eof_pkt = non_neg_integer(), cur_window = non_neg_integer(), cur_window_packets = non_neg_integer(), max_window = non_neg_integer(), max_window_user = non_neg_integer(), last_rcv_win = non_neg_integer(), last_rwin_decay = non_neg_integer(), rtt = non_neg_integer(), rtt_var = non_neg_integer(), rto = non_neg_integer(), rtt_hist = any(), retransmit_timeout = non_neg_integer(), rto_timeout = non_neg_integer(), target_delay = non_neg_integer(), ssthresh = non_neg_integer(), slow_start = boolean(), last_maxed_out_window = non_neg_integer(), our_hist = any(), their_hist = any(), average_delay = integer(), current_delay_sum = integer(), current_delay_samples = non_neg_integer(), average_delay_base = non_neg_integer(), average_sample_time = non_neg_integer(), last_measured_delay = non_neg_integer(), clock_drift = integer(), retransmit_count = non_neg_integer(), duplicate_ack = non_neg_integer(), fast_timeout = boolean(), reorder_count = non_neg_integer(), time = non_neg_integer() | undefined, recv_time = non_neg_integer() | undefined, last_got_packet = non_neg_integer(), last_sent_packet = non_neg_integer(), reply_micro = non_neg_integer(), zerowindow_time = non_neg_integer(), inbuf = any(), outbuf = any(), inque = any(), outque = any(), ida = boolean(), mtu_floor = non_neg_integer(), mtu_ceiling = non_neg_integer(), mtu_last = non_neg_integer(), mtu_probe_seq = non_neg_integer(), mtu_probe_size = non_neg_integer(), mtu_discover_time = non_neg_integer(), mtu_probe_failures = non_neg_integer()}</code><br></p>
+<p><code>Now</code>: 当前时间戳（毫秒）<br>
+<code>AckedBytes</code>: 已确认字节数<br>
+<code>RTT</code>: 测量的往返时间（微秒）<br>
+</p>
+<p>returns: 更新窗口大小后的 PCB</p>
+</div><p><p>LEDBAT 拥塞控制算法</p>
+ 
+  <p>根据相对于目标的测量延迟调整拥塞窗口。  
+实现慢启动和拥塞避免两个阶段。</p>
+ 
+  <p>算法来源: RFC 6817 和 libutp (utp_internal.cpp)</p>
+ 
+  <p>LEDBAT 公式:    
+cwnd += GAIN * off_target * bytes_acked * MSS / cwnd    
+其中 off_target = (TARGET - queuing_delay) / TARGET</p>
+ 
+  时钟漂移惩罚 (libutp):
+    当检测到对端时钟变慢超过 200ms/5s 时，应用惩罚延迟
+    penalty = (-clock_drift - 200000) / 7
+    our_delay += penalty
+    目的：防止对端通过减慢时钟来"作弊"获取更多带宽
+ </p>
+
+<h3 class="function"><a name="selective_ack_packet-3">selective_ack_packet/3</a></h3>
+<div class="spec">
+<p><code>selective_ack_packet(SAckedPackets::list(), MicroNow::integer(), Aiutp_pcb::#aiutp_pcb{conn_id_recv = non_neg_integer() | undefined, conn_id_send = non_neg_integer() | undefined, socket = {<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}} | undefined, state = atom(), close_requested = boolean(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), fast_resend_seq_nr = non_neg_integer(), got_fin = boolean(), got_fin_reached = boolean(), fin_sent = boolean(), fin_sent_acked = boolean(), eof_pkt = non_neg_integer(), cur_window = non_neg_integer(), cur_window_packets = non_neg_integer(), max_window = non_neg_integer(), max_window_user = non_neg_integer(), last_rcv_win = non_neg_integer(), last_rwin_decay = non_neg_integer(), rtt = non_neg_integer(), rtt_var = non_neg_integer(), rto = non_neg_integer(), rtt_hist = any(), retransmit_timeout = non_neg_integer(), rto_timeout = non_neg_integer(), target_delay = non_neg_integer(), ssthresh = non_neg_integer(), slow_start = boolean(), last_maxed_out_window = non_neg_integer(), our_hist = any(), their_hist = any(), average_delay = integer(), current_delay_sum = integer(), current_delay_samples = non_neg_integer(), average_delay_base = non_neg_integer(), average_sample_time = non_neg_integer(), last_measured_delay = non_neg_integer(), clock_drift = integer(), retransmit_count = non_neg_integer(), duplicate_ack = non_neg_integer(), fast_timeout = boolean(), reorder_count = non_neg_integer(), time = non_neg_integer() | undefined, recv_time = non_neg_integer() | undefined, last_got_packet = non_neg_integer(), last_sent_packet = non_neg_integer(), reply_micro = non_neg_integer(), zerowindow_time = non_neg_integer(), inbuf = any(), outbuf = any(), inque = any(), outque = any(), ida = boolean(), mtu_floor = non_neg_integer(), mtu_ceiling = non_neg_integer(), mtu_last = non_neg_integer(), mtu_probe_seq = non_neg_integer(), mtu_probe_size = non_neg_integer(), mtu_discover_time = non_neg_integer(), mtu_probe_failures = non_neg_integer()}) -&gt; #aiutp_pcb{conn_id_recv = non_neg_integer() | undefined, conn_id_send = non_neg_integer() | undefined, socket = {<a href="/home/david/workspace/kernel/doc/gen_udp.html#type-socket" docgen-rel="seetype" docgen-href="kernel:gen_udp#socket/0">gen_udp:socket()</a>, {<a href="/home/david/workspace/kernel/doc/inet.html#type-ip_address" docgen-rel="seetype" docgen-href="kernel:inet#ip_address/0">inet:ip_address()</a>, <a href="/home/david/workspace/kernel/doc/inet.html#type-port_number" docgen-rel="seetype" docgen-href="kernel:inet#port_number/0">inet:port_number()</a>}} | undefined, state = atom(), close_requested = boolean(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), fast_resend_seq_nr = non_neg_integer(), got_fin = boolean(), got_fin_reached = boolean(), fin_sent = boolean(), fin_sent_acked = boolean(), eof_pkt = non_neg_integer(), cur_window = non_neg_integer(), cur_window_packets = non_neg_integer(), max_window = non_neg_integer(), max_window_user = non_neg_integer(), last_rcv_win = non_neg_integer(), last_rwin_decay = non_neg_integer(), rtt = non_neg_integer(), rtt_var = non_neg_integer(), rto = non_neg_integer(), rtt_hist = any(), retransmit_timeout = non_neg_integer(), rto_timeout = non_neg_integer(), target_delay = non_neg_integer(), ssthresh = non_neg_integer(), slow_start = boolean(), last_maxed_out_window = non_neg_integer(), our_hist = any(), their_hist = any(), average_delay = integer(), current_delay_sum = integer(), current_delay_samples = non_neg_integer(), average_delay_base = non_neg_integer(), average_sample_time = non_neg_integer(), last_measured_delay = non_neg_integer(), clock_drift = integer(), retransmit_count = non_neg_integer(), duplicate_ack = non_neg_integer(), fast_timeout = boolean(), reorder_count = non_neg_integer(), time = non_neg_integer() | undefined, recv_time = non_neg_integer() | undefined, last_got_packet = non_neg_integer(), last_sent_packet = non_neg_integer(), reply_micro = non_neg_integer(), zerowindow_time = non_neg_integer(), inbuf = any(), outbuf = any(), inque = any(), outque = any(), ida = boolean(), mtu_floor = non_neg_integer(), mtu_ceiling = non_neg_integer(), mtu_last = non_neg_integer(), mtu_probe_seq = non_neg_integer(), mtu_probe_size = non_neg_integer(), mtu_discover_time = non_neg_integer(), mtu_probe_failures = non_neg_integer()}</code><br></p>
+<p><code>SAckedPackets</code>: 选择性确认的包列表<br>
+<code>MicroNow</code>: 当前时间（微秒）<br>
+</p>
+<p>returns: 更新后的 PCB</p>
+</div><p><p>处理选择性确认（SACK）包</p>
+ 
+  <p>处理选择性确认的包，更新 RTT 估计值，  
+并在需要时触发快速重传。</p>
+ 
+  注意：当前实现与 C++ 版本相比可能浪费带宽。
+  这是未来优化的已知限制。
+ </p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

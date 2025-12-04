@@ -1,0 +1,119 @@
+@author David Gao <david.alpha.fox@gmail.com>
+@copyright 2025 David Gao
+@version 0.2.0
+@title aiutp - Erlang uTP Protocol Library
+@doc
+
+== Introduction ==
+
+aiutp is an Erlang/OTP implementation of the uTP (Micro Transport Protocol)
+as specified in <a href="http://www.bittorrent.org/beps/bep_0029.html">BEP-29</a>.
+
+uTP provides reliable, ordered data delivery over UDP with congestion control
+using the LEDBAT (Low Extra Delay Background Transport) algorithm.
+
+== Features ==
+
+<ul>
+  <li>Reliable, ordered data transmission over UDP</li>
+  <li>LEDBAT congestion control (RFC 6817)</li>
+  <li>Selective Acknowledgment (SACK) support</li>
+  <li>Fast retransmit mechanism</li>
+  <li>Path MTU Discovery (PMTUD)</li>
+  <li>Active/Passive receive modes</li>
+  <li>OTP-compliant supervision tree</li>
+</ul>
+
+== Quick Start ==
+
+=== Server ===
+
+```
+%% Start listening
+{ok, Socket} = aiutp:open(9000),
+ok = aiutp:listen(Socket),
+
+%% Accept connection
+{ok, Conn} = aiutp:accept(Socket),
+
+%% Exchange data
+{ok, Data} = aiutp:recv(Conn, 0),
+ok = aiutp:send(Conn, <<"Response">>),
+
+%% Close
+aiutp:close(Conn).
+'''
+
+=== Client ===
+
+```
+%% Connect to server
+{ok, Socket} = aiutp:open(0),
+{ok, Conn} = aiutp:connect(Socket, "127.0.0.1", 9000),
+
+%% Exchange data
+ok = aiutp:send(Conn, <<"Request">>),
+{ok, Response} = aiutp:recv(Conn, 0),
+
+%% Close
+aiutp:close(Conn).
+'''
+
+== Architecture ==
+
+The library is organized as an OTP application with the following structure:
+
+```
+aiutp_sup (rest_for_one)
++-- aiutp_socket_sup (simple_one_for_one)
+|   +-- aiutp_socket (gen_server) - UDP socket management
++-- aiutp_channel_sup (simple_one_for_one)
+    +-- aiutp_channel (gen_statem) - Connection state machine
+'''
+
+== Core Modules ==
+
+<dl>
+  <dt>{@link aiutp}</dt>
+  <dd>Public API - the main entry point for applications</dd>
+
+  <dt>{@link aiutp_socket}</dt>
+  <dd>UDP socket management and connection dispatching</dd>
+
+  <dt>{@link aiutp_channel}</dt>
+  <dd>Connection state machine (gen_statem behavior)</dd>
+
+  <dt>{@link aiutp_pcb}</dt>
+  <dd>Protocol Control Block - core connection state</dd>
+
+  <dt>{@link aiutp_pcb_cc}</dt>
+  <dd>LEDBAT congestion control implementation</dd>
+
+  <dt>{@link aiutp_mtu}</dt>
+  <dd>Path MTU Discovery using binary search</dd>
+
+  <dt>{@link aiutp_packet}</dt>
+  <dd>Packet encoding and decoding</dd>
+</dl>
+
+== Protocol Parameters ==
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+  <tr><td>RTO_MIN</td><td>1000ms</td><td>Minimum retransmission timeout</td></tr>
+  <tr><td>RTO_MAX</td><td>6000ms</td><td>Maximum retransmission timeout</td></tr>
+  <tr><td>TARGET_DELAY</td><td>100ms</td><td>LEDBAT target delay</td></tr>
+  <tr><td>PACKET_SIZE</td><td>1296 bytes</td><td>Default packet size</td></tr>
+  <tr><td>MTU_FLOOR</td><td>528 bytes</td><td>MTU discovery lower bound</td></tr>
+  <tr><td>MTU_CEILING</td><td>1452 bytes</td><td>MTU discovery upper bound</td></tr>
+</table>
+
+== References ==
+
+<ul>
+  <li><a href="http://www.bittorrent.org/beps/bep_0029.html">BEP-29: uTP Protocol Specification</a></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc6817">RFC 6817: LEDBAT Congestion Control</a></li>
+  <li><a href="https://github.com/bittorrent/libutp">libutp: Reference C++ Implementation</a></li>
+</ul>
+
+@end

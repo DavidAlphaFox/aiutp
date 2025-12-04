@@ -40,11 +40,14 @@
     push_front/2,   %% 从头部插入
     push_back/2,    %% 从尾部插入
     pop_front/1,    %% 从头部弹出
-    pop_back/1,     %% 从尾部弹出
     front/1,        %% 查看头部元素
-    back/1,         %% 查看尾部元素
     to_list/1       %% 转换为列表
 ]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([pop_back/1, back/1]).
+-endif.
 
 -export_type([aiutp_queue/0, aiutp_queue/1]).
 

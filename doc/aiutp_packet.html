@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp_packet</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp_packet</h1>
+<ul class="index"><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>
+
+
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-extension">extension()</a></h3>
+<p><code>extension() = {sack, binary()} | {ext_bits, binary() | undefined}</code></p>
+
+
+<h3 class="typedecl"><a name="type-extension_list">extension_list()</a></h3>
+<p><code>extension_list() = [<a href="#type-extension" docgen-rel="seetype" docgen-href="#extension/0">extension()</a>]</code></p>
+
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#ack-2">ack/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#ack-3">ack/3</a></td><td></td></tr>
+<tr><td valign="top"><a href="#data-2">data/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#decode-1">decode/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#encode-1">encode/1</a></td><td></td></tr>
+<tr><td valign="top"><a href="#reset-2">reset/2</a></td><td></td></tr>
+<tr><td valign="top"><a href="#syn-1">syn/1</a></td><td></td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="ack-2">ack/2</a></h3>
+<div class="spec">
+<p><code>ack(SeqNR::non_neg_integer(), AckNR::non_neg_integer()) -&gt; #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="ack-3">ack/3</a></h3>
+<div class="spec">
+<p><code>ack(SeqNR::non_neg_integer(), AckNR::non_neg_integer(), Ext::<a href="#type-extension_list" docgen-rel="seetype" docgen-href="#extension_list/0">extension_list()</a>) -&gt; #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="data-2">data/2</a></h3>
+<div class="spec">
+<p><code>data(SeqNR::non_neg_integer(), AckNR::non_neg_integer()) -&gt; #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="decode-1">decode/1</a></h3>
+<div class="spec">
+<p><code>decode(Packet::binary()) -&gt; {ok, #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}} | {error, drop}</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="encode-1">encode/1</a></h3>
+<div class="spec">
+<p><code>encode(Aiutp_packet::#aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}) -&gt; binary()</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="reset-2">reset/2</a></h3>
+<div class="spec">
+<p><code>reset(ConnId::non_neg_integer(), AckNR::non_neg_integer()) -&gt; #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}</code><br></p>
+<p> </p>
+</div>
+
+<h3 class="function"><a name="syn-1">syn/1</a></h3>
+<div class="spec">
+<p><code>syn(SeqNR::non_neg_integer()) -&gt; #aiutp_packet{type = 0 | 1 | 2 | 3 | 4, conn_id = non_neg_integer() | undefined, wnd = non_neg_integer(), seq_nr = non_neg_integer(), ack_nr = non_neg_integer(), tv_usec = non_neg_integer(), reply_micro = non_neg_integer(), extension = list(), payload = binary()}</code><br></p>
+<p> </p>
+</div>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

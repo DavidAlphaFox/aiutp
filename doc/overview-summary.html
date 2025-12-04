@@ -1,0 +1,126 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>aiutp - Erlang uTP Protocol Library</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<h1>aiutp - Erlang uTP Protocol Library</h1>
+<p>Copyright © 2025 David Gao</p>
+<p><b>Version:</b> 0.2.0</p>
+<p><b>Authors:</b> David Gao (<a href="mailto:david.alpha.fox@gmail.com"><code>david.alpha.fox@gmail.com</code></a>).</p>
+
+
+<h3><a name="Introduction">Introduction</a></h3>
+
+<p>aiutp is an Erlang/OTP implementation of the uTP (Micro Transport Protocol)
+as specified in <a href="http://www.bittorrent.org/beps/bep_0029.html">BEP-29</a>.</p>
+
+<p>uTP provides reliable, ordered data delivery over UDP with congestion control
+using the LEDBAT (Low Extra Delay Background Transport) algorithm.</p>
+
+<h3><a name="Features">Features</a></h3>
+
+<ul>
+  <li>Reliable, ordered data transmission over UDP</li>
+  <li>LEDBAT congestion control (RFC 6817)</li>
+  <li>Selective Acknowledgment (SACK) support</li>
+  <li>Fast retransmit mechanism</li>
+  <li>Path MTU Discovery (PMTUD)</li>
+  <li>Active/Passive receive modes</li>
+  <li>OTP-compliant supervision tree</li>
+</ul>
+
+<h3><a name="Quick_Start">Quick Start</a></h3>
+
+<h4><a name="Server">Server</a></h4>
+
+<pre>%% Start listening
+{ok, Socket} = aiutp:open(9000),
+ok = aiutp:listen(Socket),
+
+%% Accept connection
+{ok, Conn} = aiutp:accept(Socket),
+
+%% Exchange data
+{ok, Data} = aiutp:recv(Conn, 0),
+ok = aiutp:send(Conn, &lt;&lt;"Response"&gt;&gt;),
+
+%% Close
+aiutp:close(Conn).</pre>
+
+<h4><a name="Client">Client</a></h4>
+
+<pre>%% Connect to server
+{ok, Socket} = aiutp:open(0),
+{ok, Conn} = aiutp:connect(Socket, "127.0.0.1", 9000),
+
+%% Exchange data
+ok = aiutp:send(Conn, &lt;&lt;"Request"&gt;&gt;),
+{ok, Response} = aiutp:recv(Conn, 0),
+
+%% Close
+aiutp:close(Conn).</pre>
+
+<h3><a name="Architecture">Architecture</a></h3>
+
+<p>The library is organized as an OTP application with the following structure:</p>
+
+<pre>aiutp_sup (rest_for_one)
++-- aiutp_socket_sup (simple_one_for_one)
+|   +-- aiutp_socket (gen_server) - UDP socket management
++-- aiutp_channel_sup (simple_one_for_one)
+    +-- aiutp_channel (gen_statem) - Connection state machine</pre>
+
+<h3><a name="Core_Modules">Core Modules</a></h3>
+
+<dl>
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp" href="aiutp.html"><code>aiutp</code></a></dt>
+  <dd>Public API - the main entry point for applications</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_socket" href="aiutp_socket.html"><code>aiutp_socket</code></a></dt>
+  <dd>UDP socket management and connection dispatching</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_channel" href="aiutp_channel.html"><code>aiutp_channel</code></a></dt>
+  <dd>Connection state machine (gen_statem behavior)</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_pcb" href="aiutp_pcb.html"><code>aiutp_pcb</code></a></dt>
+  <dd>Protocol Control Block - core connection state</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_pcb_cc" href="aiutp_pcb_cc.html"><code>aiutp_pcb_cc</code></a></dt>
+  <dd>LEDBAT congestion control implementation</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_mtu" href="aiutp_mtu.html"><code>aiutp_mtu</code></a></dt>
+  <dd>Path MTU Discovery using binary search</dd>
+
+  <dt><a docgen-rel="seeerl" docgen-href="aiutp_packet" href="aiutp_packet.html"><code>aiutp_packet</code></a></dt>
+  <dd>Packet encoding and decoding</dd>
+</dl>
+
+<h3><a name="Protocol_Parameters">Protocol Parameters</a></h3>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+  <tr><td>RTO_MIN</td><td>1000ms</td><td>Minimum retransmission timeout</td></tr>
+  <tr><td>RTO_MAX</td><td>6000ms</td><td>Maximum retransmission timeout</td></tr>
+  <tr><td>TARGET_DELAY</td><td>100ms</td><td>LEDBAT target delay</td></tr>
+  <tr><td>PACKET_SIZE</td><td>1296 bytes</td><td>Default packet size</td></tr>
+  <tr><td>MTU_FLOOR</td><td>528 bytes</td><td>MTU discovery lower bound</td></tr>
+  <tr><td>MTU_CEILING</td><td>1452 bytes</td><td>MTU discovery upper bound</td></tr>
+</table>
+
+<h3><a name="References">References</a></h3>
+
+<ul>
+  <li><a href="http://www.bittorrent.org/beps/bep_0029.html">BEP-29: uTP Protocol Specification</a></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc6817">RFC 6817: LEDBAT Congestion Control</a></li>
+  <li><a href="https://github.com/bittorrent/libutp">libutp: Reference C++ Implementation</a></li>
+</ul>
+
+<hr>
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>

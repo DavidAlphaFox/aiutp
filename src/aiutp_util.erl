@@ -1,9 +1,14 @@
 -module(aiutp_util).
 
 -export([bit16/1,bit32/1,getaddr/1]).
--export([bit16_random/0,bit32_random/0]).
+-export([bit16_random/0]).
 -export([microsecond/0,millisecond/0]).
--export([clamp/3,wrapping_compare_less/3]).
+-export([clamp/3]).
+
+%% 仅测试使用的导出
+-ifdef(TEST).
+-export([bit32_random/0,wrapping_compare_less/3]).
+-endif.
 
 %% 类型定义
 -type ipv4_address() :: {0..255, 0..255, 0..255, 0..255}.

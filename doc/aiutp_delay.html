@@ -1,0 +1,149 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Module aiutp_delay</title>
+<link rel="stylesheet" type="text/css" href="stylesheet.css" title="EDoc">
+</head>
+<body bgcolor="white">
+<div class="navbar"><a name="#navbar_top"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<hr>
+
+<h1>Module aiutp_delay</h1>
+<ul class="index"><li><a href="#description">Description</a></li><li><a href="#types">Data Types</a></li><li><a href="#index">Function Index</a></li><li><a href="#functions">Function Details</a></li></ul>LEDBAT 延迟估计模块.
+
+<p><b>References</b><ul><li>RFC 6817: Low Extra Delay Background Transport (LEDBAT)</li><li>libutp: https://github.com/bittorrent/libutp</li></ul></p>
+
+<h2><a name="description">Description</a></h2><p>LEDBAT 延迟估计模块</p>
+ 
+  <p>本模块实现 RFC 6817 中定义的延迟测量和过滤算法，用于 LEDBAT 拥塞控制。</p>
+ 
+  <h3><a name="概述">概述</a></h3>
+ 
+  <p>LEDBAT 需要估计网络路径上的排队延迟（queuing delay）。为此，需要：  
+1. 测量端到端单向延迟（one-way delay）  
+2. 从中分离出固定延迟成分（传播延迟等）  
+3. 得到可变的排队延迟成分</p>
+ 
+  <h3><a name="核心概念">核心概念</a></h3>
+ 
+  <h4><a name="Base_Delay（基准延迟）">Base Delay（基准延迟）</a></h4><p>  
+- 表示路径上的最小固定延迟（传播延迟 + 最小处理延迟）  
+- 通过记录历史观测到的最小延迟值来估计  
+- RFC 6817: 应保持 BASE_HISTORY (10-13) 分钟的历史  
+- 每分钟维护一个最小值，防止单个异常值影响</p>
+ 
+  <h4><a name="Current_Delay（当前延迟）">Current Delay（当前延迟）</a></h4><p>  
+- 最近 RTT 内观测到的延迟样本  
+- RFC 6817: 应保留不超过一个 RTT 的样本  
+- libutp: 使用 CUR_DELAY_SIZE (3) 个样本的滑动窗口</p>
+ 
+  <h4><a name="Queuing_Delay（排队延迟）">Queuing Delay（排队延迟）</a></h4><p>  
+- 计算公式: queuing_delay = min(current_delays) - base_delay  
+- 这是 LEDBAT 拥塞控制的核心输入</p>
+ 
+  <h3><a name="时钟漂移处理">时钟漂移处理</a></h3>
+ 
+  <p>由于发送方和接收方的时钟可能以不同速率运行，会导致：  
+- 时钟偏移（Clock Offset）: 两端时钟的固定差值，可以互相抵消  
+- 时钟漂移（Clock Skew）: 时钟速率差异导致的累积误差</p>
+ 
+  <p>本模块通过以下机制处理时钟漂移：  
+1. 定期（每分钟）更新 base_delay 历史  
+2. shift/2 函数用于根据对端的 base_delay 变化调整本地值  
+3. 使用 32 位环绕安全的比较算法</p>
+ 
+  <h3><a name="32_位环绕处理">32 位环绕处理</a></h3>
+ 
+  uTP 时间戳使用 32 位微秒计数器，约每 71 分钟环绕一次。
+  示例场景：
+  - delay_base = 0xFFFFFF00, sample = 0x00000400
+    sample - delay_base = 0x500 (正确的 1280 微秒差值)
+  - delay_base = 0x00000400, sample = 0xFFFFFF00
+    需要解释为负数（样本比基准更早）
+ 
+<h2><a name="types">Data Types</a></h2>
+
+<h3 class="typedecl"><a name="type-aiutp_delay">aiutp_delay()</a></h3>
+<p><b>abstract datatype</b>: <code>aiutp_delay()</code></p>
+
+
+<h2><a name="index">Function Index</a></h2>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add_sample-3">add_sample/3</a></td><td>添加新的延迟样本.</td></tr>
+<tr><td valign="top"><a href="#delay_base-1">delay_base/1</a></td><td>获取当前基准延迟.</td></tr>
+<tr><td valign="top"><a href="#new-1">new/1</a></td><td>创建新的延迟估计器.</td></tr>
+<tr><td valign="top"><a href="#shift-2">shift/2</a></td><td>调整基准延迟以补偿时钟漂移.</td></tr>
+<tr><td valign="top"><a href="#value-1">value/1</a></td><td>获取当前延迟估计值（排队延迟）.</td></tr>
+</table>
+
+<h2><a name="functions">Function Details</a></h2>
+
+<h3 class="function"><a name="add_sample-3">add_sample/3</a></h3>
+<div class="spec">
+<p><code>add_sample(Sample::non_neg_integer(), CurMilli::integer(), Aiutp_delay::<a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a>) -&gt; <a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a></code><br></p>
+<p><code>Sample</code>: 新的延迟样本（32 位微秒时间戳）<br>
+<code>CurMilli</code>: 当前时间（毫秒）<br>
+</p>
+<p>returns: 更新后的延迟估计器</p>
+</div><p><p>添加新的延迟样本</p>
+ 
+  <p>这是延迟估计的核心函数，每收到一个 ACK 包时调用。</p>
+ 
+  算法步骤：
+  1. 如果是首个样本，初始化所有历史
+  2. 更新当前分钟的最小值（如果样本更小）
+  3. 更新全局 delay_base（如果样本更小）
+  4. 计算相对延迟并存入 cur_delay_hist
+  5. 如果超过 60 秒，滚动 delay_base_hist 并重新计算 delay_base
+ </p>
+
+<h3 class="function"><a name="delay_base-1">delay_base/1</a></h3>
+<div class="spec">
+<p><code>delay_base(Aiutp_delay::<a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a>) -&gt; non_neg_integer()</code><br></p>
+<p> </p>
+<p>returns: 基准延迟（32 位微秒时间戳）</p>
+</div><p>获取当前基准延迟
+ </p>
+
+<h3 class="function"><a name="new-1">new/1</a></h3>
+<div class="spec">
+<p><code>new(CurMilli::integer()) -&gt; <a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a></code><br></p>
+<p><code>CurMilli</code>: 当前时间（毫秒），用于基准延迟历史的时间追踪<br>
+</p>
+</div><p>创建新的延迟估计器
+ </p>
+
+<h3 class="function"><a name="shift-2">shift/2</a></h3>
+<div class="spec">
+<p><code>shift(Offset::non_neg_integer(), Aiutp_delay::<a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a>) -&gt; <a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a></code><br></p>
+<p><code>Offset</code>: 偏移量（微秒），应为非负值且小于 0x10000000<br>
+</p>
+<p>returns: 调整后的延迟估计器</p>
+</div><p><p>调整基准延迟以补偿时钟漂移</p>
+ 
+  <p>当观测到对端的 base_delay 减少时调用此函数，  
+将本地的所有历史延迟值增加相应的偏移量。</p>
+ 
+  libutp: "increase all of our base delays by this amount
+  this is used to take clock skew into account
+  by observing the other side's changes in its base_delay"
+ </p>
+
+<h3 class="function"><a name="value-1">value/1</a></h3>
+<div class="spec">
+<p><code>value(Aiutp_delay::<a href="#type-aiutp_delay" docgen-rel="seetype" docgen-href="#aiutp_delay/0">aiutp_delay()</a>) -&gt; non_neg_integer()</code><br></p>
+<p> </p>
+<p>returns: 当前排队延迟估计值（微秒）</p>
+</div><p><p>获取当前延迟估计值（排队延迟）</p>
+ 
+  返回 cur_delay_hist 中的最小值，表示当前估计的排队延迟。
+  RFC 6817: queuing_delay = FILTER(current_delays) - MIN(base_delays)
+  由于 cur_delay_hist 中存储的已经是相对于 delay_base 的值，
+  所以直接返回最小值即可。
+ </p>
+<hr>
+
+<div class="navbar"><a name="#navbar_bottom"></a><table width="100%" border="0" cellspacing="0" cellpadding="2" summary="navigation bar"><tr><td><a href="overview-summary.html" target="overviewFrame">Overview</a></td><td><a href="http://www.erlang.org/"><img src="erlang.png" align="right" border="0" alt="erlang logo"></a></td></tr></table></div>
+<p><i>Generated by EDoc</i></p>
+</body>
+</html>
