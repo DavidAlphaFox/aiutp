@@ -59,6 +59,19 @@
 
 ### 最近完成 (2025-12-04)
 
+- ✅ **数据发送流程优化分析** - 深入分析发送流程，识别优化空间，对比 libutp
+  - 分析 outque → outbuf → UDP 完整流程
+  - 对比 libutp 发送策略（Nagle、批量发送、定时器频率）
+  - 识别性能瓶颈（系统调用、二进制拷贝、缓冲区遍历）
+  - 评估优化方案（批量发送、零拷贝、自适应定时器）
+  - 生成详细分析报告：[docs/report/tx-optimization-analysis-2025-12-04.md](./docs/report/tx-optimization-analysis-2025-12-04.md)
+  - **结论**: 当前实现已优化良好，无需大规模重构
+- ✅ **libutp 差异分析报告** - 系统性分析 aiutp 与 libutp 参考实现的差异
+  - 分析常量和参数差异（RTO_MIN、PACKET_SIZE、MTU 边界等）
+  - 验证 LEDBAT 拥塞控制算法对齐
+  - 验证快速重传和 SACK 处理对齐
+  - 验证 RTT 计算和超时机制对齐
+  - 生成详细差异报告：[docs/report/libutp-difference-analysis-2025-12-04.md](./docs/report/libutp-difference-analysis-2025-12-04.md)
 - ✅ MTU 超时处理集成 (aiutp_pcb_timeout.erl)
 - ✅ MTU 丢包检测集成 (aiutp_tx.erl)
 - ✅ MTU 周期性重新探测 (30 分钟间隔)

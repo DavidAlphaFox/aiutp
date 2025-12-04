@@ -11,10 +11,9 @@
 %% - 标记所有未确认包为需要重发
 %% - 重置拥塞窗口到 1 个包大小，启用慢启动
 %%
-%% === Keepalive 超时 ===
+%% === Keepalive ===
 %% - 每 KEEPALIVE_INTERVAL (29秒) 发送一次心跳
-%% - 用于保持 NAT 映射和检测死连接
-%% - 如果 2 * KEEPALIVE_INTERVAL 内没有收到包，关闭连接
+%% - 用于保持 NAT 映射
 %%
 %% === 连接超时 ===
 %% - SYN_SENT: 最多重试 MAX_SYN_RETRIES (2) 次
@@ -55,11 +54,16 @@
 %%------------------------------------------------------------------------------
 %% @doc 超时检查的主入口点
 %%
-%% 定期调用以处理各种超时条件：
-%% 1. 刷新待发送的包
-%% 2. 检查 RTO 超时
-%% 3. 检查 keepalive 超时
-%% 4. 检查连接状态转换
+%% 模仿 libutp 的 utp_check_timeouts() 设计：
+%% 1. 每次调用都刷新待发送的包（flush_packets）
+%% 2. 使用 TIMEOUT_CHECK_INTERVAL (500ms) 节流完整的超时检查
+%%
+%% 节流逻辑与 libutp 一致：
+%% ```
+%% if (ctx->current_ms - ctx->last_check < TIMEOUT_CHECK_INTERVAL)
+%%     return;
+%% ctx->last_check = ctx->current_ms;
+%% ```
 %%
 %% @param PCB 协议控制块
 %% @returns 超时处理后的更新 PCB
@@ -71,11 +75,20 @@ check_timeouts(#aiutp_pcb{state = State} = PCB)
        State == ?CS_RESET ->
     %% 已销毁或重置的连接不需要超时检查
     PCB;
-check_timeouts(PCB) ->
+check_timeouts(#aiutp_pcb{last_timeout_check = LastCheck} = PCB) ->
     Now = aiutp_util:millisecond(),
-    %% 先刷新待发送的包
+    %% 每次调用都刷新待发送的包
     PCB0 = aiutp_net:flush_packets(PCB),
-    do_check_timeouts(PCB0#aiutp_pcb{time = Now}).
+    %% 节流检查：与 libutp TIMEOUT_CHECK_INTERVAL 一致
+    case Now - LastCheck < ?TIMEOUT_CHECK_INTERVAL of
+        true ->
+            %% 不到 500ms，跳过完整的超时检查
+            PCB0;
+        false ->
+            %% 执行完整超时检查，更新 last_timeout_check
+            PCB1 = PCB0#aiutp_pcb{time = Now, last_timeout_check = Now},
+            do_check_timeouts(PCB1)
+    end.
 
 %%------------------------------------------------------------------------------
 %% @doc 标记发送缓冲区中需要重发的包
@@ -238,9 +251,10 @@ handle_mtu_probe_timeout(PCB) ->
 %%
 %% libutp 致命超时条件：
 %% 1. SYN_RECV 状态超时 -> 直接销毁
-%% 2. Keepalive 超时（2 * KEEPALIVE_INTERVAL 没有收到包）
-%% 3. SYN_SENT 重试超过 MAX_SYN_RETRIES
-%% 4. 一般重试超过 MAX_RETRANSMIT_COUNT
+%% 2. SYN_SENT 重试超过 MAX_SYN_RETRIES
+%% 3. 一般重试超过 MAX_RETRANSMIT_COUNT
+%%
+%% 注意: libutp 不检测接收超时，完全依赖 RTO 重传机制来检测死连接。
 %%
 %% @returns {Continue, PCB} - Continue 为 false 表示连接应终止
 %%------------------------------------------------------------------------------
@@ -249,20 +263,6 @@ check_fatal_timeout(#aiutp_pcb{state = ?CS_SYN_RECV} = PCB) ->
     %% 因为可能是恶意连接尝试
     logger:debug("SYN_RECV timeout, destroying connection"),
     {false, PCB#aiutp_pcb{state = ?CS_DESTROY}};
-
-check_fatal_timeout(#aiutp_pcb{
-        time = Now,
-        last_got_packet = LastGotPacket,
-        close_requested = CloseRequested
-    } = PCB)
-  when (LastGotPacket > 0) andalso
-       (Now - LastGotPacket > ?KEEPALIVE_INTERVAL * 2) ->
-    %% libutp: Keepalive 超时
-    logger:warning("Connection timeout: no packet received for ~p ms",
-                   [Now - LastGotPacket]),
-    PCB0 = aiutp_net:send_reset(PCB),
-    NewState = if CloseRequested -> ?CS_DESTROY; true -> ?CS_RESET end,
-    {false, PCB0#aiutp_pcb{state = NewState}};
 
 check_fatal_timeout(#aiutp_pcb{
         state = ?CS_SYN_SENT,
@@ -311,7 +311,7 @@ do_retransmit_timeout(#aiutp_pcb{
     } = PCB) ->
 
     %% libutp: 指数退避 RTO *= 2
-    NewTimeout = RetransmitTimeout * 2,
+    NewTimeout = RetransmitTimeout * 1.5,
 
     %% 调整拥塞窗口
     PCB0 =

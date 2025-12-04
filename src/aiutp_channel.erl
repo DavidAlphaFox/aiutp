@@ -970,11 +970,18 @@ release_conn_id(_, _, _) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 启动超时检查定时器
+%% @doc 启动 channel tick 定时器
+%%
+%% 相当于 libutp 应用层定时器，以 CHANNEL_TICK_INTERVAL (50ms) 频率触发。
+%% check_timeouts 内部使用 TIMEOUT_CHECK_INTERVAL (500ms) 节流实际检查。
+%%
+%% 设计与 libutp 一致：
+%% - 应用层高频调用（50ms）保证及时性
+%% - 内部节流（500ms）控制实际检查频率
 %%------------------------------------------------------------------------------
 -spec start_tick_timer() -> reference().
 start_tick_timer() ->
-    erlang:start_timer(?TIMEOUT_CHECK_INTERVAL, self(), tick).
+    erlang:start_timer(?CHANNEL_TICK_INTERVAL, self(), tick).
 
 %%------------------------------------------------------------------------------
 %% @private

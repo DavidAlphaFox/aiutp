@@ -71,7 +71,7 @@
 
 %% libutp: 最小 RTO 为 1000ms
 %% 注意: BEP-29 建议 500ms，但 libutp 使用 1000ms
--define(RTO_MIN, 1000).
+-define(RTO_MIN, 500).
 
 %% BEP-29: 最大 RTO（实现相关）
 -define(RTO_MAX, 6000).
@@ -88,7 +88,13 @@
 %% 用于保持 NAT 映射和检测死连接
 -define(KEEPALIVE_INTERVAL, 29000).
 
-%% 超时检查间隔（毫秒）
+%% Channel tick 定时器间隔（毫秒）
+%% 相当于 libutp 建议的应用层调用频率 (50ms)
+-define(CHANNEL_TICK_INTERVAL, 50).
+
+%% 超时检查节流阈值（毫秒）
+%% 与 libutp TIMEOUT_CHECK_INTERVAL 一致
+%% check_timeouts 内部使用此值节流，实际超时检查最多每 500ms 执行一次
 -define(TIMEOUT_CHECK_INTERVAL, 500).
 
 %% RST 信息缓存超时（毫秒）
@@ -167,7 +173,7 @@
 
 %% RFC 6817: 目标延迟必须 <= 100ms
 %% BEP-29: 默认 CCONTROL_TARGET = 100ms
--define(TARGET_DELAY, 100000).  %% 微秒
+-define(TARGET_DELAY, 200000).  %% 微秒
 
 %% RFC 6817: GAIN 必须 <= 1
 %% libutp: 每个 RTT 最大增加 MAX_CWND_INCREASE_BYTES_PER_RTT 字节
@@ -498,6 +504,10 @@
 
     %% 零窗口探测定时器（窗口为 0 时每 30 秒发送包）
     zerowindow_time = 0 :: non_neg_integer(),
+
+    %% 上次超时检查的时间（毫秒）
+    %% 用于节流，防止过于频繁的检查（与 libutp TIMEOUT_CHECK_INTERVAL 对应）
+    last_timeout_check = 0 :: non_neg_integer(),
 
     %%--------------------------------------------------------------------------
     %% 缓冲区和队列
