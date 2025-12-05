@@ -1,6 +1,6 @@
 # AIUTP 任务追踪
 
-> 最后更新: 2025-12-04
+> 最后更新: 2025-12-05
 
 ## 当前任务
 
@@ -16,6 +16,42 @@
 |------|------|--------|
 | Hex 发布 | 准备发布到 Hex.pm | 低 |
 | 删除测试文件 | 删除 src/aiutp_test.erl | 低 |
+
+---
+
+## 状态机边缘情况修复任务分解 ✅
+
+> 详细分析报告: [docs/report/state-machine-edge-case-analysis-2025-12-05.md](./docs/report/state-machine-edge-case-analysis-2025-12-05.md)
+
+### 🔴 高优先级（潜在资源泄漏或连接卡死） ✅
+
+| 任务 ID | 任务 | 描述 | 文件 | 状态 |
+|---------|------|------|------|------|
+| SM-1.1 | FIN 等待超时值错误 | 将 `60` 改为 `60000`（60ms → 60s） | `src/aiutp_rx.erl:136` | ✅ 完成 |
+| SM-1.2 | FIN 数据等待超时检测 | 添加 `got_fin=true` 但 `got_fin_reached=false` 时的超时检测 | `src/aiutp_pcb_timeout.erl` | ✅ 完成 |
+| SM-1.3 | CS_SYN_RECV 重复 SYN 处理 | 处理 seq_nr 不匹配的 SYN 包 | `src/aiutp_pcb.erl:185` | ✅ 完成 |
+
+### 🟡 中优先级（边缘情况处理不一致） ✅
+
+| 任务 ID | 任务 | 描述 | 文件 | 状态 |
+|---------|------|------|------|------|
+| SM-2.1 | 半关闭状态通知 | 发送 `utp_passive_close` 消息通知应用层 | `src/aiutp_channel.erl` | ✅ 完成 |
+| SM-2.2 | RESET 包验证 | 验证 ack_nr 在合理范围内（防止 RST 攻击） | `src/aiutp_pcb.erl:166` | ✅ 完成 |
+
+### 🟢 低优先级（极端边缘情况） ✅
+
+| 任务 ID | 任务 | 描述 | 文件 | 状态 |
+|---------|------|------|------|------|
+| SM-3.1 | CS_SYN_SENT 收到 ST_DATA | 允许 ST_DATA 触发 SYN_SENT → CONNECTED 状态转换 | `src/aiutp_pcb.erl:474` | ✅ 完成 |
+| SM-3.2 | MTU 探测失败日志 | 添加连续探测失败时的警告日志 | `src/aiutp_mtu.erl:125` | ✅ 完成 |
+
+### 测试任务 ✅
+
+| 任务 ID | 任务 | 描述 | 状态 |
+|---------|------|------|------|
+| SM-T1 | FIN + 对端崩溃测试 | 测试收到 FIN 后对端不再发送数据的超时检测 | ✅ 完成 |
+| SM-T2 | SYN_RECV 重复 SYN 测试 | 测试 seq_nr 不匹配的重复 SYN 处理 | ✅ 完成 |
+| SM-T3 | RESET 包验证测试 | 测试 conn_id 和 ack_nr 验证 | ✅ 完成 |
 
 ---
 

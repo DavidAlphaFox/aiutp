@@ -19,6 +19,7 @@
 -include("aiutp.hrl").
 
 -export([state/1,
+         got_fin_reached/1,
          process_incoming/2,
          check_timeouts/1,
          write/2,
@@ -75,6 +76,15 @@ new(ConnIdRecv, ConnIdSend, Socket) ->
 %%------------------------------------------------------------------------------
 -spec state(#aiutp_pcb{}) -> atom().
 state(#aiutp_pcb{state = State}) -> State.
+
+%%------------------------------------------------------------------------------
+%% @doc 检查是否已收到对端的 FIN 及之前的所有数据
+%%
+%% 当返回 true 时，表示对端已发起关闭（半关闭状态）
+%% @end
+%%------------------------------------------------------------------------------
+-spec got_fin_reached(#aiutp_pcb{}) -> boolean().
+got_fin_reached(#aiutp_pcb{got_fin_reached = GotFinReached}) -> GotFinReached.
 
 %%------------------------------------------------------------------------------
 %% @doc 检查连接是否已关闭并返回原因
@@ -152,16 +162,33 @@ dispatch_by_type(_, _, #aiutp_pcb{state = State} = PCB)
 
 %% @private 处理 ST_RESET 包 - 立即终止连接
 %% 根据 BEP-29：RESET 导致连接立即断开，无需响应
+%% 安全验证：conn_id 和 ack_nr 必须在合理范围内，防止 RST 攻击（类似 RFC 5961）
 dispatch_by_type(?ST_RESET,
-                 #aiutp_packet{conn_id = ConnId},
+                 #aiutp_packet{conn_id = ConnId, ack_nr = PktAckNR},
                  #aiutp_pcb{conn_id_send = ConnIdSend,
                             conn_id_recv = ConnIdRecv,
+                            seq_nr = SeqNR,
+                            cur_window_packets = CurWindowPackets,
                             close_requested = CloseRequested} = PCB) ->
-    if (ConnIdSend == ConnId) or (ConnIdRecv == ConnId) ->
+    %% 验证 conn_id
+    ConnIdValid = (ConnIdSend == ConnId) orelse (ConnIdRecv == ConnId),
+
+    %% 验证 ack_nr 在合理范围内（类似 TCP RST 验证）
+    %% 允许的范围：[seq_nr - 1 - max(cur_window_packets, 16), seq_nr - 1]
+    MaxSeqNR = aiutp_util:bit16(SeqNR - 1),
+    MinSeqNR = aiutp_util:bit16(SeqNR - 1 - erlang:max(CurWindowPackets, 16)),
+    AckNrValid = (?WRAPPING_DIFF_16(MaxSeqNR, PktAckNR) >= 0) andalso
+                 (?WRAPPING_DIFF_16(PktAckNR, MinSeqNR) >= 0),
+
+    if ConnIdValid andalso AckNrValid ->
         if CloseRequested == true -> PCB#aiutp_pcb{state = ?CS_DESTROY};
            true -> PCB#aiutp_pcb{state = ?CS_RESET}
         end;
-       true -> PCB
+       true ->
+        %% RESET 包验证失败，忽略
+        logger:debug("Invalid RESET packet: conn_id=~p (valid=~p), ack_nr=~p (valid=~p)",
+                     [ConnId, ConnIdValid, PktAckNR, AckNrValid]),
+        PCB
     end;
 
 %% @private 处理 ST_SYN 包 - 新的入站连接
@@ -179,12 +206,25 @@ dispatch_by_type(?ST_SYN,
     },
     aiutp_net:send_ack(PCB0);
 
-%% @private 处理重复的 SYN - 重传我们的 SYN-ACK
+%% @private 处理 CS_SYN_RECV 状态下的 SYN 包
+%% 场景 1: seq_nr 匹配 - 重复 SYN，重传我们的 STATE
+%% 场景 2: seq_nr 不匹配 - 客户端可能重启了连接，发送 RESET
 dispatch_by_type(?ST_SYN,
-                 #aiutp_packet{seq_nr = AckNR},
-                 #aiutp_pcb{state = ?CS_SYN_RECV, ack_nr = AckNR} = PCB) ->
-    PCB0 = PCB#aiutp_pcb{last_got_packet = aiutp_util:millisecond()},
-    aiutp_net:send_ack(PCB0);
+                 #aiutp_packet{seq_nr = PktSeqNR},
+                 #aiutp_pcb{state = ?CS_SYN_RECV, ack_nr = OurAckNR} = PCB) ->
+    Now = aiutp_util:millisecond(),
+    PCB0 = PCB#aiutp_pcb{last_got_packet = Now},
+    if PktSeqNR == OurAckNR ->
+        %% 重复 SYN，重传我们的 STATE
+        aiutp_net:send_ack(PCB0);
+       true ->
+        %% seq_nr 改变了，说明客户端可能重启了连接
+        %% 发送 RESET 拒绝旧连接，让客户端重新开始
+        logger:warning("SYN seq_nr mismatch in SYN_RECV: got=~p, expected=~p",
+                       [PktSeqNR, OurAckNR]),
+        PCB1 = aiutp_net:send_reset(PCB0),
+        PCB1#aiutp_pcb{state = ?CS_DESTROY}
+    end;
 
 %% @private 处理其他所有包类型（ST_DATA、ST_STATE、ST_FIN）
 %% 在进入完整处理流程前验证 ACK 号
@@ -428,9 +468,11 @@ update_ack_state(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
         end,
 
     %% 检查 FIN 是否被确认和最终状态转换
+    %% CS_SYN_SENT -> CS_CONNECTED: 收到 ST_STATE（纯 ACK）或 ST_DATA（携带数据的 ACK）
+    %% 虽然 BEP-29 通常使用 ST_STATE 作为 SYN-ACK，但 ST_DATA 理论上也有效
     {State1, FinSentAcked0} =
-        if (PktType == ?ST_STATE) and (State0 == ?CS_SYN_SENT) ->
-            %% 收到 SYN-ACK，连接已建立
+        if ((PktType == ?ST_STATE) orelse (PktType == ?ST_DATA)) and (State0 == ?CS_SYN_SENT) ->
+            %% 收到 SYN-ACK（可能携带数据），连接已建立
             {?CS_CONNECTED, false};
            (FinSent == true) and (CurWindowPackets == 0) ->
             %% 包括 FIN 在内的所有包都已被确认

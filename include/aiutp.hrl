@@ -103,6 +103,11 @@
 %% 用于检测对端崩溃导致的死连接，防止资源泄漏
 -define(RECV_IDLE_TIMEOUT, 60000).
 
+%% FIN 数据等待超时（毫秒）
+%% 当收到 FIN（got_fin=true）但还有之前的数据包未到达（got_fin_reached=false）时触发
+%% 10 秒足够对端重传所有缺失的包，超时说明对端可能已崩溃
+-define(FIN_DATA_TIMEOUT, 10000).
+
 %% RST 信息缓存超时（毫秒）
 -define(RST_INFO_TIMEOUT, 10000).
 -define(RST_INFO_LIMIT, 1000).

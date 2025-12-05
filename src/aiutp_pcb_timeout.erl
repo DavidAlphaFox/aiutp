@@ -429,13 +429,26 @@ maybe_transition_from_full(PCB) ->
 check_recv_idle_timeout(#aiutp_pcb{
         time = Now,
         last_got_packet = LastGotPacket,
-        cur_window_packets = CurWindowPackets
+        cur_window_packets = CurWindowPackets,
+        got_fin = GotFin,
+        got_fin_reached = GotFinReached
     } = PCB) ->
     IdleTime = Now - LastGotPacket,
-    %% 只有当我们没有发送待确认的数据时才检查接收空闲
-    %% 如果有待确认的发送数据，重传机制会处理超时
-    if (CurWindowPackets == 0) andalso (IdleTime >= ?RECV_IDLE_TIMEOUT) ->
-        logger:warning("Receive idle timeout after ~p ms", [IdleTime]),
+
+    %% 特殊情况：等待 FIN 之前的数据包
+    %% 如果 got_fin=true 但 got_fin_reached=false，说明我们收到了 FIN 但还有之前的包未到达
+    %% 这种情况使用更短的超时（FIN_DATA_TIMEOUT），因为对端应该在重传缺失的包
+    IsWaitingForFinData = GotFin andalso (not GotFinReached),
+
+    ShouldTimeout =
+        %% 情况 1: 纯接收方空闲超时（60秒）
+        ((CurWindowPackets == 0) andalso (IdleTime >= ?RECV_IDLE_TIMEOUT)) orelse
+        %% 情况 2: 等待 FIN 之前的数据超时（10秒）
+        (IsWaitingForFinData andalso (IdleTime >= ?FIN_DATA_TIMEOUT)),
+
+    if ShouldTimeout ->
+        logger:warning("Receive idle timeout after ~p ms, waiting_for_fin_data=~p",
+                       [IdleTime, IsWaitingForFinData]),
         PCB0 = aiutp_net:send_reset(PCB),
         {false, PCB0#aiutp_pcb{state = ?CS_RESET}};
        true ->

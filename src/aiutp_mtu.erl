@@ -122,6 +122,9 @@ on_probe_timeout(#aiutp_pcb{
     case NewFailures >= ?MTU_PROBE_FAILURE_THRESHOLD of
         true ->
             %% 连续失败过多，回退到 floor
+            logger:warning("MTU discovery failed after ~p consecutive attempts, "
+                           "falling back to floor=~p bytes, probe_size=~p bytes",
+                           [NewFailures, PCB1#aiutp_pcb.mtu_floor, ProbeSize]),
             Now = aiutp_util:microsecond(),
             BackoffInterval = ?MTU_PROBE_INTERVAL * ?MTU_PROBE_BACKOFF_MULTIPLIER,
             PCB1#aiutp_pcb{

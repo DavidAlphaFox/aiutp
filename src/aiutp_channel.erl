@@ -122,7 +122,8 @@
     controller_monitor => reference(),                  %% 控制进程监视器
     pcb => #aiutp_pcb{},                               %% 协议控制块
     tick_timer => reference(),                         %% 超时检查定时器
-    blocker => gen_statem:from()                       %% 阻塞的调用者
+    blocker => gen_statem:from(),                      %% 阻塞的调用者
+    passive_close_notified => boolean()               %% 是否已发送半关闭通知
 }.
 
 %%==============================================================================
@@ -954,21 +955,48 @@ do_closing_cleanup(Data, Reason) ->
 maybe_deliver_data(#{controller := undefined} = Data) ->
     Data;
 maybe_deliver_data(#{pcb := PCB, controller := Controller, active := true} = Data) ->
+    Data1 = maybe_notify_passive_close(Data),
     case aiutp_pcb:read(PCB) of
         {undefined, PCB1} ->
-            Data#{pcb := PCB1};
+            Data1#{pcb := PCB1};
         {Payload, PCB1} ->
-            UTPSocket = make_utp_socket(Data),
+            UTPSocket = make_utp_socket(Data1),
             Controller ! {utp_data, UTPSocket, Payload},
             %% once 语义: 发送后切换为非主动模式
-            Data#{pcb := PCB1, active := false}
+            Data1#{pcb := PCB1, active := false}
     end;
 maybe_deliver_data(#{pcb := PCB} = Data) ->
     %% 非主动模式，刷新 PCB
+    Data1 = maybe_notify_passive_close(Data),
     PCB1 = aiutp_pcb:flush(PCB),
-    Data#{pcb := PCB1};
+    Data1#{pcb := PCB1};
 maybe_deliver_data(Data) ->
     %% 尚无 PCB
+    Data.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查并发送半关闭通知
+%%
+%% 当对端发送 FIN 且所有数据都已收到时（got_fin_reached=true），
+%% 向 controller 发送 {utp_passive_close, Socket} 通知。
+%% 该通知仅发送一次。
+%%------------------------------------------------------------------------------
+-spec maybe_notify_passive_close(state_data()) -> state_data().
+maybe_notify_passive_close(#{passive_close_notified := true} = Data) ->
+    %% 已通知过，跳过
+    Data;
+maybe_notify_passive_close(#{pcb := PCB, controller := Controller} = Data) ->
+    case aiutp_pcb:got_fin_reached(PCB) of
+        true ->
+            %% 对端已发送 FIN 并且所有数据都已收到
+            UTPSocket = make_utp_socket(Data),
+            Controller ! {utp_passive_close, UTPSocket},
+            Data#{passive_close_notified => true};
+        false ->
+            Data
+    end;
+maybe_notify_passive_close(Data) ->
     Data.
 
 %%==============================================================================

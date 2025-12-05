@@ -361,7 +361,7 @@ recv_idle_timeout_test_() ->
            %% 不应该触发超时
            ?assertEqual(?CS_CONNECTED, Result#aiutp_pcb.state)
        end},
-      {"收到 FIN 但数据不完整时，超时后正确关闭",
+      {"收到 FIN 但数据不完整时，FIN_DATA_TIMEOUT 后正确关闭",
        fun() ->
            Now = aiutp_util:millisecond(),
            PCB = create_test_pcb(Now),
@@ -371,11 +371,43 @@ recv_idle_timeout_test_() ->
                got_fin_reached = false,  %% 但数据不完整
                eof_pkt = 100,
                ack_nr = 98,              %% 缺少数据包
-               last_got_packet = Now - ?RECV_IDLE_TIMEOUT - 1000
+               last_got_packet = Now - ?FIN_DATA_TIMEOUT - 1000  %% 超过 FIN 数据等待超时
            },
            Result = aiutp_pcb_timeout:check_timeouts(PCB1),
            %% 应该触发超时
            ?assertEqual(?CS_RESET, Result#aiutp_pcb.state)
+       end},
+      {"收到 FIN 但数据不完整时，未超过 FIN_DATA_TIMEOUT 则不触发超时",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 0,
+               got_fin = true,           %% 收到了 FIN
+               got_fin_reached = false,  %% 但数据不完整
+               eof_pkt = 100,
+               ack_nr = 98,              %% 缺少数据包
+               last_got_packet = Now - (?FIN_DATA_TIMEOUT div 2)  %% 未超过 FIN 数据等待超时
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 不应该触发超时
+           ?assertEqual(?CS_CONNECTED, Result#aiutp_pcb.state)
+       end},
+      {"正常接收完 FIN（got_fin_reached=true）时使用 RECV_IDLE_TIMEOUT",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 0,
+               got_fin = true,            %% 收到了 FIN
+               got_fin_reached = true,    %% 所有数据都已收到
+               eof_pkt = 100,
+               ack_nr = 100,
+               last_got_packet = Now - (?FIN_DATA_TIMEOUT + 1000)  %% 超过 FIN_DATA_TIMEOUT
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% FIN 已完整接收，使用 RECV_IDLE_TIMEOUT，不应该触发超时
+           ?assertEqual(?CS_CONNECTED, Result#aiutp_pcb.state)
        end}
      ]}.
 

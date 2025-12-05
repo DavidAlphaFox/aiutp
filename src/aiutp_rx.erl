@@ -130,10 +130,10 @@ maybe_handle_fin_reached(#aiutp_pcb{got_fin = true,
     case EOFPkt == AckNR of
         true ->
             %% FIN 之前的所有包都已收到
-            %% 设置一个短超时，然后发送最终 ACK
+            %% 设置一个短超时（最多60秒），然后发送最终 ACK
             PCB1 = PCB#aiutp_pcb{
                 got_fin_reached = true,
-                rto_timeout = Now + erlang:min(RTO * 3, 60),
+                rto_timeout = Now + erlang:min(RTO * 3, 60000),
                 reorder_count = 0,
                 inbuf = aiutp_buffer:new(?OUTGOING_BUFFER_MAX_SIZE)
             },
