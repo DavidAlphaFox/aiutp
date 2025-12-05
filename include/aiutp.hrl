@@ -71,7 +71,8 @@
 
 %% libutp: 最小 RTO 为 1000ms
 %% 注意: BEP-29 建议 500ms，但 libutp 使用 1000ms
--define(RTO_MIN, 500).
+%% 优化: 降低到 300ms 以提升高丢包环境下的响应速度
+-define(RTO_MIN, 300).
 
 %% BEP-29: 最大 RTO（实现相关）
 -define(RTO_MAX, 6000).
