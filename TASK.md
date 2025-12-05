@@ -10,6 +10,23 @@
 |------|------|----------|------|
 | (无) | - | - | - |
 
+### 最近完成 (2025-12-05)
+
+- ✅ **recv 功能实现** - 实现阻塞式 `aiutp:recv/2,3` 功能
+  - 添加 `recv/3` 带超时版本到 `src/aiutp.erl`
+  - 添加 `aiutp_channel:recv/3` 实现
+  - 添加 `recv_waiter` 状态字段用于阻塞等待
+  - 实现非阻塞读取（有数据立即返回）
+  - 实现阻塞等待（无数据时保存 From 并等待）
+  - 实现数据到达唤醒等待者
+  - 实现超时处理（支持 infinity 和毫秒超时）
+  - 实现 EOF 处理（got_fin_reached 时返回 closed）
+  - 实现连接关闭时清理等待者
+  - 与 active 模式互斥（active=true 时返回 `{error, active}`）
+  - 单等待者策略（并发 recv 返回 `{error, busy}`）
+  - 创建集成测试 `test/aiutp_channel_recv_tests.erl`（7 个测试用例）
+  - 详细设计文档：[docs/requirements/features/recv-implementation-plan.md](./docs/requirements/features/recv-implementation-plan.md)
+
 ### 待处理
 
 | 任务 | 描述 | 优先级 |

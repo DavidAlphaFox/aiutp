@@ -75,7 +75,7 @@
     accept/4,               %% 接受入站连接
     incoming/2,             %% 处理传入数据包
     send/2,                 %% 发送数据
-    recv/2,                 %% 接收数据
+    recv/3,                 %% 接收数据 (带超时)
     active/2,               %% 设置主动模式
     close/2,                %% 关闭连接
     controlling_process/2   %% 转移控制权
@@ -103,11 +103,21 @@
 ]).
 
 %%==============================================================================
+%% 测试辅助函数导出
+%%==============================================================================
+-ifdef(TEST).
+-export([start_recv_timer_for_test/1]).
+-endif.
+
+%%==============================================================================
 %% 类型定义
 %%==============================================================================
 
 %% 通道状态数据
 %% 使用 map 而非 record，提高可读性和灵活性
+%% recv 等待者类型: {调用者, 期望长度, 超时定时器引用}
+-type recv_waiter() :: {gen_statem:from(), non_neg_integer(), reference() | undefined}.
+
 -type state_data() :: #{
     %% 必需字段
     parent := pid(),                    %% 父套接字进程 (aiutp_socket)
@@ -122,7 +132,8 @@
     controller_monitor => reference(),                  %% 控制进程监视器
     pcb => #aiutp_pcb{},                               %% 协议控制块
     tick_timer => reference(),                         %% 超时检查定时器
-    blocker => gen_statem:from(),                      %% 阻塞的调用者
+    blocker => gen_statem:from(),                      %% 阻塞的调用者 (connect/close)
+    recv_waiter => recv_waiter(),                      %% recv 等待者
     passive_close_notified => boolean()               %% 是否已发送半关闭通知
 }.
 
@@ -218,17 +229,22 @@ send(Pid, Data) ->
 %%------------------------------------------------------------------------------
 %% @doc 接收数据
 %%
-%% 从 PCB 接收缓冲区读取数据。
-%% 注意: 当前实现仅支持主动模式，此函数返回 not_implemented。
+%% 从 PCB 接收缓冲区读取数据。如果没有可用数据，会阻塞等待直到：
+%% - 数据到达
+%% - 超时
+%% - 连接关闭
+%%
+%% 注意: 此函数与 active 模式互斥。如果 active=true，返回 {error, active}。
 %%
 %% @param Pid 通道进程
-%% @param Len 期望接收的字节数 (当前未使用)
+%% @param Len 期望接收的字节数 (0 = 返回所有可用数据)
+%% @param Timeout 超时时间 (毫秒或 infinity)
 %% @returns {ok, Data} | {error, Reason}
 %% @end
 %%------------------------------------------------------------------------------
--spec recv(pid(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
-recv(Pid, Len) ->
-    gen_statem:call(Pid, {recv, Len}, infinity).
+-spec recv(pid(), non_neg_integer(), timeout()) -> {ok, binary()} | {error, term()}.
+recv(Pid, Len, Timeout) ->
+    gen_statem:call(Pid, {recv, Len, Timeout}, infinity).
 
 %%------------------------------------------------------------------------------
 %% @doc 设置主动模式
@@ -494,6 +510,10 @@ accepting({call, From}, {set_controller, OldController, NewController, Active},
     },
     {keep_state, NewData, [{reply, From, ok}]};
 
+%% recv - 在 accepting 状态返回错误提示连接未就绪
+accepting({call, From}, {recv, _Len, _Timeout}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]};
+
 %% 其他调用返回错误
 accepting({call, From}, _Request, _Data) ->
     {keep_state_and_data, [{reply, From, {error, accepting}}]};
@@ -521,9 +541,17 @@ connected({call, From}, {send, SendData}, #{pcb := PCB} = Data) ->
             {keep_state, Data#{pcb := PCB1}, [{reply, From, ok}]}
     end;
 
-%% 接收数据 (当前未实现阻塞式接收)
-connected({call, From}, {recv, _Len}, _Data) ->
-    {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
+%% 接收数据 - active 模式下不允许 recv
+connected({call, From}, {recv, _Len, _Timeout}, #{active := true}) ->
+    {keep_state_and_data, [{reply, From, {error, active}}]};
+
+%% 接收数据 - 已有等待者
+connected({call, From}, {recv, _Len, _Timeout}, #{recv_waiter := _}) ->
+    {keep_state_and_data, [{reply, From, {error, busy}}]};
+
+%% 接收数据 - 正常处理
+connected({call, From}, {recv, Len, Timeout}, #{pcb := PCB} = Data) ->
+    handle_recv(From, Len, Timeout, PCB, Data);
 
 %% 设置主动模式
 connected({call, From}, {active, Active}, Data) ->
@@ -568,6 +596,12 @@ connected(cast, {packet, PacketInfo}, Data) ->
 %% 超时检查
 connected(info, {timeout, TRef, tick}, #{tick_timer := TRef} = Data) ->
     handle_timeout_connected(Data);
+
+%% recv 超时
+connected(info, {timeout, TRef, recv_timeout},
+          #{recv_waiter := {From, _Len, TRef}} = Data) ->
+    NewData = maps:remove(recv_waiter, Data),
+    {keep_state, NewData, [{reply, From, {error, timeout}}]};
 
 %% 父进程崩溃
 connected(info, {'DOWN', MRef, process, Parent, _Reason},
@@ -736,6 +770,68 @@ handle_packet_connected({_Packet, _RecvTime} = PacketWithTS, #{pcb := PCB} = Dat
             NewData = maybe_deliver_data(Data#{pcb := PCB1}),
             {keep_state, NewData}
     end.
+
+%%==============================================================================
+%% 内部函数 - recv 处理
+%%==============================================================================
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 处理 recv 调用
+%%
+%% 如果有可用数据，立即返回；否则设置等待者，等待数据到达或超时。
+%%------------------------------------------------------------------------------
+-spec handle_recv(gen_statem:from(), non_neg_integer(), timeout(),
+                  #aiutp_pcb{}, state_data()) -> gen_statem:state_enter_result(atom()).
+handle_recv(From, Len, Timeout, PCB, Data) ->
+    case aiutp_pcb:read(PCB) of
+        {undefined, PCB1} ->
+            %% 无数据可用，检查是否已收到对端 FIN
+            case aiutp_pcb:got_fin_reached(PCB1) of
+                true ->
+                    %% 对端已关闭且无数据
+                    {keep_state, Data#{pcb := PCB1},
+                     [{reply, From, {error, closed}}]};
+                false ->
+                    %% 设置 recv 等待者
+                    TimerRef = start_recv_timer(Timeout),
+                    NewData = Data#{
+                        pcb := PCB1,
+                        recv_waiter => {From, Len, TimerRef}
+                    },
+                    {keep_state, NewData}
+            end;
+        {Payload, PCB1} ->
+            %% 有数据，立即返回
+            {keep_state, Data#{pcb := PCB1}, [{reply, From, {ok, Payload}}]}
+    end.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 启动 recv 超时定时器
+%%------------------------------------------------------------------------------
+-spec start_recv_timer(timeout()) -> reference() | undefined.
+start_recv_timer(infinity) ->
+    undefined;
+start_recv_timer(Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    erlang:start_timer(Timeout, self(), recv_timeout).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 取消 recv 超时定时器
+%%------------------------------------------------------------------------------
+-spec cancel_recv_timer(reference() | undefined) -> ok.
+cancel_recv_timer(undefined) ->
+    ok;
+cancel_recv_timer(TimerRef) ->
+    erlang:cancel_timer(TimerRef, [{async, true}, {info, false}]),
+    ok.
+
+%% 测试辅助函数
+-ifdef(TEST).
+start_recv_timer_for_test(Timeout) ->
+    start_recv_timer(Timeout).
+-endif.
 
 %%==============================================================================
 %% 内部函数 - 超时处理
@@ -922,10 +1018,19 @@ do_closing_cleanup(Data, Reason) ->
     Controller = maps:get(controller, Data, undefined),
     Active = maps:get(active, Data, false),
 
-    %% 回复阻塞的调用者
-    Actions = case Blocker of
+    %% 回复阻塞的调用者 (connect/close)
+    Actions0 = case Blocker of
         undefined -> [];
         _ -> [{reply, Blocker, ok}]
+    end,
+
+    %% 回复 recv 等待者
+    Actions = case maps:get(recv_waiter, Data, undefined) of
+        undefined ->
+            Actions0;
+        {RecvFrom, _Len, RecvTimer} ->
+            cancel_recv_timer(RecvTimer),
+            [{reply, RecvFrom, {error, closed}} | Actions0]
     end,
 
     %% 通知 controller
@@ -946,14 +1051,39 @@ do_closing_cleanup(Data, Reason) ->
 
 %%------------------------------------------------------------------------------
 %% @private
-%% @doc 尝试读取并投递数据给 controller
+%% @doc 尝试读取并投递数据给 controller 或 recv 等待者
 %%
-%% 仅在主动模式且有 controller 时投递数据。
-%% 投递后自动切换为非主动模式 (once 语义)。
+%% 优先级:
+%% 1. 如果有 recv 等待者，尝试读取数据并回复
+%% 2. 如果是主动模式，投递数据给 controller (once 语义)
+%% 3. 否则，仅刷新 PCB 缓冲区
 %%------------------------------------------------------------------------------
 -spec maybe_deliver_data(state_data()) -> state_data().
 maybe_deliver_data(#{controller := undefined} = Data) ->
     Data;
+%% 有 recv 等待者时，优先处理
+maybe_deliver_data(#{pcb := PCB, recv_waiter := {From, _Len, TimerRef}} = Data) ->
+    Data1 = maybe_notify_passive_close(Data),
+    case aiutp_pcb:read(PCB) of
+        {undefined, PCB1} ->
+            %% 无数据，检查是否已收到对端 FIN
+            case aiutp_pcb:got_fin_reached(PCB1) of
+                true ->
+                    %% 对端已关闭且无数据，回复 closed
+                    cancel_recv_timer(TimerRef),
+                    gen_statem:reply(From, {error, closed}),
+                    maps:remove(recv_waiter, Data1#{pcb := PCB1});
+                false ->
+                    %% 继续等待
+                    Data1#{pcb := PCB1}
+            end;
+        {Payload, PCB1} ->
+            %% 有数据，回复并清理等待者
+            cancel_recv_timer(TimerRef),
+            gen_statem:reply(From, {ok, Payload}),
+            maps:remove(recv_waiter, Data1#{pcb := PCB1})
+    end;
+%% 主动模式，投递给 controller
 maybe_deliver_data(#{pcb := PCB, controller := Controller, active := true} = Data) ->
     Data1 = maybe_notify_passive_close(Data),
     case aiutp_pcb:read(PCB) of

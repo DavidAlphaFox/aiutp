@@ -59,7 +59,7 @@
 
 -export([open/1,open/2]).
 -export([connect/3,accept/1]).
--export([listen/1,listen/2,send/2,recv/2,close/1]).
+-export([listen/1,listen/2,send/2,recv/2,recv/3,close/1]).
 -export([active/2,controlling_process/2]).
 
 %%%=============================================================================
@@ -191,17 +191,45 @@ send({utp,_,Channel},Data)->
 
 %% @doc Receives data from a uTP connection.
 %%
-%% Blocks until data is available. In active mode, data is delivered as
-%% messages instead.
+%% Blocks until data is available or the connection is closed.
+%% In active mode, data is delivered as messages instead and this function
+%% returns `{error, active}'.
 %%
 %% @param Connection The uTP connection
 %% @param Length Number of bytes to receive (0 = any available data)
 %% @returns `{ok, Data}' on success, `{error, Reason}' on failure
+%% @equiv recv(Connection, Length, infinity)
+%% @see recv/3
 %% @see send/2
 %% @see active/2
 -spec recv(utp_connection(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
-recv({utp,_,Channel},Len)->
-  aiutp_channel:recv(Channel,Len).
+recv(Connection, Len) ->
+    recv(Connection, Len, infinity).
+
+%% @doc Receives data from a uTP connection with timeout.
+%%
+%% Blocks until data is available, the timeout expires, or the connection
+%% is closed.
+%%
+%% Possible errors:
+%% <ul>
+%%   <li>`{error, timeout}' - No data received within the timeout period</li>
+%%   <li>`{error, closed}' - Connection has been closed by the peer</li>
+%%   <li>`{error, active}' - Connection is in active mode</li>
+%%   <li>`{error, busy}' - Another recv is already in progress</li>
+%% </ul>
+%%
+%% @param Connection The uTP connection
+%% @param Length Number of bytes to receive (0 = any available data)
+%% @param Timeout Maximum time to wait in milliseconds, or `infinity'
+%% @returns `{ok, Data}' on success, `{error, Reason}' on failure
+%% @see recv/2
+%% @see send/2
+%% @see active/2
+-spec recv(utp_connection(), non_neg_integer(), timeout()) ->
+    {ok, binary()} | {error, term()}.
+recv({utp, _, Channel}, Len, Timeout) ->
+    aiutp_channel:recv(Channel, Len, Timeout).
 
 %% @doc Sets the connection's active mode.
 %%

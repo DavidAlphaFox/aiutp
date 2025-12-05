@@ -66,7 +66,7 @@ api_functions_exported_test() ->
 
     %% Data transfer
     ?assert(lists:member({send, 2}, Exports)),
-    ?assert(lists:member({recv, 2}, Exports)),
+    ?assert(lists:member({recv, 3}, Exports)),
 
     %% Control
     ?assert(lists:member({active, 2}, Exports)),
