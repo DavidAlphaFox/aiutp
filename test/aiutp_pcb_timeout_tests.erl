@@ -317,3 +317,87 @@ mtu_restart_discovery_test_() ->
            ?assertEqual(?MTU_CEILING_DEFAULT, Result#aiutp_pcb.mtu_ceiling)
        end}
      ]}.
+
+%%==============================================================================
+%% Test: 接收空闲超时
+%%==============================================================================
+
+recv_idle_timeout_test_() ->
+    {"接收空闲超时测试",
+     [{"纯接收方超过 RECV_IDLE_TIMEOUT 时触发超时",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 0,  %% 没有发送待确认的数据
+               last_got_packet = Now - ?RECV_IDLE_TIMEOUT - 1000  %% 超过超时时间
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 应该触发超时，状态变为 RESET
+           ?assertEqual(?CS_RESET, Result#aiutp_pcb.state)
+       end},
+      {"有待确认发送数据时不触发接收空闲超时",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 1,  %% 有发送待确认的数据
+               last_got_packet = Now - ?RECV_IDLE_TIMEOUT - 1000  %% 超过超时时间
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 不应该触发接收空闲超时（由重传机制处理）
+           ?assertNotEqual(?CS_RESET, Result#aiutp_pcb.state),
+           ?assertNotEqual(?CS_DESTROY, Result#aiutp_pcb.state)
+       end},
+      {"未超过 RECV_IDLE_TIMEOUT 时不触发超时",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 0,
+               last_got_packet = Now - (?RECV_IDLE_TIMEOUT div 2)  %% 未超过超时时间
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 不应该触发超时
+           ?assertEqual(?CS_CONNECTED, Result#aiutp_pcb.state)
+       end},
+      {"收到 FIN 但数据不完整时，超时后正确关闭",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               cur_window_packets = 0,
+               got_fin = true,           %% 收到了 FIN
+               got_fin_reached = false,  %% 但数据不完整
+               eof_pkt = 100,
+               ack_nr = 98,              %% 缺少数据包
+               last_got_packet = Now - ?RECV_IDLE_TIMEOUT - 1000
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 应该触发超时
+           ?assertEqual(?CS_RESET, Result#aiutp_pcb.state)
+       end}
+     ]}.
+
+%%==============================================================================
+%% Helper functions
+%%==============================================================================
+
+create_test_pcb(Now) ->
+    #aiutp_pcb{
+        state = ?CS_CONNECTED,
+        time = Now,
+        rto_timeout = 0,  %% 无 RTO 超时
+        retransmit_timeout = 1000,
+        cur_window_packets = 0,
+        max_window = ?PACKET_SIZE * 4,
+        outbuf = aiutp_buffer:new(16),
+        inbuf = aiutp_buffer:new(16),
+        outque = aiutp_queue:new(),
+        mtu_floor = ?MTU_FLOOR_DEFAULT,
+        mtu_ceiling = ?MTU_CEILING_DEFAULT,
+        mtu_probe_seq = 0,
+        last_got_packet = Now,
+        fin_sent = false,
+        last_sent_packet = Now
+    }.

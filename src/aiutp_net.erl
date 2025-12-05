@@ -304,6 +304,9 @@ send_fin(#aiutp_pcb{outque = OutQue} = PCB) ->
 %% @end
 %%------------------------------------------------------------------------------
 -spec send_reset(#aiutp_pcb{}) -> #aiutp_pcb{}.
+send_reset(#aiutp_pcb{socket = undefined} = PCB) ->
+    %% Socket 未初始化，跳过发送
+    PCB;
 send_reset(#aiutp_pcb{time = Now,
                       socket = Socket,
                       conn_id_send = ConnIdSend,

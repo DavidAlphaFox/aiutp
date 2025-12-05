@@ -11,6 +11,12 @@
 %% - 标记所有未确认包为需要重发
 %% - 重置拥塞窗口到 1 个包大小，启用慢启动
 %%
+%% === 接收空闲超时 ===
+%% - 当连接没有发送待确认的数据（纯接收方）时检查
+%% - 如果超过 RECV_IDLE_TIMEOUT (60秒) 未收到对端数据，触发超时
+%% - 用于检测对端崩溃导致的死连接，防止资源泄漏
+%% - 典型场景：对端发送 FIN 后崩溃，我方等待缺失的数据包
+%%
 %% === Keepalive ===
 %% - 每 KEEPALIVE_INTERVAL (29秒) 发送一次心跳
 %% - 用于保持 NAT 映射
@@ -167,22 +173,30 @@ check_active_connection_timeouts(#aiutp_pcb{
     PCB0 = handle_zero_window_probe(PCB),
 
     %% 步骤 2: 检查 RTO 超时
-    {Continue, PCB1} =
+    {Continue1, PCB1} =
         if (RTOTimeout > 0) andalso (Now >= RTOTimeout) ->
             handle_rto_timeout(PCB0);
            true ->
             {true, PCB0}
         end,
 
-    %% 步骤 3: 如果连接仍然有效，继续其他检查
-    if Continue ->
-        PCB2 = handle_keepalive(PCB1),
-        PCB3 = flush_if_no_pending_packets(PCB2),
-        PCB4 = maybe_transition_from_full(PCB3),
-        %% 步骤 4: 检查是否需要重新开始 MTU 发现
-        maybe_restart_mtu_discovery(PCB4);
+    %% 步骤 3: 检查接收空闲超时（检测对端崩溃）
+    {Continue2, PCB2} =
+        if Continue1 ->
+            check_recv_idle_timeout(PCB1);
+           true ->
+            {false, PCB1}
+        end,
+
+    %% 步骤 4: 如果连接仍然有效，继续其他检查
+    if Continue2 ->
+        PCB3 = handle_keepalive(PCB2),
+        PCB4 = flush_if_no_pending_packets(PCB3),
+        PCB5 = maybe_transition_from_full(PCB4),
+        %% 步骤 5: 检查是否需要重新开始 MTU 发现
+        maybe_restart_mtu_discovery(PCB5);
        true ->
-        PCB1
+        PCB2
     end.
 
 %%------------------------------------------------------------------------------
@@ -397,3 +411,33 @@ maybe_transition_from_full(#aiutp_pcb{state = ?CS_CONNECTED_FULL} = PCB) ->
     end;
 maybe_transition_from_full(PCB) ->
     PCB.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc 检查接收空闲超时
+%%
+%% 当连接满足以下条件时触发超时：
+%% 1. 没有待确认的发送包（cur_window_packets == 0）
+%% 2. 距离上次收到数据包超过 RECV_IDLE_TIMEOUT
+%%
+%% 这用于检测以下场景：
+%% - 对端在发送 FIN 后崩溃，我方等待缺失数据包
+%% - 对端突然断开，我方作为纯接收方无法通过重传机制检测
+%%
+%% @returns {Continue, PCB} - Continue 为 false 表示连接应终止
+%%------------------------------------------------------------------------------
+check_recv_idle_timeout(#aiutp_pcb{
+        time = Now,
+        last_got_packet = LastGotPacket,
+        cur_window_packets = CurWindowPackets
+    } = PCB) ->
+    IdleTime = Now - LastGotPacket,
+    %% 只有当我们没有发送待确认的数据时才检查接收空闲
+    %% 如果有待确认的发送数据，重传机制会处理超时
+    if (CurWindowPackets == 0) andalso (IdleTime >= ?RECV_IDLE_TIMEOUT) ->
+        logger:warning("Receive idle timeout after ~p ms", [IdleTime]),
+        PCB0 = aiutp_net:send_reset(PCB),
+        {false, PCB0#aiutp_pcb{state = ?CS_RESET}};
+       true ->
+        {true, PCB}
+    end.

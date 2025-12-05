@@ -98,6 +98,11 @@
 %% check_timeouts 内部使用此值节流，实际超时检查最多每 500ms 执行一次
 -define(TIMEOUT_CHECK_INTERVAL, 500).
 
+%% 接收空闲超时（毫秒）
+%% 当连接没有发送数据（纯接收方）且长时间未收到对端数据时触发
+%% 用于检测对端崩溃导致的死连接，防止资源泄漏
+-define(RECV_IDLE_TIMEOUT, 60000).
+
 %% RST 信息缓存超时（毫秒）
 -define(RST_INFO_TIMEOUT, 10000).
 -define(RST_INFO_LIMIT, 1000).
