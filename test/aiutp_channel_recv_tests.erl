@@ -104,7 +104,8 @@ recv_integration_test_() ->
           {"echo recv 测试", fun test_echo_recv/0},
           {"recv 超时测试", fun test_recv_timeout/0},
           {"recv active 互斥测试", fun test_recv_active_mutual_exclusion/0},
-          {"recv busy 测试", fun test_recv_busy/0}
+          {"recv busy 测试", fun test_recv_busy/0},
+          {"recv 无效参数测试", fun test_recv_badarg/0}
          ]}
      end}.
 
@@ -291,4 +292,50 @@ test_recv_busy() ->
     end,
 
     %% 不调用 close，让进程自动清理
+    ok.
+
+test_recv_badarg() ->
+    %% 启动服务端
+    {ok, ServerSocket} = aiutp:open(0),
+    ServerPort = get_utp_port(ServerSocket),
+    ok = aiutp:listen(ServerSocket),
+
+    %% 服务端
+    Parent = self(),
+    spawn_link(fun() ->
+        {ok, ServerConn} = aiutp:accept(ServerSocket),
+        timer:sleep(2000),
+        aiutp:close(ServerConn),
+        Parent ! server_done
+    end),
+
+    timer:sleep(100),
+
+    %% 客户端连接
+    {ok, ClientSocket} = aiutp:open(0),
+    {ok, ClientConn} = aiutp:connect(ClientSocket, "127.0.0.1", ServerPort),
+    ok = aiutp:active(ClientConn, false),
+
+    %% 获取 channel pid 用于验证进程存活
+    ChannelPid = element(3, ClientConn),
+    ?assert(is_process_alive(ChannelPid)),
+
+    %% 测试无效 Timeout (非 infinity 且非正整数)
+    ?assertEqual({error, badarg}, aiutp:recv(ClientConn, 0, foo)),
+    ?assertEqual({error, badarg}, aiutp:recv(ClientConn, 0, -1)),
+    ?assertEqual({error, badarg}, aiutp:recv(ClientConn, 0, 1.5)),
+
+    %% 测试无效 Len (非正整数)
+    ?assertEqual({error, badarg}, aiutp:recv(ClientConn, -1, 1000)),
+    ?assertEqual({error, badarg}, aiutp:recv(ClientConn, foo, 1000)),
+
+    %% 验证 channel 进程仍然存活
+    ?assert(is_process_alive(ChannelPid)),
+
+    %% 验证正常参数仍然可用
+    ?assertEqual({error, timeout}, aiutp:recv(ClientConn, 0, 100)),
+    ?assert(is_process_alive(ChannelPid)),
+
+    %% 清理
+    receive server_done -> ok after 3000 -> ok end,
     ok.

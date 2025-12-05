@@ -541,6 +541,12 @@ connected({call, From}, {send, SendData}, #{pcb := PCB} = Data) ->
             {keep_state, Data#{pcb := PCB1}, [{reply, From, ok}]}
     end;
 
+%% 接收数据 - 参数验证
+connected({call, From}, {recv, Len, Timeout}, _Data)
+  when not is_integer(Len) orelse Len < 0 orelse
+       (Timeout =/= infinity andalso (not is_integer(Timeout) orelse Timeout < 0)) ->
+    {keep_state_and_data, [{reply, From, {error, badarg}}]};
+
 %% 接收数据 - active 模式下不允许 recv
 connected({call, From}, {recv, _Len, _Timeout}, #{active := true}) ->
     {keep_state_and_data, [{reply, From, {error, active}}]};
