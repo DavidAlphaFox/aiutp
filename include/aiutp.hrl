@@ -416,9 +416,9 @@
     max_window = 0 :: non_neg_integer(),
 
     %% 对端通告的最大接收窗口（字节）
-    %% libutp: max_window_user = 255 * PACKET_SIZE
-    %% 减 1 为 FIN 包预留空间
-    max_window_user = 255 * ?PACKET_SIZE :: non_neg_integer(),
+    %% 4MB 窗口，支持高延迟高带宽链路
+    %% 例如: 173ms RTT 下可达 ~185 Mbps
+    max_window_user = 4 * 1024 * 1024 :: non_neg_integer(),
 
     %% 我们通告的最后接收窗口（字节）
     last_rcv_win = 0 :: non_neg_integer(),
