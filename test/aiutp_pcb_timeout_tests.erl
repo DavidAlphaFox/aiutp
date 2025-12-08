@@ -433,3 +433,182 @@ create_test_pcb(Now) ->
         fin_sent = false,
         last_sent_packet = Now
     }.
+
+%%==============================================================================
+%% Test: 零窗口探测
+%%==============================================================================
+
+zero_window_probe_test_() ->
+    {"零窗口探测测试",
+     [{"零窗口探测定时器到期时恢复窗口并发送探测",
+       {setup,
+        fun() -> setup_real_socket() end,
+        fun(Socket) -> cleanup_socket(Socket) end,
+        fun(Socket) ->
+           fun() ->
+               Now = aiutp_util:millisecond(),
+               PCB = create_zero_window_test_pcb_with_socket(Now, Socket),
+               PCB1 = PCB#aiutp_pcb{
+                   max_window_user = 0,           %% 对端通告零窗口
+                   zerowindow_time = Now - 100,   %% 探测定时器已到期
+                   zerowindow_probes = 0          %% 第一次探测
+               },
+               Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+               %% 窗口应该恢复为 PACKET_SIZE
+               ?assertEqual(?PACKET_SIZE, Result#aiutp_pcb.max_window_user),
+               %% 探测计数应该增加
+               ?assertEqual(1, Result#aiutp_pcb.zerowindow_probes),
+               %% 下次探测时间应该设置
+               ?assert(Result#aiutp_pcb.zerowindow_time > Now)
+           end
+        end}},
+      {"零窗口探测使用指数退避（每次翻倍，最大10秒）",
+       {setup,
+        fun() -> setup_real_socket() end,
+        fun(Socket) -> cleanup_socket(Socket) end,
+        fun(Socket) ->
+           fun() ->
+               Now = aiutp_util:millisecond(),
+               PCB = create_zero_window_test_pcb_with_socket(Now, Socket),
+               PCB1 = PCB#aiutp_pcb{
+                   max_window_user = 0,
+                   zerowindow_time = Now - 100,
+                   zerowindow_probes = 2  %% 已经探测过 2 次
+               },
+               Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+               %% 探测计数应该增加到 3
+               ?assertEqual(3, Result#aiutp_pcb.zerowindow_probes),
+               %% 下次探测间隔应该是 1000 * 2^2 = 4000ms
+               ExpectedInterval = ?ZERO_WINDOW_PROBE_INTERVAL bsl 2,  %% 1000 * 4 = 4000
+               ActualInterval = Result#aiutp_pcb.zerowindow_time - Now,
+               %% 允许一些误差
+               ?assert(abs(ActualInterval - ExpectedInterval) < 100)
+           end
+        end}},
+      {"零窗口探测间隔不超过最大值",
+       {setup,
+        fun() -> setup_real_socket() end,
+        fun(Socket) -> cleanup_socket(Socket) end,
+        fun(Socket) ->
+           fun() ->
+               Now = aiutp_util:millisecond(),
+               PCB = create_zero_window_test_pcb_with_socket(Now, Socket),
+               PCB1 = PCB#aiutp_pcb{
+                   max_window_user = 0,
+                   zerowindow_time = Now - 100,
+                   zerowindow_probes = 4  %% 已经探测过 4 次，理论间隔 1000*16=16000 > 10000
+               },
+               Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+               %% 探测计数应该增加到 5
+               ?assertEqual(5, Result#aiutp_pcb.zerowindow_probes),
+               %% 下次探测间隔应该被限制在 10000ms
+               ActualInterval = Result#aiutp_pcb.zerowindow_time - Now,
+               ?assert(abs(ActualInterval - ?ZERO_WINDOW_PROBE_MAX_INTERVAL) < 100)
+           end
+        end}},
+      {"达到最大重试次数后恢复窗口并重置状态",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_zero_window_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               max_window_user = 0,
+               zerowindow_time = Now - 100,
+               zerowindow_probes = ?ZERO_WINDOW_PROBE_MAX_RETRIES  %% 已达到最大重试次数
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 窗口应该恢复
+           ?assertEqual(?PACKET_SIZE, Result#aiutp_pcb.max_window_user),
+           %% 探测状态应该重置
+           ?assertEqual(0, Result#aiutp_pcb.zerowindow_time),
+           ?assertEqual(0, Result#aiutp_pcb.zerowindow_probes)
+       end},
+      {"定时器未到期时不触发探测",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_zero_window_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               max_window_user = 0,
+               zerowindow_time = Now + 5000,  %% 定时器还没到期
+               zerowindow_probes = 1
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 窗口应该保持为 0
+           ?assertEqual(0, Result#aiutp_pcb.max_window_user),
+           %% 探测计数不变
+           ?assertEqual(1, Result#aiutp_pcb.zerowindow_probes)
+       end},
+      {"窗口非零时不触发探测",
+       fun() ->
+           Now = aiutp_util:millisecond(),
+           PCB = create_zero_window_test_pcb(Now),
+           PCB1 = PCB#aiutp_pcb{
+               max_window_user = ?PACKET_SIZE,  %% 窗口不为零
+               zerowindow_time = Now - 100,     %% 即使定时器到期
+               zerowindow_probes = 1
+           },
+           Result = aiutp_pcb_timeout:check_timeouts(PCB1),
+           %% 探测计数不变（因为窗口不为零）
+           ?assertEqual(1, Result#aiutp_pcb.zerowindow_probes)
+       end}
+     ]}.
+
+create_zero_window_test_pcb(Now) ->
+    %% 用于不需要发送的测试（如达到最大重试次数、定时器未到期等）
+    #aiutp_pcb{
+        state = ?CS_CONNECTED,
+        time = Now,
+        socket = undefined,
+        conn_id_recv = 12345,
+        conn_id_send = 12346,
+        rto_timeout = 0,
+        retransmit_timeout = 1000,
+        cur_window_packets = 0,
+        max_window = ?PACKET_SIZE * 4,
+        max_window_user = 0,
+        outbuf = aiutp_buffer:new(16),
+        inbuf = aiutp_buffer:new(16),
+        outque = aiutp_queue:new(),
+        mtu_floor = ?MTU_FLOOR_DEFAULT,
+        mtu_ceiling = ?MTU_CEILING_DEFAULT,
+        mtu_probe_seq = 0,
+        last_got_packet = Now,
+        fin_sent = false,
+        last_sent_packet = Now,
+        zerowindow_time = 0,
+        zerowindow_probes = 0
+    }.
+
+create_zero_window_test_pcb_with_socket(Now, Socket) ->
+    %% 用于需要实际发送探测包的测试
+    #aiutp_pcb{
+        state = ?CS_CONNECTED,
+        time = Now,
+        socket = Socket,
+        conn_id_recv = 12345,
+        conn_id_send = 12346,
+        rto_timeout = 0,
+        retransmit_timeout = 1000,
+        cur_window_packets = 0,
+        max_window = ?PACKET_SIZE * 4,
+        max_window_user = 0,
+        outbuf = aiutp_buffer:new(16),
+        inbuf = aiutp_buffer:new(16),
+        outque = aiutp_queue:new(),
+        mtu_floor = ?MTU_FLOOR_DEFAULT,
+        mtu_ceiling = ?MTU_CEILING_DEFAULT,
+        mtu_probe_seq = 0,
+        last_got_packet = Now,
+        fin_sent = false,
+        last_sent_packet = Now,
+        zerowindow_time = 0,
+        zerowindow_probes = 0
+    }.
+
+setup_real_socket() ->
+    %% 创建真实的 UDP socket 用于测试
+    {ok, Socket} = gen_udp:open(0, [binary, {active, false}]),
+    {ok, Port} = inet:port(Socket),
+    {Socket, {{127,0,0,1}, Port}}.
+
+cleanup_socket({Socket, _Addr}) ->
+    gen_udp:close(Socket).

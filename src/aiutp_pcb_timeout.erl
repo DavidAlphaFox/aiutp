@@ -212,16 +212,59 @@ maybe_restart_mtu_discovery(PCB) ->
 %% @private
 %% @doc 处理零窗口探测
 %%
-%% libutp: 当对端通告零窗口时，定期尝试恢复
+%% 当对端通告零窗口时，定期发送探测包以检测窗口何时重新打开。
+%%
+%% 探测机制：
+%% 1. 当定时器到期时，恢复 max_window_user 为 PACKET_SIZE
+%% 2. 主动发送一个 ACK 包作为探测
+%% 3. 使用指数退避增加探测间隔（从 1 秒开始，每次翻倍，最大 10 秒）
+%% 4. 超过最大重试次数后，由 RTO 机制接管
+%%
+%% 探测时间序列: 1s -> 2s -> 4s -> 8s -> 10s -> 10s -> ...
+%%
+%% 参考: RFC 793 (TCP 零窗口探测), libutp
 %%------------------------------------------------------------------------------
 handle_zero_window_probe(#aiutp_pcb{
         time = Now,
         zerowindow_time = ZeroWindowTime,
+        zerowindow_probes = ZeroWindowProbes,
         max_window_user = MaxWindowUser
     } = PCB) ->
-    if (MaxWindowUser == 0) andalso (Now >= ZeroWindowTime) ->
-        %% libutp: max_window_user = PACKET_SIZE
-        PCB#aiutp_pcb{max_window_user = ?PACKET_SIZE};
+    if (MaxWindowUser == 0) andalso (ZeroWindowTime > 0) andalso (Now >= ZeroWindowTime) ->
+        %% 零窗口探测定时器到期
+        if ZeroWindowProbes >= ?ZERO_WINDOW_PROBE_MAX_RETRIES ->
+            %% 超过最大重试次数，恢复窗口让 RTO 机制接管
+            %% 如果对端真的无法接收，后续发送会触发 RTO 超时
+            logger:debug("Zero window probe max retries (~p) reached, recovering window",
+                         [ZeroWindowProbes]),
+            PCB#aiutp_pcb{
+                max_window_user = ?PACKET_SIZE,
+                zerowindow_time = 0,
+                zerowindow_probes = 0
+            };
+           true ->
+            %% 计算下次探测时间（指数退避：每次翻倍，最大 10 秒）
+            %% 间隔 = min(INTERVAL * 2^probes, MAX_INTERVAL)
+            Interval = erlang:min(
+                ?ZERO_WINDOW_PROBE_INTERVAL bsl ZeroWindowProbes,  %% 左移 = 乘以 2^probes
+                ?ZERO_WINDOW_PROBE_MAX_INTERVAL
+            ),
+            NextProbeTime = Now + Interval,
+            NewProbes = ZeroWindowProbes + 1,
+
+            logger:debug("Zero window probe #~p, next probe in ~p ms",
+                         [NewProbes, Interval]),
+
+            %% 恢复窗口为一个包大小，允许发送探测
+            PCB0 = PCB#aiutp_pcb{
+                max_window_user = ?PACKET_SIZE,
+                zerowindow_time = NextProbeTime,
+                zerowindow_probes = NewProbes
+            },
+            %% 主动发送 ACK 作为探测包
+            %% 这会触发对端回复其当前窗口状态
+            aiutp_net:send_ack(PCB0)
+        end;
        true ->
         PCB
     end.

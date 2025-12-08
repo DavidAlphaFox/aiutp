@@ -436,7 +436,7 @@ apply_congestion_control(Packet, AckedPackets, SAckedPackets,
 %% @private 步骤 3: 更新 ACK 相关状态
 %%
 %% 处理：
-%% - 零窗口探测定时器（对端窗口为 0 时设置 15 秒探测）
+%% - 零窗口探测定时器（对端窗口为 0 时设置探测定时器）
 %% - 连接状态转换（SYN_RECV -> CONNECTED, SYN_SENT -> CONNECTED）
 %% - FIN 确认状态（当所有包包括 FIN 都被确认时）
 %% - 更新 max_window_user（对端通告的接收窗口）
@@ -448,14 +448,24 @@ update_ack_state(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
                             time = Now,
                             fast_resend_seq_nr = FastResendSeqNR,
                             zerowindow_time = ZeroWindowTime,
+                            zerowindow_probes = ZeroWindowProbes,
                             fin_sent = FinSent,
                             close_requested = CloseRequested,
                             fin_sent_acked = FinSentAcked,
                             cur_window_packets = CurWindowPackets} = PCB) ->
     %% 处理零窗口 - 当对端通告窗口为 0 时设置探测定时器
-    ZeroWindowTime0 =
-        if PktMaxWindowUser == 0 -> Now + 15000;
-           true -> ZeroWindowTime
+    %% 使用 ZERO_WINDOW_PROBE_INTERVAL (3秒) 作为初始间隔
+    {ZeroWindowTime0, ZeroWindowProbes0} =
+        if PktMaxWindowUser == 0 ->
+            %% 对端窗口为 0，设置探测定时器（如果尚未设置）
+            if ZeroWindowTime == 0 ->
+                {Now + ?ZERO_WINDOW_PROBE_INTERVAL, 0};
+               true ->
+                {ZeroWindowTime, ZeroWindowProbes}
+            end;
+           true ->
+            %% 窗口打开，重置探测状态
+            {0, 0}
         end,
 
     %% 连接建立的状态转换
@@ -495,7 +505,8 @@ update_ack_state(#aiutp_packet{type = PktType, ack_nr = PktAckNR,
         state = State1,
         fin_sent_acked = FinSentAcked0,
         fast_resend_seq_nr = FastResendSeqNR0,
-        zerowindow_time = ZeroWindowTime0
+        zerowindow_time = ZeroWindowTime0,
+        zerowindow_probes = ZeroWindowProbes0
     }.
 
 %% @private 步骤 4: 从已确认包计算 RTT 并更新 RTO
